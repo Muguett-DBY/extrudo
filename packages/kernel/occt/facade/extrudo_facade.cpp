@@ -202,10 +202,13 @@
 
 #include <unistd.h>
 
+#include <emscripten/stack.h>
+
 #include <algorithm>
 #include <type_traits>
 #include <cmath>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
 #include <map>
@@ -218,7 +221,7 @@
 
 class ExtrudoFacade {
 public:
-  ExtrudoFacade() : nextHandle_(1) {}
+  ExtrudoFacade() : nextHandle_(1) { armStackGuard(); }
 
   // -------------------------------------------------------- mass properties --
 
@@ -5111,8 +5114,57 @@ private:
   std::unordered_map<const TopoDS_TShape*, size_t> recordStarts_;
 
   void beginOp() {
+    checkStackGuard();
     lastError_.clear();
     history_.clear();
+  }
+
+  /**
+   * The stack guard (ADR-0001's amendment, 2026-10-11). The WASM stack is a
+   * fixed block of linear memory just above the static data, and it grows
+   * down towards that data with no check in an optimised build: an OCCT call
+   * that needs more stack than STACK_SIZE (libcascade.config.ts) writes over
+   * the data beneath it (vtables, globals) and returns as if nothing
+   * happened; a later call then traps somewhere unrelated ("table index is
+   * out of bounds", "memory access out of bounds") or, worse, computes with
+   * the damage. So the stack's lowest STACK_GUARD_BYTES are painted with a
+   * pattern when the facade is made and checked (every 16 bytes) when an
+   * operation starts and before a result is stored. No call comes near that
+   * depth (the deepest measured needs well under 1 % of the stack), so a
+   * changed word means the stack ran over, and the module stops right there
+   * (abort, which the kernel client treats as a crash) instead of carrying
+   * on with damaged memory. A single word at the bottom is not enough: the
+   * frame that overflows can be a large, partly used local array that skips
+   * it.
+   */
+  static constexpr uint64_t STACK_GUARD = 0x45585452554453ULL;  // "EXTRUDS"
+#ifndef EXTRUDO_STACK_GUARD_BYTES
+#define EXTRUDO_STACK_GUARD_BYTES (64 * 1024)
+#endif
+  static constexpr uintptr_t STACK_GUARD_BYTES = EXTRUDO_STACK_GUARD_BYTES;
+
+  /** The guard zone's first word, or null when the stack is too small to spare one. */
+  static uint64_t* stackGuard() {
+    const uintptr_t end = (emscripten_stack_get_end() + 15) & ~static_cast<uintptr_t>(15);
+    if (emscripten_stack_get_base() - end < 4 * STACK_GUARD_BYTES) return nullptr;
+    return reinterpret_cast<uint64_t*>(end);
+  }
+
+  static void armStackGuard() {
+    uint64_t* guard = stackGuard();
+    if (guard == nullptr) return;
+    for (uintptr_t i = 0; i < STACK_GUARD_BYTES / 8; ++i) guard[i] = STACK_GUARD ^ i;
+  }
+
+  static void checkStackGuard() {
+    const uint64_t* guard = stackGuard();
+    if (guard == nullptr) return;
+    for (uintptr_t i = 0; i < STACK_GUARD_BYTES / 8; i += 2) {
+      if (guard[i] != (STACK_GUARD ^ i)) {
+        std::fprintf(stderr, "Extrudo kernel: the WASM stack overflowed (STACK_SIZE); stopping.\n");
+        std::abort();
+      }
+    }
   }
 
   int fail(const char* message) {
@@ -5491,6 +5543,7 @@ private:
   }
 
   int store(const TopoDS_Shape& shape) {
+    checkStackGuard();
     if (shape.IsNull()) return fail("The operation produced no shape.");
     const int handle = nextHandle_++;
     shapes_.emplace(handle, shape);
