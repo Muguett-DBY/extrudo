@@ -335,3 +335,10 @@ Test: `kernel.test.ts` "refuses rounds that meet at a corner where one runs
 over a rod, instead of trapping OCCT" (the bar, step and rod by hand; it
 trapped before). Still open: an edge that is an arc, a curved face, and a
 curved boundary crossed by a lone chain go to OCCT unguarded, as before.
+
+**Addendum 2026-10-11.** The design that led here also ran out of the 64 kB WASM
+stack (ADR-0001's amendment of 2026-10-11: its fillet calls reached the stack's
+end), which by itself corrupts memory and traps later. With the 8 MB stack the
+rod case above still traps without this refusal ("memory access out of bounds",
+the native harness at 8 MB), so the refusal stays: it guards a fault of OCCT's,
+not of the stack.

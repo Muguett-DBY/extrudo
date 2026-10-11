@@ -449,9 +449,16 @@ raw, +1.3 kB brotli, 20.57 / 6.66 / 4.63 MB unchanged) and P6-05's STEP
 assemblies (`pushStepGroup`, `writeStepAssembly`: +4.9 kB raw, +3 kB brotli;
 20.57 / 6.66 / 4.63 MB before) and P6-05's pose proximity (`proximityOpen`,
 `proximityPose`, `proximityClose`: +32.6 kB raw, +10.1 kB brotli; 20.58 / 6.66
-/ 4.63 MB before, 20.61 / 6.67 / 4.64 MB after); the 15.76 MB / 3.69 MB brotli
+/ 4.63 MB before, 20.61 / 6.67 / 4.64 MB after) and the 8 MB stack, its guard
+and ADR-0038's rod refusal (2026-10-11: +12.3 kB raw, +3 kB gzip; 20.62 / 6.67 /
+4.64 MB after); the 15.76 MB / 3.69 MB brotli
 of ADR-0037 was P2-15's; OCCT input hash
-`a246513b1c48` (release `occt-a246513b1c48`); **don't
+`2aa485093172` (release `occt-2aa485093172`); **the WASM stack is 8 MB**
+(`STACK_SIZE` in `libcascade.config.ts`; Emscripten's default 64 kB was run past
+by booleans and chamfers on B-spline faces, silently corrupting static data until
+a later call trapped: ADR-0001's amendment of 2026-10-11), and the facade aborts
+when anything reaches the stack's lowest 64 kB (`checkStackGuard` in `beginOp`
+and `store`); **don't
 expose an OCCT type in a facade method**, and no raw access from JS: the
 memory test's leak control leaks through the facade).
 ADR-0039 (P2-17) built benchmarks B2 and B3 through the UI
@@ -2387,6 +2394,15 @@ them. Notes further down that name a machine apply to that machine only.
   The CI path is proven (run 36179601320, 2026-09-25): the `occt` job took
   about 16 minutes and published the release before the tests ran. After a
   local rebuild, restart the dev server: it keeps serving the old WASM.
+- **A trap that moves when the heap or call order changes may be a stack
+  overflow** (2026-10-11): build the native harness with the build's own stack
+  (`-sSTACK_SIZE=8MB` today; it was 64 kB until ADR-0001's amendment of that day)
+  and `-sSTACK_OVERFLOW_CHECK=2`, which names the frame. On the real build,
+  painting the stack from JS between calls measures each call's depth (the
+  stack is the 8 MB below the initial `__stack_pointer`, the first mutable i32
+  global in the binary's global section). The OCCT bindings step compiles the
+  facade without Emscripten's own headers (`emscripten/stack.h` is "file not
+  found" there): declare such a function `extern "C"` yourself.
 - **Facade C++ (`packages/kernel/occt/facade/`):** the toolchain binds every
   class in the file, so it holds one class with no overloaded names. Check it
   in seconds with `em++ -fsyntax-only` inside the image (README, Arch

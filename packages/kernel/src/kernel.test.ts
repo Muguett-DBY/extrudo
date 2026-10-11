@@ -562,6 +562,33 @@ describe('errors and ownership', () => {
     expect(() => kernel.tangentFaces(box, 99)).toThrow(/out of range/);
   });
 
+  it('has the stack OCCT needs on B-spline faces: a chamfer and a STEP export after a non-uniform scale', () => {
+    using scope = kernel.scope();
+    // A non-uniform scale makes every surface and curve a B-spline (ADR-0053), and OCCT's
+    // B-spline evaluation takes large stack frames. With Emscripten's default 64 kB stack the
+    // chamfer below ran past the stack's end and wrote over static data: the module carried
+    // on, and this STEP export then failed ("the file couldn't be written"); in a bigger
+    // design a later call trapped (ADR-0001's amendment, 2026-10-11).
+    const cylinder = scope.track(kernel.cylinder(10, 20));
+    const oval = scope.track(kernel.scale(cylinder, [0, 0, 0], [1.5, 1, 1])).shape;
+    const top = kernel
+      .describe(oval)
+      .edges.findIndex((e) => Math.abs((e.midpoint[2] ?? 0) - 20) < 1e-6);
+    expect(top).toBeGreaterThanOrEqual(0);
+    const chamfered = scope.track(
+      kernel.chamfer(oval, [top], { mode: 'equal', distance: 1 }),
+    ).shape;
+    expect(kernel.isValid(chamfered)).toBe(true);
+    // 1.5 π r² × 20 less the chamfer's ring: a 0.5 mm² section along a rim shorter than 3 π r.
+    const volume = kernel.measure(chamfered).volume;
+    expect(volume).toBeLessThan(1.5 * Math.PI * 100 * 20);
+    expect(volume).toBeGreaterThan(1.5 * Math.PI * 100 * 20 - 1.5 * Math.PI * 10);
+    const step = kernel.writeStep([{ shape: chamfered, name: 'Oval' }]);
+    const back = scope.track(kernel.readStep(step));
+    expect(kernel.measure(back).volume).toBeCloseTo(volume, 1);
+    expect(kernel.writeStep([{ shape: oval, name: 'Oval' }])).toContain('B_SPLINE_SURFACE');
+  });
+
   it('releases scoped shapes', () => {
     const before = kernel.stats().liveShapes;
     {
