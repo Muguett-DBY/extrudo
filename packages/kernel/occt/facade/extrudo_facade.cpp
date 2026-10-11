@@ -202,8 +202,6 @@
 
 #include <unistd.h>
 
-#include <emscripten/stack.h>
-
 #include <algorithm>
 #include <type_traits>
 #include <cmath>
@@ -218,6 +216,11 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+
+// Emscripten's stack bounds (emscripten/stack.h, which the bindings step can't
+// see): the stack's highest address and its lowest, which it grows down to.
+extern "C" uintptr_t emscripten_stack_get_base(void);
+extern "C" uintptr_t emscripten_stack_get_end(void);
 
 class ExtrudoFacade {
 public:
