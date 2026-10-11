@@ -59,14 +59,80 @@ export function loadProject(platform: Platform, id: ProjectId): Promise<ExtrudoD
   return platform.projects.load(id, { onNotice: (m) => noteOnOpen(id, m) });
 }
 
-/** Lets the user pick an `.extrudo` file and imports it; `undefined` if they cancel. */
-export async function importProject(platform: Platform): Promise<ProjectSummary | undefined> {
-  const file = await platform.files.pick(`${FILE_EXTENSION},application/zip`);
+/**
+ * Lets the user pick an `.extrudo` file and imports it; `undefined` if they
+ * cancel. An `.f3d` picked here is imported as one too.
+ */
+export async function importProject(
+  platform: Platform,
+): Promise<Pick<ProjectSummary, 'id'> | undefined> {
+  const file = await platform.files.pick(`${FILE_EXTENSION},application/zip,${F3D_ACCEPT}`);
   if (!file) return undefined;
+  if (/\.f3d$/i.test(file.name)) {
+    const id = await importF3dFile(platform, file);
+    return id ? { id } : undefined;
+  }
   const notices: string[] = [];
   const summary = await platform.projects.importFile(file, { onNotice: (m) => notices.push(m) });
   for (const notice of notices) noteOnOpen(summary.id, notice);
   return summary;
+}
+
+/** What an `.f3d` file is picked as. */
+export const F3D_ACCEPT = '.f3d';
+
+/** The most a `.f3d` file may be before it is read (M1). */
+export const MAX_F3D_BYTES = 100 * 1024 * 1024;
+
+/**
+ * Lets the user pick an `.f3d` file and imports it as a new
+ * design; `undefined` if they cancel. The importer loads only now (its own
+ * chunk). What it could not bring over is left for the design's page.
+ */
+export async function importF3dFile(
+  platform: Platform,
+  picked?: File,
+): Promise<ProjectId | undefined> {
+  const file = picked ?? (await platform.files.pick(F3D_ACCEPT));
+  if (!file) return undefined;
+  // Reading and decoding run on the UI thread, so refuse a huge file first (M1).
+  if (file.size > MAX_F3D_BYTES)
+    throw new Error(
+      `This .f3d file is too large to import (the limit is ${MAX_F3D_BYTES / (1024 * 1024)} MB).`,
+    );
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const { importF3d } = await import('@extrudo/f3d');
+  const name = file.name.replace(/\.f3d$/i, '') || 'Imported design';
+  const { design, report, preview } = importF3d(bytes, name, {
+    id: crypto.randomUUID(),
+    appVersion: APP_VERSION,
+  });
+  const doc = design.toJSON();
+  const id = await createProject(
+    platform,
+    doc,
+    preview ? new Blob([preview as Uint8Array<ArrayBuffer>], { type: 'image/png' }) : undefined,
+  );
+  for (const message of importNotices(report)) noteOnOpen(id, message);
+  return id;
+}
+
+/** The import report as a few readable notices. */
+function importNotices(report: {
+  imported: string[];
+  skipped: { name: string; kind: string; reason: string }[];
+}): string[] {
+  const skipped = report.skipped.filter((s) => s.reason !== 'suppressed in the file');
+  const total = report.imported.length + skipped.length;
+  const out = [
+    `Imported from the .f3d file: ${report.imported.length} of ${total} timeline features.`,
+  ];
+  if (skipped.length > 0) {
+    const shown = skipped.slice(0, 6).map((s) => `${s.name} (${s.reason})`);
+    const more = skipped.length - shown.length;
+    out.push(`Not imported: ${shown.join('; ')}${more > 0 ? `; and ${more} more` : ''}.`);
+  }
+  return out;
 }
 
 /** Downloads a project as `<name>.extrudo` and returns the file name. */
