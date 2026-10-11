@@ -84,6 +84,7 @@
 #include <BRepLib_ToolTriangulatedShape.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepTools.hxx>
+#include <BRepTools_History.hxx>
 #include <BRepTools_ReShape.hxx>
 #include <BRepLib.hxx>
 #include <BRepLib_MakeEdge.hxx>
@@ -146,6 +147,9 @@
 #include <TopLoc_Location.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <BRepTools_WireExplorer.hxx>
+#include <ShapeBuild_ReShape.hxx>
+#include <ShapeUpgrade_ShapeDivideClosed.hxx>
+#include <ShapeUpgrade_UnifySameDomain.hxx>
 #include <TopoDS.hxx>
 #include <TopoDS_Iterator.hxx>
 #include <TopoDS_Compound.hxx>
@@ -879,6 +883,19 @@ public:
           if (buildOffset(builder, copy, copyFaces, picked, distance, result) &&
               offsetIsGood(builder, copy, copyFaces, moving, result, distance)) {
             recordHistory(builder, copy, 0, result);
+            return store(result);
+          }
+        }
+      }
+      if (hasSeam(*input)) {
+        const TopoDS_Shape copy = BRepBuilderAPI_Copy(*input, true, false).Shape();
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> copyFaces;
+        TopExp::MapShapes(copy, TopAbs_FACE, copyFaces);
+        if (copyFaces.Extent() == faces.Extent()) {
+          DividedOffset divided;
+          TopoDS_Shape result;
+          if (buildDividedOffset(divided, copy, copyFaces, picked, moving, distance, result)) {
+            recordHistory(divided, copy, 0, result);
             return store(result);
           }
         }
@@ -6927,6 +6944,7 @@ private:
       }
       compounds.Add(originals, face);
     }
+    if (!farFacesKept(builder, input, faces, moving, result)) return false;
     if (!any) return true;
     BRepExtrema_DistShapeShape measure(originals, offsets, Extrema_ExtFlag_MIN);
     if (!measure.IsDone()) return true;
@@ -6941,8 +6959,187 @@ private:
     TopExp::MapShapes(copy, TopAbs_FACE, faces);
     BRepOffset_MakeOffset builder;
     TopoDS_Shape result;
-    return buildOffset(builder, copy, faces, picked, distance, result) &&
-           offsetIsGood(builder, copy, faces, moving, result, distance);
+    if (buildOffset(builder, copy, faces, picked, distance, result) &&
+        offsetIsGood(builder, copy, faces, moving, result, distance)) {
+      return true;
+    }
+    if (!hasSeam(input)) return false;
+    const TopoDS_Shape again = BRepBuilderAPI_Copy(input, true, false).Shape();
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> againFaces;
+    TopExp::MapShapes(again, TopAbs_FACE, againFaces);
+    DividedOffset divided;
+    return buildDividedOffset(divided, again, againFaces, picked, moving, distance, result);
+  }
+
+  /**
+   * Whether every face of `input` that neither moves nor shares an edge with
+   * a moving face comes through the offset as it was: the same area at the
+   * same place (ADR-0051's amendment, 2026-10-11). OCCT can build a valid,
+   * smaller solid out of a face pushed through the body (a slot's cap pushed
+   * 12 mm through a 12 mm slot across a cylinder's seam left a 5 mm disk of
+   * the 21 mm cylinder, which grew no volume and kept its moved faces far
+   * enough from where they were); a face far from the moved ones vanishing,
+   * shrinking or moving gives it away (that disk's bottom kept its area at
+   * another height). Faces next to a moving one are extended or trimmed by
+   * design, so they are not checked.
+   */
+  static bool farFacesKept(BRepOffset_MakeOffset& builder, const TopoDS_Shape& input,
+                           const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& faces,
+                           const std::vector<int>& moving, const TopoDS_Shape& result) {
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> resultFaces;
+    TopExp::MapShapes(result, TopAbs_FACE, resultFaces);
+    NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> edgeFaces;
+    TopExp::MapShapesAndUniqueAncestors(input, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+    NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> near;
+    for (int index : moving) {
+      const TopoDS_Shape& face = faces(index + 1);
+      near.Add(face);
+      for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next()) {
+        const int at = edgeFaces.FindIndex(e.Current());
+        if (at == 0) continue;
+        for (NCollection_List<TopoDS_Shape>::Iterator f(edgeFaces(at)); f.More(); f.Next()) near.Add(f.Value());
+      }
+    }
+    for (int i = 1; i <= faces.Extent(); ++i) {
+      const TopoDS_Shape& face = faces(i);
+      if (near.Contains(face)) continue;
+      GProp_GProps before;
+      BRepGProp::SurfaceProperties(face, before);
+      GProp_GProps after;
+      for (const TopoDS_Shape& made : builder.Generated(face)) {
+        if (made.ShapeType() != TopAbs_FACE || resultFaces.FindIndex(made) == 0) continue;
+        BRepGProp::SurfaceProperties(made, after);
+      }
+      if (std::fabs(after.Mass() - before.Mass()) > 1e-6 * before.Mass() + 1e-6) return false;
+      if (after.Mass() > 0 && after.CentreOfMass().Distance(before.CentreOfMass()) > 1e-4) return false;
+    }
+    return true;
+  }
+
+  /** Whether some face of `shape` has a seam (a cylinder's or a cone's wall, a sphere). */
+  static bool hasSeam(const TopoDS_Shape& shape) {
+    for (TopExp_Explorer f(shape, TopAbs_FACE); f.More(); f.Next()) {
+      const TopoDS_Face& face = TopoDS::Face(f.Current());
+      for (TopExp_Explorer e(face, TopAbs_EDGE); e.More(); e.Next()) {
+        if (BRep_Tool::IsClosed(TopoDS::Edge(e.Current()), face)) return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * The history of an offset built on a body whose closed faces were divided
+   * first and merged back after (buildDividedOffset): each step's images taken
+   * through the next, with the relation (modified, generated, deleted) the
+   * offset step gives, as recordHistory() reads a builder.
+   */
+  struct DividedOffset {
+    Handle(BRepTools_History) divide;
+    BRepOffset_MakeOffset offset;
+    Handle(BRepTools_History) unify;
+
+    NCollection_List<TopoDS_Shape> pieces(const TopoDS_Shape& sub) const {
+      NCollection_List<TopoDS_Shape> out;
+      if (divide->IsRemoved(sub)) return out;
+      const NCollection_List<TopoDS_Shape>& modified = divide->Modified(sub);
+      if (modified.IsEmpty()) out.Append(sub);
+      else out = modified;
+      return out;
+    }
+
+    void merged(const NCollection_List<TopoDS_Shape>& made, NCollection_List<TopoDS_Shape>& out,
+                NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher>& seen) const {
+      for (NCollection_List<TopoDS_Shape>::Iterator it(made); it.More(); it.Next()) {
+        if (unify->IsRemoved(it.Value())) continue;
+        const NCollection_List<TopoDS_Shape>& modified = unify->Modified(it.Value());
+        if (modified.IsEmpty()) {
+          if (seen.Add(it.Value())) out.Append(it.Value());
+          continue;
+        }
+        for (NCollection_List<TopoDS_Shape>::Iterator m(modified); m.More(); m.Next()) {
+          if (seen.Add(m.Value())) out.Append(m.Value());
+        }
+      }
+    }
+
+    NCollection_List<TopoDS_Shape> Modified(const TopoDS_Shape& sub) {
+      NCollection_List<TopoDS_Shape> out;
+      NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> seen;
+      const NCollection_List<TopoDS_Shape> all = pieces(sub);
+      for (NCollection_List<TopoDS_Shape>::Iterator p(all); p.More(); p.Next()) merged(offset.Modified(p.Value()), out, seen);
+      return out;
+    }
+
+    NCollection_List<TopoDS_Shape> Generated(const TopoDS_Shape& sub) {
+      NCollection_List<TopoDS_Shape> out;
+      NCollection_Map<TopoDS_Shape, TopTools_ShapeMapHasher> seen;
+      const NCollection_List<TopoDS_Shape> all = pieces(sub);
+      for (NCollection_List<TopoDS_Shape>::Iterator p(all); p.More(); p.Next()) merged(offset.Generated(p.Value()), out, seen);
+      return out;
+    }
+
+    bool IsDeleted(const TopoDS_Shape& sub) {
+      const NCollection_List<TopoDS_Shape> all = pieces(sub);
+      for (NCollection_List<TopoDS_Shape>::Iterator p(all); p.More(); p.Next()) {
+        if (!offset.IsDeleted(p.Value())) return false;
+      }
+      return true;
+    }
+  };
+
+  /**
+   * The offset of `input` (a copy) with its closed faces divided into
+   * seamless pieces first (ShapeUpgrade_ShapeDivideClosed) and merged back
+   * after (ShapeUpgrade_UnifySameDomain), into `result`, with `divided`
+   * holding the history (ADR-0051's amendment, 2026-10-11). OCCT's offset
+   * reports success with no shape at all for a body whose cylinder wall has
+   * a notch across its seam (the seam edge split by the cut), whichever face
+   * is moved; on seamless pieces it builds. A picked or moving face stands
+   * for all of its pieces. Tried only after the plain offset failed.
+   */
+  static bool buildDividedOffset(DividedOffset& divided, const TopoDS_Shape& input,
+                                 const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& faces,
+                                 const std::vector<int>& picked, const std::vector<int>& moving, double distance,
+                                 TopoDS_Shape& result) {
+    try {
+      ShapeUpgrade_ShapeDivideClosed divide(input);
+      divide.SetNbSplitPoints(1);
+      if (!divide.Perform()) return false;
+      const TopoDS_Shape split = divide.Result();
+      divided.divide = divide.GetContext()->History();
+      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> splitFaces;
+      TopExp::MapShapes(split, TopAbs_FACE, splitFaces);
+      const auto piecesOf = [&](const std::vector<int>& indices) {
+        std::vector<int> out;
+        for (int index : indices) {
+          const NCollection_List<TopoDS_Shape> all = divided.pieces(faces(index + 1));
+          for (NCollection_List<TopoDS_Shape>::Iterator p(all); p.More(); p.Next()) {
+            const int at = splitFaces.FindIndex(p.Value()) - 1;
+            if (at >= 0 && std::find(out.begin(), out.end(), at) == out.end()) out.push_back(at);
+          }
+        }
+        return out;
+      };
+      const std::vector<int> pickedPieces = piecesOf(picked);
+      const std::vector<int> movingPieces = piecesOf(moving);
+      if (pickedPieces.empty()) return false;
+      TopoDS_Shape offset;
+      if (!buildOffset(divided.offset, split, splitFaces, pickedPieces, distance, offset) ||
+          !offsetIsGood(divided.offset, split, splitFaces, movingPieces, offset, distance)) {
+        return false;
+      }
+      ShapeUpgrade_UnifySameDomain unify(offset, true, true, false);
+      unify.Build();
+      divided.unify = unify.History();
+      result = asSolid(unify.Shape());
+      if (result.IsNull() || !BRepCheck_Analyzer(result).IsValid()) return false;
+      // The merge must not change the body: the same volume within the integration's bound.
+      const double before = exactVolume(offset);
+      return std::fabs(exactVolume(result) - before) <= 1e-6 * std::fabs(before) + 1e-9;
+    } catch (...) {
+      result.Nullify();
+      return false;
+    }
   }
 
   /**

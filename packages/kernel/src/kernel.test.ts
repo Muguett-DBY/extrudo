@@ -562,6 +562,52 @@ describe('errors and ownership', () => {
     expect(() => kernel.tangentFaces(box, 99)).toThrow(/out of range/);
   });
 
+  it("offsets the faces of a notch across a cylinder's seam as it does anywhere else round the wall", {
+    timeout: 120_000,
+  }, () => {
+    using scope = kernel.scope();
+    // A Ø70 × 21 cylinder with a 20 × 2 × 12 slot cut into its side. Its seam is at +X, so the
+    // slot at +X cuts the seam edge in two: OCCT's offset then "succeeded" with no shape for
+    // every face of the body, and at 12 mm it made a valid 5 mm disk of it (ADR-0051's
+    // amendment, 2026-10-11). The same slot at +Y is the same body turned a quarter: every
+    // offset must come out the same.
+    const notched = (seam: boolean) => {
+      const cylinder = scope.track(kernel.cylinder(35, 21));
+      const slot = seam
+        ? scope.track(kernel.box([20, 2, 12], [20, -1, 5]))
+        : scope.track(kernel.box([2, 20, 12], [-1, 20, 5]));
+      return scope.track(kernel.cut(cylinder, slot, { simplify: true })).shape;
+    };
+    const outcomes = (body: number, distance: number) => {
+      const out: string[] = [];
+      for (let face = 0; face < kernel.count(body, 'face'); face++) {
+        try {
+          const moved = scope.track(kernel.offsetFaces(body, [face], distance));
+          expect(kernel.isValid(moved.shape)).toBe(true);
+          expect(kernel.count(moved.shape, 'face')).toBe(8);
+          const generated = moved.history.filter(
+            (r) => r.from.kind === 'face' && r.relation === 'generated',
+          );
+          expect(generated).toHaveLength(8);
+          out.push(`ok ${kernel.measure(moved.shape).volume.toFixed(2)}`);
+        } catch (error) {
+          expect(error).toBeInstanceOf(OffsetFaceError);
+          const [problem] = (error as OffsetFaceError).problems;
+          out.push(`${problem?.kind} ${problem?.kind === 'too-far' ? problem.max.toFixed(2) : ''}`);
+        }
+      }
+      return out.sort();
+    };
+    const seam = notched(true);
+    const turned = notched(false);
+    expect(kernel.count(seam, 'face')).toBe(8);
+    for (const distance of [-0.2, 0.5, -12]) {
+      const across = outcomes(seam, distance);
+      expect(across).toEqual(outcomes(turned, distance));
+      if (distance === -0.2) expect(across.every((o) => o.startsWith('ok'))).toBe(true);
+    }
+  });
+
   it('has the stack OCCT needs on B-spline faces: a chamfer and a STEP export after a non-uniform scale', () => {
     using scope = kernel.scope();
     // A non-uniform scale makes every surface and curve a B-spline (ADR-0053), and OCCT's

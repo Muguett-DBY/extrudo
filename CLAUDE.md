@@ -453,7 +453,7 @@ assemblies (`pushStepGroup`, `writeStepAssembly`: +4.9 kB raw, +3 kB brotli;
 and ADR-0038's rod refusal (2026-10-11: +12.3 kB raw, +3 kB gzip; 20.62 / 6.67 /
 4.64 MB after); the 15.76 MB / 3.69 MB brotli
 of ADR-0037 was P2-15's; OCCT input hash
-`2aa485093172` (release `occt-2aa485093172`); **the WASM stack is 8 MB**
+`e67295b269ca` (release `occt-e67295b269ca`); **the WASM stack is 8 MB**
 (`STACK_SIZE` in `libcascade.config.ts`; Emscripten's default 64 kB was run past
 by booleans and chamfers on B-spline faces, silently corrupting static data until
 a later call trapped: ADR-0001's amendment of 2026-10-11), and the facade aborts
@@ -886,7 +886,14 @@ past a cylinder's axis; bisection gives `[status, value]` read through
 `OffsetFaceError.problems`; solids with a sealed void are refused, and **so are
 bodies where one smooth chain has a sharp edge inside it** (two fillets
 meeting at a corner, `smoothChains`): OCCT's offset traps the wasm heap on
-them whichever face is offset, even the floor).
+them whichever face is offset, even the floor). **ADR-0051's amendment
+(2026-10-11)**: a notch across a cylinder's seam made OCCT's offset return a
+null shape for every face, so a body with a seam is retried on a copy with its
+closed faces divided (`ShapeUpgrade_ShapeDivideClosed`) and merged back
+(`UnifySameDomain`), the history composed through the three steps
+(`DividedOffset`), and `offsetIsGood` also asks `farFacesKept` (a face neither
+moving nor next to a moving one keeps its area and centre), which refuses the
+valid junk OCCT can make of a face pushed through the body.
 **OCCT moves the faces that run smoothly into a picked face together** (angle
 under 4 degrees), so the facade's `tangentFaces` and `KernelApi.tangentChain(…,
 kind)` let the dialog's face field (`tangentChain: true`) pick the whole chain
