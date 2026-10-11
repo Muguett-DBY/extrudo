@@ -2100,7 +2100,7 @@ viewport store, **Radial right-click menu** (a checkbox on the same state as the
 Version history, Settings, Help, and the name plus the save dot are one `TitleGroup`
 centred between the cluster and Version history; the pure `titleFit`
 (`shell/titleFit.ts`) drops the save word first (`data-title-fit="dot"`), then truncates
-the name (`truncate`, `title` = full name). The separator after the cluster is gone. **Tiles first**: Home › Files has no fixed `more` (Import Design, Import Model — `importBody`, full label "Import STEP, mesh or OpenSCAD…" —, Import Drawing, Canvas, Export Design, Export Model, Export as Script, Save to Linked Folder), Construct › Planes shows all seven planes as tiles, and tile text is `short` on one line (never truncated).
+the name (`truncate`, `title` = full name). The separator after the cluster is gone. **Tiles first**: Home › Files has no fixed `more` (Import Design, Import Model — `importBody`, full label "Import STEP, mesh or OpenSCAD…" —, Import Drawing, Canvas, Export Design, Export Model, Export as Script, Save to Linked Folder), Construct › Planes shows all seven planes as tiles, and a tile is a fixed 64 px wide, its label the tool's full name wrapped onto up to two 11 px lines when it fits, its short name otherwise (ADR-0079 round 3).
 
 ADR-0080 (P6-06, slice S1) made the docs site one site: `apps/site/src/docs.ts`'s
 `COLLECTIONS` map `docs/guide` → `/docs/`, `guide/tutorials` → `/docs/tutorials/`,

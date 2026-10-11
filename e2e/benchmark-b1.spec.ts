@@ -305,7 +305,7 @@ test('B1: a parametric plate with four corner holes', async ({ page }) => {
   await selectTab(page, 'Sketch');
   await page
     .getByRole('group', { name: 'Export' })
-    .getByRole('button', { name: 'Export', exact: true })
+    .getByRole('button', { name: 'Export Sketch', exact: true })
     .first()
     .click();
   await expect(exportDialog(page).locator('[data-export-summary]')).toHaveText(

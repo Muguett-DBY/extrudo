@@ -679,7 +679,7 @@ export const TOOLS = {
   planeThroughPoints: {
     id: 'planeThroughPoints',
     label: 'Plane Through 3 Points',
-    short: 'Plane Through 3 Points',
+    short: '3-Point Plane',
     icon: 'plane-3-points',
     category: 'construct',
     hint: 'A plane through three points.',
@@ -921,7 +921,7 @@ export const TOOLS = {
   saveToLinkedFolder: {
     id: 'saveToLinkedFolder',
     label: 'Save to Linked Folder',
-    short: 'Save to Linked Folder',
+    short: 'Save to Folder',
     icon: 'linked-folder',
     category: 'file',
     hint: 'Keep this design as an .extrudo file in the linked folder on disk.',

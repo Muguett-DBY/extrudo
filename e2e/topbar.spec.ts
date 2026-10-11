@@ -71,7 +71,8 @@ test('one top bar: the tabs in order, no File menu, undo, redo and search work',
     `document.querySelector('#toolbar-groups').parentElement.getBoundingClientRect().bottom`,
   );
   console.log(`chrome above the view: ${chrome} px`);
-  expect(chrome).toBeLessThanOrEqual(130);
+  // The top bar (40 px) plus the toolbar row (92 px, ADR-0079 round 3) plus its border.
+  expect(chrome).toBeLessThanOrEqual(134);
 
   // Undo and redo from the top bar: a Box, undone and redone.
   const undo = header.getByRole('button', { name: 'Undo', exact: true });
@@ -384,7 +385,7 @@ test('narrow: the save word goes first, then the name is cut with an ellipsis', 
 
 // ---- Tiles first (round 2, part 8) -----------------------------------------------------
 
-test('Home and Construct show every tool as a tile at 1440 px, labels on one line', async ({
+test('Home and Construct show every tool as a tile at 1440 px, each 64 px wide', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 1440, height: 900 });
@@ -395,18 +396,18 @@ test('Home and Construct show every tool as a tile at 1440 px, labels on one lin
     await expect(page.getByRole('tab', { name: tab })).toHaveAttribute('aria-selected', 'true');
     const fit = (await toolbar.getAttribute('data-toolbar-fit')) ?? '';
     expect(fit.split(',').every((n) => n === '0')).toBe(true);
-    // No tile's label is cut or wraps to a second line.
-    const clipped = await page.evaluate(`(() => {
+    // Every ordinary tile is the fixed 64 px, and no label line overflows its box.
+    const bad = await page.evaluate(`(() => {
       const bad = [];
       for (const t of document.querySelectorAll('#toolbar-groups button[data-tool]')) {
-        const span = t.querySelector('span');
-        if (!span) continue;
-        if (span.scrollWidth > span.clientWidth + 1 || span.getBoundingClientRect().height > 18)
-          bad.push(t.dataset.tool);
+        const box = t.getBoundingClientRect();
+        if (Math.round(box.width) !== 64) bad.push(t.dataset.tool + ':w=' + box.width);
+        for (const line of t.querySelectorAll('span > span'))
+          if (line.scrollWidth > line.clientWidth + 1) bad.push(t.dataset.tool + ':cut');
       }
       return bad.join(',');
     })()`);
-    expect(clipped).toBe('');
+    expect(bad).toBe('');
     // Home keeps its menu-less Files group; Construct no fixed ▾ menu on Planes.
     const planes = toolbar.locator('[data-toolbar-group="Planes"] button[aria-haspopup]');
     if (tab === 'Construct') await expect(planes).toHaveCount(0);
@@ -418,11 +419,11 @@ test('Home and Construct show every tool as a tile at 1440 px, labels on one lin
   expect(files).toMatch(
     /^importProject,importBody,importDrawing,canvas,exportProject,export,exportScript(,saveToLinkedFolder)?$/,
   );
-  for (const name of ['Import Design', 'Import Model', 'Import Drawing', 'Export Model']) {
+  for (const name of ['Import .extrudo', 'Import Model', 'Import Drawing', 'Export Model']) {
     await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
   }
   await page.getByRole('tab', { name: 'Construct' }).click();
-  for (const name of ['Plane Through 3 Points', 'Plane Along Path', 'Angled Midplane']) {
+  for (const name of ['3-Point Plane', 'Plane Along Path', 'Angled Midplane']) {
     await expect(page.getByRole('button', { name, exact: true })).toBeVisible();
   }
 

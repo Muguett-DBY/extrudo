@@ -151,8 +151,8 @@ export const ICON_MARKUP: Readonly<Record<string, string>> = Object.fromEntries(
 export interface ToolIconProps {
   name: IconName;
   category: ToolCategory;
-  /** 24 toolbar · 18 timeline chips, dialog titles, compact toolbar groups · 16 menus, browser tree · 14 constraint glyphs. */
-  size?: 14 | 16 | 18 | 24;
+  /** 32 toolbar tiles · 24 timeline chips, dialog titles, compact toolbar groups · 16 menus, browser tree · 14 constraint glyphs. */
+  size?: 14 | 16 | 18 | 24 | 32;
   /** Overrides the category colour: Finish Sketch is `success` green (UI spec §4). */
   color?: string;
   className?: string;
@@ -167,7 +167,12 @@ export function ToolIcon({ name, category, size = 24, color, className = '' }: T
       height={size}
       aria-hidden="true"
       className={`x-tool-icon shrink-0 ${className}`}
-      style={{ color: color ?? `var(--x-cat-${category})` }}
+      // The sources are drawn on a 24 grid at stroke-width 1.75; a bigger icon keeps the
+      // same line weight by scaling the stroke back (ADR-0079 round 3, 2026-10-11).
+      style={{
+        color: color ?? `var(--x-cat-${category})`,
+        ...(size > 24 ? { strokeWidth: (1.75 * 24) / size } : {}),
+      }}
       // Our own build-time sources (svg/*.svg), checked by icons.test.ts.
       // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted, bundled SVG.
       dangerouslySetInnerHTML={{ __html: ICON_MARKUP[name] ?? '' }}

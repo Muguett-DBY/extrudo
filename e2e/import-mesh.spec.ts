@@ -431,7 +431,7 @@ test('a mesh body moves, and splits along a plane', async ({ page }) => {
   // Move the cube 10 mm along x: 10…30.
   await solidTab(page);
   await selectBodies(page, ['Body1']);
-  await pickTool(page, 'Move');
+  await pickTool(page, 'Move/Copy');
   const move = page.getByRole('region', { name: 'Move dialog' });
   await expect(move).toBeVisible();
   await move.getByRole('textbox', { name: 'X distance' }).fill('10 mm');

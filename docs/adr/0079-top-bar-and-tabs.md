@@ -200,3 +200,58 @@ Decisions:
   OpenSCAD…", kept for tooltips and search); tiles never truncate (`whitespace-nowrap`,
   the fit rule measures real widths). At 1440 px Home and Construct move nothing; at
   900 px the fit is Home `0,0,4,0,0`, Construct `3,0,0` (Solid `3,1,0,0,0`).
+
+## Round 3, 2026-10-11: fixed tiles
+
+The owner compared four prototypes of the toolbar's tiles and chose one:
+<https://claude.ai/artifact/B2fmza7TjM1xG2GsBoiqrj>, variant C, with the changes below.
+**Only the tiles under the tabs change**: the top bar, the tabs, the group labels and the
+▾ menus stay as they are.
+
+The four prototypes differed in icon size and label handling: A, B and C grew the icons by
+10 %, 20 % and 30 % (24 → ~26, ~29, ~32 px) and wrapped the label onto up to two lines; D kept
+today's 24 px icon and cut every label to one line with an ellipsis. **C won**, with the icons
+at 32 px on the same 24 grid, tiles at a fixed 64 px, and today's stroke weight.
+
+- **A tile is 64 px wide, fixed**, whatever its label (`TILE_WIDTH`). Inside: `px-px py-1`,
+  the icon, a 2 px gap, then the label box. Hover, pressed and disabled states are as they
+  were; Finish Sketch's tile follows the same rules.
+- **The icon is 32 px** but the line weight stays 1.75 px: the sources are drawn on a 24 grid
+  at `stroke-width: 1.75`, so `ToolIcon` sets `strokeWidth: (1.75 * 24) / size` inline for any
+  size above 24 (1.3125 px at 32). Sizes 14 to 24 render exactly as before.
+- **The label** is 11 px text on 13 px lines, centred, in a box always two lines (26 px) high,
+  so every icon sits at the same height; each line is `white-space: nowrap`. **11 px, not
+  11.5 px**: at 11.5 px "Parameters" and "Customizer" no longer fit the 62 px line (they do at
+  11 px).
+- **Which text, and how it wraps** is the pure `tileLabel(full, short, max, measure)` in
+  `shell/tileLabel.ts` (`max = TILE_TEXT_WIDTH = 62` = 64 − 2 × 1 px padding). `full` is
+  `group.labels[id] ?? tool.label`, `short` is `group.labels[id] ?? tool.short ?? tool.label`;
+  a trailing `…` is stripped from both first ("Open File…" shows as "Open File"; the tooltip
+  still shows the tool's own label). The wrap is greedy **at spaces only** — a word is never
+  broken inside — and the first word of a line always goes on it. The text fits when it wraps
+  to at most two lines, each measuring `<= max`. The choice, in order: the full text if it
+  fits; else the short text if it fits; else the short text **cut**, line 1 its first wrapped
+  line and line 2 the remaining words, each line wider than `max` clipped from its end until
+  `trimEnd(line) + '…'` fits (`cut: true`). The full text is used when it fits **on purpose**:
+  two lines now show "Rectangular Pattern" where the old tile said "Rectangular". In the app
+  one module-level canvas 2D context measures at `font = '11px "Instrument Sans"'` (`--x-font-ui`);
+  the toolbar measures again once `document.fonts.ready` resolves (a state bump), so a
+  fallback-font width never sticks, guarded for environments without `document.fonts`.
+- **Two labels would still be cut at 64 px**, so they get a `short` in `shell/tools.ts`:
+  `planeThroughPoints` "3-Point Plane" and `saveToLinkedFolder` "Save to Folder". Every other
+  tool's full or short text fits. Accessible names change with the visible text: "Export Sketch"
+  (was "Export"), "2-Point Rectangle" (was "Rectangle"), "Section Analysis" (was "Section"),
+  "Overhang Analysis" (was "Overhangs"), "Import .extrudo" (was "Import Design") and so on; a
+  cut label gets `aria-label` = the full text, which starts with what is visible. `data-label`
+  stays `label ?? tool.label`, so `pickTool`, the F1 docs links and the command search are
+  unchanged.
+- **Compact groups** (the Sketch tab's Constraints grid): buttons 30 px, grid rows
+  `repeat(2, 30px)`, icons 24 px.
+- **The toolbar row** is `min-h-[92px]`: 4 + 68 (tile) + 16 (group label) + 4.
+- **The fit rule is unchanged** (`fitToolbar` and its measurement); the tiles are simply all
+  64 px now, so a tab hides more tiles at a given width than it used to. `data-toolbar-fit`
+  still updates on resize.
+
+Consequences: every screenshot baseline's top area changed; the docs demos and pictures are
+not re-recorded.
+

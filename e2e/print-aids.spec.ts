@@ -327,7 +327,7 @@ test('Overhang analysis: shading counts follow the angle, the down direction and
   await panel.getByRole('button', { name: 'Done' }).click();
   await expect(panel).toBeHidden();
   await page.getByRole('tab', { name: 'Solid' }).click();
-  await pickTool(page, 'Section');
+  await pickTool(page, 'Section Analysis');
   await page
     .getByRole('region', { name: 'Section Analysis' })
     .getByRole('button', { name: 'XY plane' })

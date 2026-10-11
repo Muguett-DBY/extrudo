@@ -4,6 +4,7 @@ import {
   forwardRef,
   useEffect,
   useLayoutEffect,
+  useReducer,
   useRef,
   useState,
 } from 'react';
@@ -12,6 +13,7 @@ import { shortcutLabel } from '../commands/shortcuts';
 import { type IconName, Menu, MenuItem, MenuLabel, ToolIcon, Tooltip } from '../design-system';
 import { ToolDemo } from '../onboarding/ToolDemo';
 import { isToolReady } from './commands';
+import { measureTileText, TILE_TEXT_WIDTH, tileLabel } from './tileLabel';
 import { type FitGroup, fitToolbar, groupWidth } from './toolbarFit';
 import {
   defaultTab,
@@ -157,6 +159,25 @@ export function ToolbarTabs({
   );
 }
 
+/**
+ * Bumps once `document.fonts.ready` resolves: the tiles measure their labels in
+ * the real font then, so a fallback-font width never sticks (ADR-0079 round 3).
+ * Guarded for environments without `document.fonts` (and for the unit tests).
+ */
+function useFontsReady() {
+  const [, bump] = useReducer((n: number) => n + 1, 0);
+  useEffect(() => {
+    if (typeof document === 'undefined' || !document.fonts) return;
+    let active = true;
+    document.fonts.ready.then(() => {
+      if (active) bump();
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+}
+
 /** What the fit rule measured for one tab's tiles, so a resize needs no new measurement. */
 interface Measured {
   key: string;
@@ -178,6 +199,7 @@ export function Toolbar({
   const tabs = visibleTabs(mode);
   const active = tabs.find((t) => t.id === tab) ?? tabs[0];
   const showsFinish = active?.id === 'sketch';
+  useFontsReady();
   useEffect(() => (showsFinish ? () => releaseTool('finishSketch') : undefined), [showsFinish]);
   const groups: ToolGroup[] = (active?.groups ?? []).map((g) => ({
     ...g,
@@ -200,6 +222,12 @@ export function Toolbar({
     fresh && width !== undefined
       ? fitToolbar(fresh.groups, width, fresh.chrome)
       : groups.map(() => 0);
+  const finishLabel = tileLabel(
+    TOOLS.finishSketch.label,
+    TOOLS.finishSketch.label,
+    TILE_TEXT_WIDTH,
+    measureTileText,
+  );
 
   // Measure every tile with nothing hidden, once per set of tiles (labels differ).
   useLayoutEffect(() => {
@@ -251,7 +279,7 @@ export function Toolbar({
         role="tabpanel"
         aria-labelledby={`tab-${active?.id}`}
         data-toolbar-fit={fit.join(',')}
-        className="flex min-h-[70px] items-stretch gap-1 overflow-x-auto px-2 pt-1 pb-1"
+        className="flex min-h-[92px] items-stretch gap-1 overflow-x-auto px-2 pt-1 pb-1"
       >
         {groups.map((group, i) => {
           const hide = group.compact ? 0 : (fit[i] ?? 0);
@@ -275,7 +303,7 @@ export function Toolbar({
                   <div
                     data-toolbar-tiles=""
                     className="grid grid-flow-col gap-px"
-                    style={{ gridTemplateRows: 'repeat(2, 26px)' }}
+                    style={{ gridTemplateRows: 'repeat(2, 30px)' }}
                   >
                     {tiles.map((id) => (
                       <ToolButton
@@ -392,6 +420,7 @@ export function Toolbar({
                 <ToolTile
                   data-tool="finishSketch"
                   data-label={TOOLS.finishSketch.label}
+                  aria-label={finishLabel.lines.join(' ')}
                   className="text-ink"
                   onClick={() => onRun('finishSketch')}
                   {...trackTool('finishSketch')}
@@ -399,9 +428,10 @@ export function Toolbar({
                   <ToolIcon
                     name={TOOLS.finishSketch.icon}
                     category="sketch"
+                    size={32}
                     color="var(--x-success)"
                   />
-                  <span>{TOOLS.finishSketch.label}</span>
+                  <TileText lines={finishLabel.lines} />
                 </ToolTile>
               </Tooltip>
               <span className={LABEL}>Finish</span>
@@ -439,7 +469,7 @@ function ToolButton({
   shortcut: string | undefined;
   pressed: boolean;
   onRun(): void;
-  /** An icon-only 26 px button, labelled for assistive tech. */
+  /** An icon-only 30 px button, labelled for assistive tech. */
   compact?: boolean;
 }) {
   const unavailable = !ready;
@@ -465,40 +495,58 @@ function ToolButton({
           aria-pressed={pressed || undefined}
           onClick={unavailable ? undefined : onRun}
           {...trackTool(tool.id)}
-          className={`grid size-[26px] place-items-center rounded-control transition-colors duration-(--x-fast) hover:bg-accent-soft aria-pressed:bg-accent-soft aria-disabled:cursor-default aria-disabled:hover:bg-transparent ${unavailable ? 'opacity-55' : ''}`}
+          className={`grid size-[30px] place-items-center rounded-control transition-colors duration-(--x-fast) hover:bg-accent-soft aria-pressed:bg-accent-soft aria-disabled:cursor-default aria-disabled:hover:bg-transparent ${unavailable ? 'opacity-55' : ''}`}
         >
-          <ToolIcon name={tool.icon} category={tool.category} size={18} />
+          <ToolIcon name={tool.icon} category={tool.category} size={24} />
         </button>
       </Tooltip>
     );
   }
+  const full = label ?? tool.label;
+  const short = label ?? tool.short ?? tool.label;
+  const { lines, cut } = tileLabel(full, short, TILE_TEXT_WIDTH, measureTileText);
   return (
     <Tooltip {...tooltip}>
       <ToolTile
         data-tool={tool.id}
         // The tool's full name, for finding a tile whose label is short ("Section").
         data-label={label ?? tool.label}
+        // The visible text, or the full text when the short one had to be cut.
+        aria-label={cut ? full : lines.join(' ')}
         aria-disabled={unavailable || undefined}
         aria-pressed={pressed || undefined}
         onClick={unavailable ? undefined : onRun}
         {...trackTool(tool.id)}
         className={unavailable ? 'opacity-55' : ''}
       >
-        <ToolIcon name={tool.icon} category={tool.category} />
-        <span>{label ?? tool.short ?? tool.label}</span>
+        <ToolIcon name={tool.icon} category={tool.category} size={32} />
+        <TileText lines={lines} />
       </ToolTile>
     </Tooltip>
   );
 }
 
-/** A 40 px tool button: icon over label. */
+/** A tile's label box: two 13 px lines, each a nowrap, centred line of 11 px text. */
+function TileText({ lines }: { lines: string[] }) {
+  return (
+    <span className="flex h-[26px] flex-col items-center justify-center text-[11px] leading-[13px]">
+      {lines.map((line) => (
+        <span key={line} className="block whitespace-nowrap">
+          {line}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/** A 64 px tool button: icon over a two-line label, at the same height however long the label is. */
 const ToolTile = forwardRef<HTMLButtonElement, ButtonHTMLAttributes<HTMLButtonElement>>(
   function ToolTile({ className = '', children, ...props }, ref) {
     return (
       <button
         ref={ref}
         type="button"
-        className={`flex min-w-10 flex-col items-center gap-0.5 whitespace-nowrap rounded-control px-2 py-1 text-xs text-muted transition-colors duration-(--x-fast) hover:bg-accent-soft hover:text-ink aria-pressed:bg-accent-soft aria-pressed:text-ink aria-disabled:cursor-default aria-disabled:hover:bg-transparent ${className}`}
+        className={`flex w-16 flex-col items-center gap-0.5 rounded-control px-px py-1 text-muted transition-colors duration-(--x-fast) hover:bg-accent-soft hover:text-ink aria-pressed:bg-accent-soft aria-pressed:text-ink aria-disabled:cursor-default aria-disabled:hover:bg-transparent ${className}`}
         {...props}
       >
         {children}

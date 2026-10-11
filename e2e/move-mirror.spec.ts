@@ -118,7 +118,7 @@ test('moves a body by typed distances and turns; a copy keeps the original', asy
   await kernelReady(page);
   await cube(page);
 
-  const dialog = await open(page, 'Move', 'Move dialog', ['Body1']);
+  const dialog = await open(page, 'Move/Copy', 'Move dialog', ['Body1']);
   // The gizmo: an arrow and a ring for each axis.
   await expect(viewport.locator('[data-manipulators]')).toHaveAttribute(
     'data-manipulators',
@@ -137,7 +137,7 @@ test('moves a body by typed distances and turns; a copy keeps the original', asy
   });
 
   // A copy, turned 45° about Z through its own middle: the original stays.
-  const copy = await open(page, 'Move', 'Move dialog', ['Body1']);
+  const copy = await open(page, 'Move/Copy', 'Move dialog', ['Body1']);
   await copy.getByRole('checkbox', { name: 'Create copy' }).check();
   await copy.getByRole('textbox', { name: 'Y distance' }).fill('50 mm');
   await copy.getByRole('textbox', { name: 'Z angle' }).fill('45 deg');
@@ -163,7 +163,7 @@ test('dragging a gizmo arrow writes its distance field', async ({ page }) => {
   await page.keyboard.press('Shift+1');
   const at = await settledProjector(viewport);
 
-  const dialog = await open(page, 'Move', 'Move dialog', ['Body1']);
+  const dialog = await open(page, 'Move/Copy', 'Move dialog', ['Body1']);
   const field = dialog.getByRole('textbox', { name: 'X distance' });
   await expect(field).toHaveValue('0 mm');
   // The arrow starts on the +X face of the cube; drag it along the X axis on screen.
@@ -196,7 +196,7 @@ test('turns a body about a picked axis', async ({ page }) => {
   await page.keyboard.press('Shift+1');
   const at = await settledProjector(viewport);
 
-  const dialog = await open(page, 'Move', 'Move dialog', ['Body1']);
+  const dialog = await open(page, 'Move/Copy', 'Move dialog', ['Body1']);
   await dialog.getByRole('combobox', { name: 'Move type' }).selectOption('rotate');
   await expect(dialog.getByRole('textbox', { name: 'X distance' })).toHaveCount(0);
   await dialog.getByRole('button', { name: 'Axis', exact: true }).click();

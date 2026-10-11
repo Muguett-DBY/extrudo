@@ -89,7 +89,7 @@ test('walks the tour: a sketch, a rectangle, a size, an extrude and a fillet', a
   const click = clicker(page, at);
 
   // 2. A rectangle.
-  await page.getByRole('button', { name: /^Rectangle/ }).click();
+  await page.getByRole('button', { name: '2-Point Rectangle', exact: true }).click();
   await click(-20, -10);
   await click(20, 10);
   await page.keyboard.press('Escape');
@@ -97,7 +97,7 @@ test('walks the tour: a sketch, a rectangle, a size, an extrude and a fillet', a
   await expect(page.locator('[data-tutorial-ring="dimension"]')).toBeVisible();
 
   // 3. A dimension: the bottom side, labelled below it, set to 40.
-  await page.getByRole('button', { name: /^Dimension/ }).click();
+  await page.getByRole('button', { name: 'Sketch Dimension', exact: true }).click();
   await click(0, -10);
   await click(0, -16);
   await page.keyboard.type('40');

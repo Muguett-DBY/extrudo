@@ -211,7 +211,7 @@ test('B10: a cable chain link, swept and patterned', async ({ page }) => {
   // Fillet the path's four corners, 3 mm: the radius goes into the heads-up
   // box first, so every corner comes out the same size.
   await chip(page, 'Sketch1').dblclick();
-  await pickTool(page, 'Fillet');
+  await pickTool(page, 'Sketch Fillet');
   await expect(toolPrompt(page)).toBeVisible();
   xz = await projector(viewport);
   await clickXZ(0, 0);

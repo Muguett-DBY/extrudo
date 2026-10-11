@@ -1,5 +1,6 @@
+import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
-import { ICON_MARKUP, ICON_NAMES } from './index';
+import { ICON_MARKUP, ICON_NAMES, ToolIcon } from './index';
 
 const sources = import.meta.glob<string>('./svg/*.svg', {
   query: '?raw',
@@ -59,5 +60,19 @@ describe('tool icon sources (docs/05-brand.md §6)', () => {
     // At least one filled "subject" surface (class f) and one outline.
     expect(svg).toMatch(/class="f"/);
     expect(tags.some(([, , a]) => !a?.includes('class="f"'))).toBe(true);
+  });
+});
+
+describe('ToolIcon stroke weight (ADR-0079 round 3)', () => {
+  it('scales the stroke back above 24 px so the line weight stays at 1.75 px', () => {
+    const html = renderToStaticMarkup(<ToolIcon name="box" category="create" size={32} />);
+    expect(html).toContain('stroke-width:1.3125');
+  });
+
+  it('leaves the stroke to the stylesheet at 24 px and below', () => {
+    for (const size of [14, 16, 18, 24] as const) {
+      const html = renderToStaticMarkup(<ToolIcon name="box" category="create" size={size} />);
+      expect(html).not.toContain('stroke-width');
+    }
   });
 });

@@ -63,7 +63,8 @@ brief, voice) is in **`05-brand.md`**. In short:
   tab (on the desktop app also Open File, Save As and Open Recent, and Help has
   Check for Updates…); Windows and Linux have no native menu bar either, macOS
   keeps the system one (ADR-0075). Below 1024 px the wordmark goes; when the title group doesn't fit, the save
-  word goes first (the dot stays), then the name truncates (ADR-0079, round 2). Tool tiles carry a one-line label that may be long; a tool has a
+  word goes first (the dot stays), then the name truncates (ADR-0079, round 2). Tool tiles are a fixed 64 px wide, an icon over a label of up to two 11 px lines that shows the tool's full
+  name when it fits and its short name otherwise (ADR-0079, round 3); a tool has a
   tile whenever there is room, and the ▾ menu holds only what the fit rule moved.
 - **Versions** (P2-14, ADR-0036): Ctrl+S, Home › Save Version or
   Version History, the clock icon beside the project name, or the

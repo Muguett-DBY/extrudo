@@ -52,7 +52,7 @@ async function rectangle(page: Page) {
   const viewport = viewportOf(page);
   await expect(viewport).toHaveAttribute('data-camera-direction', '0,0,-1');
   const click = clicker(page, await mapping(viewport));
-  await page.getByRole('button', { name: /^Rectangle/ }).click();
+  await page.getByRole('button', { name: '2-Point Rectangle', exact: true }).click();
   await click(-20, -10);
   await click(20, 10);
   await page.keyboard.press('Escape');
@@ -175,7 +175,7 @@ test('Replace is refused, with nothing changed, while something outside the run 
   await rectangle(page);
   // A dimension makes a parameter of the sketch (d1); a user parameter that reads it holds the sketch.
   const click = clicker(page, await mapping(viewportOf(page)));
-  await page.getByRole('button', { name: /^Dimension/ }).click();
+  await page.getByRole('button', { name: 'Sketch Dimension', exact: true }).click();
   await click(0, -10);
   await click(0, -16);
   await page.keyboard.type('40');

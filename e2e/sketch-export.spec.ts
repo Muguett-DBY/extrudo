@@ -23,11 +23,11 @@ test.afterEach(() => {
 const dialog = (page: Page) => page.getByRole('dialog', { name: 'Export sketch' });
 const summary = (page: Page) => dialog(page).locator('[data-export-summary]');
 const prompt = (page: Page) => page.getByRole('status', { name: 'Tool prompt' });
-/** The Sketch tab's Export Sketch tile (its label is "Export"). */
+/** The Sketch tab's Export Sketch tile (its label wraps to "Export Sketch"). */
 const exportTile = (page: Page) =>
   page
     .getByRole('group', { name: 'Export' })
-    .getByRole('button', { name: 'Export', exact: true })
+    .getByRole('button', { name: 'Export Sketch', exact: true })
     .first();
 
 async function save(page: Page, button: string): Promise<{ name: string; text: string }> {
