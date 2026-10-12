@@ -6528,28 +6528,15 @@ private:
         gp_Dir b;
         if (!edgeNormal(edge, face, a) || !edgeNormal(edge, TopoDS::Face(other), b)) return false;
         const double dot = a.Dot(b);
-        if (dot > 0.9994 || std::fabs(dot) < 1e-3) continue;
+        // A tangent neighbour, or a crease with a flat face (square or slanted): the
+        // wall under the face is the face's outline swept into the wall, and the
+        // neighbouring wall's inner surface is a plane the moved cavity lands on.
+        if (dot > 0.9994) continue;
+        if (BRepAdaptor_Surface(TopoDS::Face(other)).GetType() == GeomAbs_Plane) continue;
         return false;
       }
     }
     return true;
-  }
-
-  /** Whether two of the `removed` faces share an edge. */
-  static bool removedTouch(const TopoDS_Shape& body,
-                           const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& faces,
-                           const std::vector<int>& removed) {
-    EdgeFaceMap edgeFaces;
-    TopExp::MapShapesAndUniqueAncestors(body, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
-    for (int e = 1; e <= edgeFaces.Extent(); ++e) {
-      int count = 0;
-      for (const TopoDS_Shape& other : edgeFaces(e)) {
-        const int index = faces.FindIndex(other) - 1;
-        if (std::find(removed.begin(), removed.end(), index) != removed.end()) ++count;
-      }
-      if (count > 1) return true;
-    }
-    return false;
   }
 
   /**
@@ -6569,7 +6556,6 @@ private:
     }
     if (tangent < 0) return 0;
     refused = tangent;
-    if (removedTouch(body, faces, removed)) return -1;
     for (int index : removed) {
       if (!pluggable(body, TopoDS::Face(faces(index + 1)))) {
         refused = index;
@@ -6598,7 +6584,7 @@ private:
                            const NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher>& faces,
                            const std::vector<int>& removed, const std::vector<double>& perFace, double thickness,
                            double factor, bool outside, bool sharp, TopoDS_Shape& result,
-                           std::vector<TopoDS_Shape>& plugs) {
+                           std::vector<TopoDS_Shape>& plugs, std::vector<std::vector<TopoDS_Shape>>& corners) {
     // Hollowed closed, every face has a wall, the removed ones too.
     if (sharp && wallsPassThrough(input, faces, {}, perFace, factor, outside)) return false;
     try {
@@ -6620,9 +6606,10 @@ private:
       // The cavity: the skin's inside when hollowing inwards, the body itself when growing outwards.
       const TopoDS_Shape cavity = outside ? input : asSolid(skin);
       if (cavity.IsNull()) return false;
-      BRep_Builder builder;
-      TopoDS_Compound tools;
-      builder.MakeCompound(tools);
+      std::vector<TopoDS_Shape> prisms;
+      std::vector<gp_Dir> normals;
+      std::vector<double> moves;
+      std::vector<TopoDS_Shape> toolShapes;
       plugs.clear();
       for (int index : removed) {
         const TopoDS_Face face = TopoDS::Face(faces(index + 1));
@@ -6640,13 +6627,68 @@ private:
         const double move = depth + 2 * over;
         BRepAlgoAPI_Common plug(prism.Shape(), shifted(cavity, n.X() * move, n.Y() * move, n.Z() * move));
         if (!plug.IsDone() || !TopExp_Explorer(plug.Shape(), TopAbs_SOLID).More()) return false;
+        prisms.push_back(prism.Shape());
+        normals.push_back(n);
+        moves.push_back(move);
         plugs.push_back(plug.Shape());
-        builder.Add(tools, plug.Shape());
+        toolShapes.push_back(plug.Shape());
+      }
+      // Two removed faces that share an edge leave the bar between them (each plug
+      // is inset from the edge: the moved cavity trims to the *neighbour's* inner
+      // surface, and neither is the other's neighbour). Add a corner plug at each
+      // edge/vertex shared by removed faces: their prisms in common, in common with
+      // the cavity moved out along the sum of their normals, which reaches the bar.
+      corners.assign(removed.size(), {});
+      // A corner plug that fails leaves the bar between two touching removed
+      // faces in the part, so a missing plug must refuse the whole shell.
+      const auto addCorner = [&](const std::vector<int>& around) -> bool {
+        TopoDS_Shape common = prisms[around[0]];
+        gp_Vec sum(0, 0, 0);
+        for (size_t k = 0; k < around.size(); ++k) {
+          if (k > 0) {
+            BRepAlgoAPI_Common next(common, prisms[around[k]]);
+            if (!next.IsDone()) return false;
+            common = next.Shape();
+          }
+          sum += gp_Vec(normals[around[k]]) * moves[around[k]];
+        }
+        BRepAlgoAPI_Common corner(common, shifted(cavity, sum.X(), sum.Y(), sum.Z()));
+        if (!corner.IsDone() || !TopExp_Explorer(corner.Shape(), TopAbs_SOLID).More()) return false;
+        corners[around[0]].push_back(corner.Shape());
+        toolShapes.push_back(corner.Shape());
+        return true;
+      };
+      const auto clusters = [&](TopAbs_ShapeEnum kind, int minimum) -> bool {
+        NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> map;
+        TopExp::MapShapesAndUniqueAncestors(input, kind, TopAbs_FACE, map);
+        for (int e = 1; e <= map.Extent(); ++e) {
+          std::vector<int> around;
+          for (const TopoDS_Shape& other : map(e)) {
+            const int at = faces.FindIndex(other) - 1;
+            const auto found = std::find(removed.begin(), removed.end(), at);
+            if (found == removed.end()) continue;
+            const int position = static_cast<int>(found - removed.begin());
+            if (std::find(around.begin(), around.end(), position) == around.end()) around.push_back(position);
+          }
+          if (static_cast<int>(around.size()) >= minimum && !addCorner(around)) return false;
+        }
+        return true;
+      };
+      if (!clusters(TopAbs_EDGE, 2) || !clusters(TopAbs_VERTEX, 3)) return false;
+      // Fused into one tool: the corner plugs overlap the per-face plugs at the
+      // shared edge, and cutting them as a compound counts that region twice and
+      // drops the whole cut.
+      TopoDS_Shape tool = toolShapes.front();
+      for (size_t i = 1; i < toolShapes.size(); ++i) {
+        BRepAlgoAPI_Fuse fused(tool, toolShapes[i]);
+        fused.SimplifyResult();
+        if (!fused.IsDone()) return false;
+        tool = fused.Shape();
       }
       NCollection_List<TopoDS_Shape> arguments;
       NCollection_List<TopoDS_Shape> toolList;
       arguments.Append(hollow);
-      toolList.Append(tools);
+      toolList.Append(tool);
       cut.SetArguments(arguments);
       cut.SetTools(toolList);
       cut.SetRunParallel(false);
@@ -6675,8 +6717,9 @@ private:
     BRepAlgoAPI_Cut cut;
     TopoDS_Shape result;
     std::vector<TopoDS_Shape> plugs;
+    std::vector<std::vector<TopoDS_Shape>> corners;
     return buildPlugged(thick, cut, copy, faces, removed, perFace, thickness, factor, outside, sharp, result,
-                        plugs) &&
+                        plugs, corners) &&
            shellFacesGood(thick, copy, faces, removed, perFace, factor, result, outside);
   }
 
@@ -6698,9 +6741,10 @@ private:
         BRepAlgoAPI_Cut cut;
         TopoDS_Shape result;
         std::vector<TopoDS_Shape> plugs;
-        if (buildPlugged(thick, cut, copy, faces, removed, perFace, thickness, 1.0, outside, sharp, result, plugs) &&
+        std::vector<std::vector<TopoDS_Shape>> corners;
+        if (buildPlugged(thick, cut, copy, faces, removed, perFace, thickness, 1.0, outside, sharp, result, plugs, corners) &&
             shellFacesGood(thick, copy, faces, removed, perFace, 1.0, result, outside)) {
-          recordPlugged(thick, cut, copy, removed, plugs, result);
+          recordPlugged(thick, cut, copy, removed, plugs, corners, result);
           return store(result);
         }
       }
@@ -6721,7 +6765,7 @@ private:
    */
   void recordPlugged(BRepOffset_MakeOffset& thick, BRepAlgoAPI_Cut& cut, const TopoDS_Shape& input,
                      const std::vector<int>& removed, const std::vector<TopoDS_Shape>& plugs,
-                     const TopoDS_Shape& result) {
+                     const std::vector<std::vector<TopoDS_Shape>>& corners, const TopoDS_Shape& result) {
     NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> resultMaps[3];
     for (int kind = 0; kind < 3; ++kind) TopExp::MapShapes(result, kindToEnum(kind), resultMaps[kind]);
     // The result's images of a shape of the closed hollow; `kept` when it is there unchanged.
@@ -6753,6 +6797,12 @@ private:
                it.Next()) {
             bool kept = false;
             through(it.Current(), rim, kept);
+          }
+          for (const TopoDS_Shape& corner : corners[static_cast<size_t>(at - removed.begin())]) {
+            for (TopExp_Explorer it(corner, TopAbs_FACE); it.More(); it.Next()) {
+              bool kept = false;
+              through(it.Current(), rim, kept);
+            }
           }
           if (!appendRelation(rim, resultMaps, 0, kind, i - 1, 0)) {
             pushRecord(0, kind, i - 1, 2);

@@ -697,8 +697,9 @@ chain are refused, and a body with a sharp edge inside a smooth chain is
 refused before OCCT runs, ADR-0051's trap); `Kernel.shell(…, walls)` calls it
 only when there are walls, so a shell without sets computes as before. And a
 removed face that runs smoothly into a neighbour (`touchesTangentFace`) is no
-longer refused when it is **flat, its other edges meet their neighbours square
-and it touches no other removed face** (`openingRoute`, `pluggable`): the body
+longer refused when it is **flat, each other edge meets a neighbour that runs
+smoothly into it or is flat (square or slanted), and it touches no other
+removed face** (`openingRoute`, `pluggable`): the body
 is hollowed closed and the opening cut as a **plug** (`buildPlugged`: the
 face's prism in common with the cavity moved out by two walls; history through
 `recordPlugged`, the plug's faces are the rim). The old refusal's heap trap
@@ -706,6 +707,18 @@ didn't reproduce in about 3,000 unguarded builds (mimalloc `-O3` and
 `emmalloc-memvalidate` too); OCCT simply never builds those openings, so
 the faces plugs can't open stay refused (status 6). Native harness:
 `spikes/p4-12-shell-faces/` (`run.sh`, `run.sh sweep`, `run.sh sweep2`).
+**ADR-0046's second amendment (2026-10-12)** widened `pluggable` from "square"
+to "flat" (a crease at any angle): the plug's lateral boundary is the removed
+face's own outline, and the moved cavity only has to land on the neighbour's
+planar inner surface, so an **opening past a slanted neighbour** next to a
+fillet computes (case 2, the harness's `run.sh slanted` corpus). It also adds
+a **corner plug** where two removed faces share an edge (or three share a
+vertex): their prisms in common, in common with the cavity moved out along
+the **sum of their normals**, so the bar between the openings is removed
+(case 3, `run.sh corners`); the plugs are **fused** into one tool before the
+cut (a compound cut drops the shared region) and `recordPlugged` carries the
+corner plugs' faces into the first removed face's rim. An opening through a
+**curved** face and **round joins with wall sets** stay refused (status 6).
 ADR-0048 (P3-10) added the 3D-print aids (`apps/web/src/print/`, no
 facade or schema-version change): **Place on Bed is its own feature
 `placeOnBed`** (`core/src/place-on-bed.ts`, kernel `features/place-on-bed.ts`,
