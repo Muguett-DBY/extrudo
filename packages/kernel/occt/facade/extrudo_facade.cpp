@@ -6639,23 +6639,26 @@ private:
       // edge/vertex shared by removed faces: their prisms in common, in common with
       // the cavity moved out along the sum of their normals, which reaches the bar.
       corners.assign(removed.size(), {});
-      const auto addCorner = [&](const std::vector<int>& around) {
+      // A corner plug that fails leaves the bar between two touching removed
+      // faces in the part, so a missing plug must refuse the whole shell.
+      const auto addCorner = [&](const std::vector<int>& around) -> bool {
         TopoDS_Shape common = prisms[around[0]];
         gp_Vec sum(0, 0, 0);
         for (size_t k = 0; k < around.size(); ++k) {
           if (k > 0) {
             BRepAlgoAPI_Common next(common, prisms[around[k]]);
-            if (!next.IsDone()) return;
+            if (!next.IsDone()) return false;
             common = next.Shape();
           }
           sum += gp_Vec(normals[around[k]]) * moves[around[k]];
         }
         BRepAlgoAPI_Common corner(common, shifted(cavity, sum.X(), sum.Y(), sum.Z()));
-        if (!corner.IsDone() || !TopExp_Explorer(corner.Shape(), TopAbs_SOLID).More()) return;
+        if (!corner.IsDone() || !TopExp_Explorer(corner.Shape(), TopAbs_SOLID).More()) return false;
         corners[around[0]].push_back(corner.Shape());
         toolShapes.push_back(corner.Shape());
+        return true;
       };
-      const auto clusters = [&](TopAbs_ShapeEnum kind, int minimum) {
+      const auto clusters = [&](TopAbs_ShapeEnum kind, int minimum) -> bool {
         NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> map;
         TopExp::MapShapesAndUniqueAncestors(input, kind, TopAbs_FACE, map);
         for (int e = 1; e <= map.Extent(); ++e) {
@@ -6667,11 +6670,11 @@ private:
             const int position = static_cast<int>(found - removed.begin());
             if (std::find(around.begin(), around.end(), position) == around.end()) around.push_back(position);
           }
-          if (static_cast<int>(around.size()) >= minimum) addCorner(around);
+          if (static_cast<int>(around.size()) >= minimum && !addCorner(around)) return false;
         }
+        return true;
       };
-      clusters(TopAbs_EDGE, 2);
-      clusters(TopAbs_VERTEX, 3);
+      if (!clusters(TopAbs_EDGE, 2) || !clusters(TopAbs_VERTEX, 3)) return false;
       // Fused into one tool: the corner plugs overlap the per-face plugs at the
       // shared edge, and cutting them as a compound counts that region twice and
       // drops the whole cut.
