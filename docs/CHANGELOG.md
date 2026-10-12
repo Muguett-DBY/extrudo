@@ -2,7 +2,7 @@
 
 One line per completed roadmap task, newest first. Dates are absolute.
 
-## Next
+## v0.6.1 (2026-10-12)
 
 - 2026-10-12 · **Desktop: a design opened from a file saves back to it after a restart** (ADR-0075's amendment): main keeps the paths it handed out in `userData/external-paths.json` and takes in its recent list at start, so a project reopened from the home screen after a restart or an update no longer has every write-back refused with "Extrudo was not asked to open that file."; a write-back error that repeats on every save is said once.
 

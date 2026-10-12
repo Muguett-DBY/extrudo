@@ -2245,7 +2245,7 @@ owner's UI reviews"); its tooltip clips cover the Solid and Modify tabs, and
 Construct, 3D Print and the Sketch tab follow in later batches. The repository is public (2026-10-04); the first public
 release is **v0.4.0** (no v0.3.0 tag): the owner does the slicer check and a
 fresh look on edge, the agent then bumps the versions to 0.4.0, and **the owner
-tags** (`docs/release-checklist.md`; don't tag yourself). v0.4.1 fixed the desktop build; v0.5.0 (2026-10-10); **v0.6.0** (2026-10-12) is the next release.
+tags** (`docs/release-checklist.md`; don't tag yourself). v0.4.1 fixed the desktop build; v0.5.0 (2026-10-10), v0.6.0 (2026-10-12); **v0.6.1** (2026-10-12) is the next release.
 
 ## Commands
 
