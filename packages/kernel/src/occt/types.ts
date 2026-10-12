@@ -215,6 +215,7 @@ export interface FacadeBinding {
   writeStep(): number;
   readStep(text: string): number;
   readStepColors(text: string): number;
+  readStepNames(text: string): number;
   clearExport(): void;
   exportPositionsPtr(): number;
   exportPositionsSize(): number;
@@ -222,6 +223,8 @@ export interface FacadeBinding {
   exportIndicesSize(): number;
   exportTextPtr(): number;
   exportTextSize(): number;
+  readNamesPtr(): number;
+  readNamesSize(): number;
   lastError(): string;
   heapTop(): number;
   debugAbort(): void;

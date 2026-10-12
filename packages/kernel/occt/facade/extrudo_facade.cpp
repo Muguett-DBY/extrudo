@@ -169,6 +169,7 @@
 #include <Quantity_Color.hxx>
 #include <TDF_Label.hxx>
 #include <TDataStd_Name.hxx>
+#include <TCollection_AsciiString.hxx>
 #include <TCollection_ExtendedString.hxx>
 #include <TopLoc_Location.hxx>
 #include <TDocStd_Document.hxx>
@@ -2490,6 +2491,69 @@ public:
     }
   }
 
+  /**
+   * The names of a STEP file's solids (ADR-0034's amendment): the same text as
+   * readStep(), read through XDE (STEPCAFControl_Reader with the name mode on,
+   * into an XCAF document that lives only for this call). Per solid, in the
+   * order readStep()'s shape lists them, the name of the solid's own label,
+   * else its part's, else the nearest assembly instance's, as UTF-8 and empty
+   * for none. Read with readNamesPtr/Size: the names joined by '\0' (one entry
+   * per solid, empty when it has none). Returns the number of solids, or -1.
+   */
+  int readStepNames(const char* text) {
+    beginOp();
+    quietMessages();
+    readNames_.clear();
+    readNameText_.clear();
+    try {
+      // Declared first, so the reader (which keeps labels) goes before it.
+      Handle(TDocStd_Document) doc = new TDocStd_Document("BinXCAF");
+      XCAFDoc_DocumentTool::Set(doc->Main(), false);
+      int solids = -1;
+      {
+        STEPCAFControl_Reader reader;
+        reader.SetColorMode(false);
+        reader.SetNameMode(true);
+        reader.SetLayerMode(false);
+        reader.SetPropsMode(false);
+        reader.SetMetaMode(false);
+        reader.SetProductMetaMode(false);
+        reader.SetSHUOMode(false);
+        reader.SetGDTMode(false);
+        reader.SetMatMode(false);
+        reader.SetViewMode(false);
+        std::istringstream in(text == nullptr ? "" : text);
+        if (reader.ReadStream("extrudo.step", in) == IFSelect_RetDone && reader.Transfer(doc)) {
+          const Handle(XCAFDoc_ShapeTool) shapes = XCAFDoc_DocumentTool::ShapeTool(doc->Main());
+          NCollection_Sequence<TDF_Label> roots;
+          shapes->GetFreeShapes(roots);
+          for (NCollection_Sequence<TDF_Label>::Iterator root(roots); root.More(); root.Next()) {
+            stepSolidNames(shapes, root.Value(), nullptr);
+          }
+          solids = static_cast<int>(readNames_.size());
+          for (const std::string& name : readNames_) {
+            readNameText_ += name;
+            readNameText_ += '\0';
+          }
+        }
+      }
+      // An XCAF document is OCCT memory the facade owns (ADR-0001): drop its
+      // attributes before the handle goes, so nothing outlives the call.
+      doc->Main().Root().ForgetAllAttributes(true);
+      if (solids < 0) {
+        readNames_.clear();
+        readNameText_.clear();
+        return fail("STEP import failed: the file's part names couldn't be read.");
+      }
+      return solids;
+    } catch (...) {
+      readNames_.clear();
+      readNameText_.clear();
+      failFromException("STEP import failed");
+      return -1;
+    }
+  }
+
   /** Frees the export buffers once JS has copied them. */
   void clearExport() {
     std::vector<double>().swap(exportPositions_);
@@ -2503,6 +2567,8 @@ public:
   int exportIndicesSize() const { return static_cast<int>(exportIndices_.size()); }
   uintptr_t exportTextPtr() const { return reinterpret_cast<uintptr_t>(exportText_.data()); }
   int exportTextSize() const { return static_cast<int>(exportText_.size()); }
+  uintptr_t readNamesPtr() const { return reinterpret_cast<uintptr_t>(readNameText_.data()); }
+  int readNamesSize() const { return static_cast<int>(readNameText_.size()); }
 
   // ------------------------------------------------ scale and draft (P3-08) --
 
@@ -5065,6 +5131,17 @@ private:
            XCAFDoc_ColorTool::GetColor(label, XCAFDoc_ColorGen, color);
   }
 
+  /** A label's name (`TDataStd_Name`) as UTF-8, empty when it has none. */
+  static bool stepLabelName(const TDF_Label& label, std::string& name) {
+    Handle(TDataStd_Name) attr;
+    if (!label.FindAttribute(TDataStd_Name::GetID(), attr)) return false;
+    const TCollection_ExtendedString& ext = attr->Get();
+    if (ext.IsEmpty()) return false;
+    TCollection_AsciiString utf8(ext, true);
+    name = utf8.ToCString();
+    return !name.empty();
+  }
+
   /**
    * readStepColors()'s walk: an assembly's components in order (each passes
    * down its own instance colour, else the one it was given), a part's solids
@@ -5108,12 +5185,53 @@ private:
     }
   }
 
+  /**
+   * readStepNames()'s walk, the same shape as stepSolidColors(): an assembly's
+   * components in order (each passes down its own instance name, else the one
+   * it was given), a part's solids in TopExp::MapShapes order (each its own
+   * sub-shape name, else the part's, else the instance's), one entry per solid
+   * (empty for none) in readNames_.
+   */
+  void stepSolidNames(const Handle(XCAFDoc_ShapeTool)& shapes, const TDF_Label& label,
+                      const std::string* inherited) {
+    std::string own;
+    const std::string* given = stepLabelName(label, own) ? &own : inherited;
+    TDF_Label referred;
+    if (XCAFDoc_ShapeTool::IsReference(label) && XCAFDoc_ShapeTool::GetReferredShape(label, referred)) {
+      stepSolidNames(shapes, referred, given);
+      return;
+    }
+    if (XCAFDoc_ShapeTool::IsAssembly(label)) {
+      NCollection_Sequence<TDF_Label> components;
+      XCAFDoc_ShapeTool::GetComponents(label, components, false);
+      for (NCollection_Sequence<TDF_Label>::Iterator c(components); c.More(); c.Next()) {
+        stepSolidNames(shapes, c.Value(), given);
+      }
+      return;
+    }
+    const TopoDS_Shape part = XCAFDoc_ShapeTool::GetShape(label);
+    if (part.IsNull()) return;
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> solids;
+    TopExp::MapShapes(part, TopAbs_SOLID, solids);
+    for (int i = 1; i <= solids.Extent(); ++i) {
+      std::string name;
+      const std::string* found = given;
+      TDF_Label sub;
+      if (shapes->FindSubShape(label, solids(i), sub) && stepLabelName(sub, name)) found = &name;
+      readNames_.push_back(found == nullptr ? std::string() : *found);
+    }
+  }
+
   std::vector<std::string> stepNames_;
   /** Per staged STEP part, [r, g, b] in 0..1 (sRGB), or -1s for none (P4-12). */
   std::vector<double> stepColors_;
   /** Per staged STEP part, its group's index or -1, and the groups' names (P6-05). */
   std::vector<int> stepGroups_;
   std::vector<std::string> stepGroupNames_;
+  /** readStepNames(): one name per solid of the file, in readStep order. */
+  std::vector<std::string> readNames_;
+  /** The names above joined by '\0', which JS copies out (readNamesPtr/Size). */
+  std::string readNameText_;
   std::vector<double> numbers_;
   /** Walls staged for shellFaces(): face indices and their thicknesses. */
   std::vector<int> wallFaces_;
