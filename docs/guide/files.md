@@ -90,9 +90,8 @@ What does not come across:
 
 That is still plenty: an imported body behaves like any other. Move it, Combine it with another,
 round its edges with Fillet or Chamfer, hollow it with Shell, or push and pull a face with
-Press-Pull. If you need the history too, a [desktop app](./desktop.md) or a `.f3d` file — which
-Extrudo reads directly, rebuilding its parameters, sketches and features — is the better starting
-point; **Import Model** takes `.f3d` as well.
+Press-Pull. If you need the history too, start from a `.f3d` file instead: **Import Model** reads
+it directly and rebuilds its parameters, sketches and features.
 
 ## Version history
 
