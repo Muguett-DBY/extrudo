@@ -2,6 +2,10 @@
 
 One line per completed roadmap task, newest first. Dates are absolute.
 
+## Unreleased
+
+- 2026-10-12 · **Shell: an opening past a slanted neighbour** (ADR-0046's second amendment, P4-12): a flat face whose other edge meets a slanted plane next to a fillet now opens too, where before only a square edge did, so a chamfered neighbour no longer refuses the shell; the plug's lateral boundary is the removed face's own outline and the moved cavity lands on the neighbour's planar inner surface. An opening through a curved face, two removed faces that share an edge, and round joins with wall sets stay refused (recorded as Rejected in the ADR with the evidence).
+
 ## v0.6.1 (2026-10-12)
 
 - 2026-10-12 · **Fillets and chamfers built from the chains that work** (ADR-0038's and ADR-0043's amendments, ADR-0083's): with `skipLostEdges` on (the .f3d import sets it on every round), a round one of whose tangent chains is too large now keeps the edges that build and warns "2 of 9 edges left out of the fillet: Radius 3 mm is too large for edge 12 (max ≈ 1.2 mm). Use Fix References…" instead of failing whole; it leaves out at most a third of the edges, and without the input or past that bound it fails as before. On the 250-file corpus 127 designs match (was 123), with no design's verdict worse.

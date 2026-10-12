@@ -423,3 +423,58 @@ Round joins with wall sets (case 4) are unchanged from amendment 1's
 rejection: `GeomAbs_Arc` spreads a face's offset over every diverging edge,
 so a set's thickness leaks into its neighbours. Attempted only if the time
 budget allows; a fillet of the outside corners after the shell does it today.
+
+### Decisions and results
+
+1. **Case 2, done: a slanted planar neighbour.** `pluggable` now accepts a
+   non-tangent neighbour whenever it is **flat** (a crease at any angle),
+   not only square. The moved cavity's translation lands on a planar
+   neighbour's inner surface whatever its slope; the opening's lateral
+   boundary at such a neighbour is the *removed face's own outline* swept
+   along its normal (a vertical rim), not the neighbour's slope, which is
+   what a square edge already gave. `run.sh slanted` sweeps a 20 mm cube
+   whose top-back edge is filleted `r` and top-front edge chamfered `c`
+   (c ∈ {2, 4, 6}, r ∈ {2, 3, 5}, thicknesses 0.5/1/2 mm, inside and
+   outside): every case builds a valid solid with a positive volume, and
+   the existing table still passes (`failures: 0`). The exact volume of
+   c 4, r 3, t 2 inside (3351.315 mm³) checks out by hand: the hollowed
+   body (3772.805) less the top slab (421.49), whose front wedge follows
+   the chamfer's inner plane.
+
+### Rejected
+
+- **Case 3, two removed faces that share an edge.** Each plug is inset from
+  the shared outer edge (the moved cavity trims to the *neighbour's* inner
+  surface, and the other removed face is not a neighbour), so the bar
+  between the two openings is left. Natively, `one3` (a cube with one top
+  edge rounded 3 mm) with its top and back removed at 1 mm leaves
+  1532.823 mm³ against the exact 1514.823; the shared bar is 18 mm³. Cutting
+  the two plugs as a compound instead gave a wrong 288 mm³ (the shared
+  region counted twice drops the whole cut), which `shellFacesGood` still
+  passed — a cut to be suspicious of. Fusing the plugs fixes that volume
+  but not the bar. The full fix adds a **corner plug** per shared edge: the
+  faces' prisms in common with the cavity shifted by the **sum of their
+  normals**, which would need `recordPlugged` to carry more than one plug
+  per removed face. Deferred; the case stays refused (status 6).
+- **Case 1, a curved removed face next to a fillet.** The plug is the
+  removed face's prism — one constant direction. A curved face needs its
+  own **offset solid** (its normal field swept by the wall), and the moved
+  cavity must land on the neighbours' inner surfaces; `pluggable` requires
+  a flat face and stays that way. Refused (status 6).
+- **Case 4, round joins with wall sets.** Unchanged from amendment 1: a
+  round join spreads a set's thickness over every diverging edge, which a
+  check can only refuse. Refused.
+
+### Consequences
+
+- The facade's OCCT input hash becomes `3904d30660ab` (built by CI on
+  branch `claude/shell-openings`).
+- A document that removed a flat face next to a fillet with a **slanted**
+  planar neighbour now computes instead of refusing; every other shell
+  document computes exactly as before (the golden table only gains rows).
+- The harness gains `run.sh slanted`; `spikes/p4-12-shell-faces/README.md`
+  documents it.
+
+### Open
+
+- Cases 1 and 3 above, and round joins with wall sets.

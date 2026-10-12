@@ -655,7 +655,68 @@ static int leaks(const std::string& what, int n) {
   return 0;
 }
 
+/** Chains a chamfer and a fillet onto the cube: top-front edge (y=0) chamfered c, top-back (y=20) filleted r. */
+static int slopeBody(double c, double r) {
+  const int cube = f.makeBox(0, 0, 0, 20, 20, 20);
+  const auto midOf = [](const TopoDS_Edge& e) {
+    BRepAdaptor_Curve cu(e);
+    return cu.Value(0.5 * (cu.FirstParameter() + cu.LastParameter()));
+  };
+  BRepFilletAPI_MakeFillet fillet(*f.find(cube));
+  for (TopExp_Explorer it(*f.find(cube), TopAbs_EDGE); it.More(); it.Next()) {
+    const gp_Pnt m = midOf(TopoDS::Edge(it.Current()));
+    if (std::abs(m.Z() - 20) < 1e-6 && std::abs(m.Y() - 20) < 1e-6) fillet.Add(r, TopoDS::Edge(it.Current()));
+  }
+  fillet.Build();
+  if (!fillet.IsDone()) return 0;
+  const int rounded = f.store(fillet.Shape());
+  BRepFilletAPI_MakeChamfer chamfer(*f.find(rounded));
+  for (TopExp_Explorer it(*f.find(rounded), TopAbs_EDGE); it.More(); it.Next()) {
+    const gp_Pnt m = midOf(TopoDS::Edge(it.Current()));
+    if (std::abs(m.Z() - 20) < 1e-6 && std::abs(m.Y()) < 1e-6) chamfer.Add(c, TopoDS::Edge(it.Current()));
+  }
+  chamfer.Build();
+  if (!chamfer.IsDone()) return 0;
+  return f.store(chamfer.Shape());
+}
+
+static int slanted() {
+  for (double c : {2.0, 4.0, 6.0}) {
+    for (double r : {2.0, 3.0, 5.0}) {
+      const int s = slopeBody(c, r);
+      if (s == 0) {
+        std::printf("slope c%g r%g: body failed\n", c, r);
+        continue;
+      }
+      FaceMap fs = facesOf(s);
+      int top = -1;
+      for (int i = 1; i <= fs.Extent(); ++i) {
+        const gp_Pnt p = centreOf(fs(i));
+        if (BRepAdaptor_Surface(TopoDS::Face(fs(i))).GetType() == GeomAbs_Plane && p.Z() > 19.5) top = i - 1;
+      }
+      for (double t : {0.5, 1.0, 2.0}) {
+        for (bool outside : {false, true}) {
+          f.clearArgs();
+          f.pushArg(top);
+          const int res = f.shell(s, t, outside);
+          std::printf("slope c%g r%g top %d t%g %-7s: %s", c, r, top, t, outside ? "outside" : "inside",
+                      res ? "" : f.lastError_.c_str());
+          if (res) {
+            std::printf(" volume %.3f valid %d faces %d", ExtrudoFacade::exactVolume(*f.find(res)),
+                        BRepCheck_Analyzer(*f.find(res)).IsValid() ? 1 : 0, facesOf(res).Extent());
+          } else if (!f.geometry_.empty()) {
+            std::printf(" [%g, %g]", f.geometry_[0], f.geometry_.size() > 1 ? f.geometry_[1] : -1);
+          }
+          std::printf("\n");
+        }
+      }
+    }
+  }
+  return 0;
+}
+
 int main(int argc, char** argv) {
+  if (argc >= 2 && std::strcmp(argv[1], "slanted") == 0) return slanted();
   if (argc >= 5 && std::strcmp(argv[1], "leaks") == 0) checkStep = std::atoi(argv[4]);
   if (argc >= 4 && std::strcmp(argv[1], "leaks") == 0) return leaks(argv[2], std::atoi(argv[3]));
   if (argc >= 2 && std::strcmp(argv[1], "plug") == 0) {

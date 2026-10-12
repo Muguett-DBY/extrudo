@@ -6528,7 +6528,11 @@ private:
         gp_Dir b;
         if (!edgeNormal(edge, face, a) || !edgeNormal(edge, TopoDS::Face(other), b)) return false;
         const double dot = a.Dot(b);
-        if (dot > 0.9994 || std::fabs(dot) < 1e-3) continue;
+        // A tangent neighbour, or a crease with a flat face (square or slanted): the
+        // wall under the face is the face's outline swept into the wall, and the
+        // neighbouring wall's inner surface is a plane the moved cavity lands on.
+        if (dot > 0.9994) continue;
+        if (BRepAdaptor_Surface(TopoDS::Face(other)).GetType() == GeomAbs_Plane) continue;
         return false;
       }
     }

@@ -9,6 +9,7 @@ facade with `#define private public`, so it calls the private helpers too.
     bash spikes/p4-12-shell-faces/run.sh             # the volume table (exits 1 on a mismatch)
     bash spikes/p4-12-shell-faces/run.sh probe       # the table, then round against sharp joins and the plug steps
     bash spikes/p4-12-shell-faces/run.sh plug        # the first plug prototype (the prism alone; see the ADR)
+    bash spikes/p4-12-shell-faces/run.sh slanted     # second amendment: openings past a slanted neighbour (case 2)
     bash spikes/p4-12-shell-faces/run.sh faces round3    # a body's faces, numbered, with `tangent=1` where one runs into a neighbour
     bash spikes/p4-12-shell-faces/run.sh trap round3 10 2 raw   # one raw MakeThickSolidByJoin, no refusal
     bash spikes/p4-12-shell-faces/run.sh useq round3:10:2 …     # unguarded shells (build, check, bisection) in one process
@@ -23,7 +24,12 @@ and `BUILD=<name>` writes `build/<name>.cjs` so builds can sit side by side.
 Bodies (`body()` in harness.cpp): `box` (20 mm cube), `cyl` (r 10, h 20),
 `round<r>` (every edge of the cube rounded), `vert<r>` (its four vertical
 edges), `top<r>` (its four top edges: a sharp edge inside a smooth chain),
-`one<r>` (one top edge), `cylr<r>` (the cylinder's top rim).
+`one<r>` (one top edge), `cylr<r>` (the cylinder's top rim). `slanted`
+builds `slopeBody(c, r)`: a 20 mm cube whose top-back edge is filleted `r`
+and whose top-front edge is chamfered `c`, the removed face is its top (a
+tangent fillet on one edge, a slanted plane on another); it shells the top
+inside and outside over a grid of `c`, `r` and thicknesses (the second
+amendment's case 2).
 
 Needs Docker and the pinned image (`OCCT_IMAGE`, default `74e2918318e4`).
 The results are in `docs/adr/0046-shell.md`'s amendment.

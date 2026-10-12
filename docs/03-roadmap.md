@@ -869,9 +869,12 @@ end to end, faster than in established desktop CAD.
     locally at the edge's middle, so a curved edge and a curved face work too).
   - Shell: ~~a thickness per face~~; ~~removing faces next to a fillet~~
     (ADR-0046's amendment; done 2026-10-06: wall sets, and a flat face next to
-    a fillet opened as a plug. Still open: an opening through a curved face
-    or past a slanted neighbour next to a fillet, two touching removed faces
-    next to one, round joins with wall sets).
+    a fillet opened as a plug); ~~an opening past a slanted neighbour~~
+    (ADR-0046's second amendment, done 2026-10-12: a flat face whose other
+    edge meets a slanted plane next to a fillet now opens too). Still open,
+    **rejected** in the second amendment (see the ADR): an opening through a
+    curved face next to a fillet, two touching removed faces next to one,
+    round joins with wall sets.
   - Primitives: ~~position handles and a click point as the centre~~,
     ~~torus placement options~~ (ADR-0032; done 2026-10-06 — the handles
     and the two-corner box in the amendment, the torus as `axis` and
