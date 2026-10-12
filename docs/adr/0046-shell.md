@@ -441,21 +441,26 @@ budget allows; a fillet of the outside corners after the shell does it today.
    body (3772.805) less the top slab (421.49), whose front wedge follows
    the chamfer's inner plane.
 
+2. **Case 3, done: two removed faces that share an edge.** Each plug alone
+   is inset from the shared outer edge (the moved cavity trims to the
+   *neighbour's* inner surface, and the other removed face is not a
+   neighbour), so the bar between the two openings was left; and cutting the
+   two plugs as a **compound** gave a wrong result (the shared region
+   counted twice drops the whole cut: 288 mm³, which `shellFacesGood` still
+   passed — a cut to be suspicious of). `buildPlugged` now adds a **corner
+   plug** at every edge shared by two removed faces (and every vertex shared
+   by three): their prisms in common, in common with the cavity moved out
+   along the **sum of their normals**, which reaches the bar. The plugs are
+   **fused** into one tool before the cut (fusing fixes the compound's wrong
+   volume), and `recordPlugged` carries the corner plugs' faces into the rim
+   of the first removed face of each cluster. `run.sh corners` sweeps
+   `one3` and `round3` with the top and back removed (0.5/1/2 mm, inside and
+   outside): every case is a valid solid, and `one3` at 1 mm gives
+   1514.823 mm³, exactly the hollowed body less the two slabs less the
+   1×1×18 bar. The existing table still passes (`failures: 0`).
+
 ### Rejected
 
-- **Case 3, two removed faces that share an edge.** Each plug is inset from
-  the shared outer edge (the moved cavity trims to the *neighbour's* inner
-  surface, and the other removed face is not a neighbour), so the bar
-  between the two openings is left. Natively, `one3` (a cube with one top
-  edge rounded 3 mm) with its top and back removed at 1 mm leaves
-  1532.823 mm³ against the exact 1514.823; the shared bar is 18 mm³. Cutting
-  the two plugs as a compound instead gave a wrong 288 mm³ (the shared
-  region counted twice drops the whole cut), which `shellFacesGood` still
-  passed — a cut to be suspicious of. Fusing the plugs fixes that volume
-  but not the bar. The full fix adds a **corner plug** per shared edge: the
-  faces' prisms in common with the cavity shifted by the **sum of their
-  normals**, which would need `recordPlugged` to carry more than one plug
-  per removed face. Deferred; the case stays refused (status 6).
 - **Case 1, a curved removed face next to a fillet.** The plug is the
   removed face's prism — one constant direction. A curved face needs its
   own **offset solid** (its normal field swept by the wall), and the moved
@@ -463,18 +468,20 @@ budget allows; a fillet of the outside corners after the shell does it today.
   a flat face and stays that way. Refused (status 6).
 - **Case 4, round joins with wall sets.** Unchanged from amendment 1: a
   round join spreads a set's thickness over every diverging edge, which a
-  check can only refuse. Refused.
+  check can only refuse.
 
 ### Consequences
 
-- The facade's OCCT input hash becomes `3904d30660ab` (built by CI on
+- The facade's OCCT input hash becomes `dcf909fc4137` (built by CI on
   branch `claude/shell-openings`).
-- A document that removed a flat face next to a fillet with a **slanted**
-  planar neighbour now computes instead of refusing; every other shell
-  document computes exactly as before (the golden table only gains rows).
-- The harness gains `run.sh slanted`; `spikes/p4-12-shell-faces/README.md`
-  documents it.
+- Documents that removed a flat face next to a fillet with a **slanted**
+  planar neighbour, or two removed faces that share an edge, now compute
+  instead of refusing; every other shell document computes exactly as before
+  (the golden table only gains rows).
+- The harness gains `run.sh slanted` and `run.sh corners`;
+  `spikes/p4-12-shell-faces/README.md` documents them.
 
 ### Open
 
-- Cases 1 and 3 above, and round joins with wall sets.
+- Case 1 above, and round joins with wall sets.
+- A curved removed face where the neighbours are also curved.

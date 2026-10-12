@@ -292,7 +292,20 @@ static int table() {
         outerOne - (18 * 18 * 18 - 18 * 4 * (1 - PI / 4)) - 18 * 16 * 1);
     row("one top edge r3, top removed, 1, floor 4 (plug)", one, {oTop}, {{oFloor, 4}}, 1, false,
         outerOne - (18 * 18 * 15 - 18 * 4 * (1 - PI / 4)) - 18 * 16 * 1);
-    refusal("one top edge r3, top and back removed (they touch)", one, {oTop, faceAt(one, 10, 20, 10)}, {}, 1, 6);
+    // Two removed faces that share an edge (the second amendment's case 3): the
+    // corner plug removes the bar between them (exact: 2144.823 - 612 - 18).
+    {
+      f.clearArgs();
+      f.pushArg(oTop);
+      f.pushArg(faceAt(one, 10, 20, 10));
+      const int opened = f.shell(one, 1, false);
+      const double expected = 1514.823;
+      const bool ok = opened != 0 && std::abs(volume(opened) - expected) < 1e-6 * expected &&
+                      BRepCheck_Analyzer(*f.find(opened)).IsValid();
+      std::printf("| %-44s | %10.3f | %10.3f | %s\n", "one top edge r3, top and back removed (touch)", opened ? volume(opened) : -1.0,
+                  expected, ok ? "ok" : "FAIL");
+      if (!ok) ++failures;
+    }
     const int cylr = body("cylr2");
     int cylrTop = -1;
     {
@@ -355,8 +368,9 @@ static int table() {
           BRepAlgoAPI_Cut cut;
           TopoDS_Shape result;
           std::vector<TopoDS_Shape> plugs;
+          std::vector<std::vector<TopoDS_Shape>> corners;
           std::vector<double> perFace(fs.Extent(), 2.0);
-          const bool built = ExtrudoFacade::buildPlugged(thick, cut, copy, fs, {10}, perFace, 2, 1, outside, sharp, result, plugs);
+          const bool built = ExtrudoFacade::buildPlugged(thick, cut, copy, fs, {10}, perFace, 2, 1, outside, sharp, result, plugs, corners);
           const bool good = built && ExtrudoFacade::shellFacesGood(thick, copy, fs, {10}, perFace, 1, result, outside);
           std::printf("plug sharp %d outside %d: built %d (offset done %d, error %d), good %d, valid %d, volume %.3f\n", sharp, outside, built,
                       thick.IsDone(), static_cast<int>(thick.Error()), good, built ? BRepCheck_Analyzer(result).IsValid() : 0,
@@ -715,7 +729,41 @@ static int slanted() {
   return 0;
 }
 
+/** Two removed faces that share an edge, next to a fillet (case 3): through the facade. */
+static int corners() {
+  for (const char* name : {"one3", "vert3", "round3"}) {
+    const int shape = body(name);
+    FaceMap fs = facesOf(shape);
+    int top = -1, back = -1;
+    for (int i = 1; i <= fs.Extent(); ++i) {
+      const gp_Pnt c = centreOf(fs(i));
+      if (BRepAdaptor_Surface(TopoDS::Face(fs(i))).GetType() == GeomAbs_Plane && c.Z() > 19.5) top = i - 1;
+      if (BRepAdaptor_Surface(TopoDS::Face(fs(i))).GetType() == GeomAbs_Plane && c.Y() > 19.5) back = i - 1;
+    }
+    std::printf("%s top %d back %d\n", name, top, back);
+    for (double t : {0.5, 1.0, 2.0}) {
+      for (bool outside : {false, true}) {
+        f.clearArgs();
+        f.pushArg(top);
+        f.pushArg(back);
+        const int res = f.shell(shape, t, outside);
+        std::printf("  %s top+back t%g %-7s: %s", name, t, outside ? "outside" : "inside",
+                    res ? "" : f.lastError_.c_str());
+        if (res) {
+          std::printf(" volume %.3f valid %d faces %d", ExtrudoFacade::exactVolume(*f.find(res)),
+                      BRepCheck_Analyzer(*f.find(res)).IsValid() ? 1 : 0, facesOf(res).Extent());
+        } else if (!f.geometry_.empty()) {
+          std::printf(" [%g, %g]", f.geometry_[0], f.geometry_.size() > 1 ? f.geometry_[1] : -1);
+        }
+        std::printf("\n");
+      }
+    }
+  }
+  return 0;
+}
+
 int main(int argc, char** argv) {
+  if (argc >= 2 && std::strcmp(argv[1], "corners") == 0) return corners();
   if (argc >= 2 && std::strcmp(argv[1], "slanted") == 0) return slanted();
   if (argc >= 5 && std::strcmp(argv[1], "leaks") == 0) checkStep = std::atoi(argv[4]);
   if (argc >= 4 && std::strcmp(argv[1], "leaks") == 0) return leaks(argv[2], std::atoi(argv[3]));

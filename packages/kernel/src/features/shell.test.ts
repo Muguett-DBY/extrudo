@@ -507,6 +507,56 @@ describe('shell', { timeout: 120_000 }, () => {
     expect(measure('B:0').volume).toBeCloseTo(4859.724, 1);
   });
 
+  it('two removed faces that share an edge next to a fillet open through a plug (P4-12 case 3)', async () => {
+    // A 20 mm cube with its top-front edge filleted 3 mm. Removing the top and
+    // the back leaves a bar where the two openings meet at their shared edge;
+    // the corner plug (the faces' prisms in common with the cavity moved out
+    // along the sum of the normals) removes it.
+    const b = new SketchBuilder();
+    const l = rect(b, 0, 0, 20, 20);
+    const features = [sketch('SB', b.sketch), extrude('B', 'SB', b.sketch, '20 mm')];
+    const first = ok(await run(testDocument(features)));
+    const top = 'extrude:B:cap:end';
+    const side = (line: string) => `extrude:B:side:${line}`;
+    const front = edgeName([top, side(l.bottom)]);
+    const fillet: Feature = {
+      ...testFeature('R', 'fillet'),
+      inputs: filletInputs([{ edges: [refTo(first, 'edge', front)], radius: '3 mm' }]),
+    };
+    const filleted = ok(await run(testDocument([...features, fillet])));
+    const topRef = refTo(filleted, 'face', top);
+    const backRef = refTo(filleted, 'face', side(l.top));
+    const result = ok(
+      await runWithShapes(
+        testDocument([...features, fillet, shell('S', [topRef, backRef], '1 mm')]),
+      ),
+    );
+    const m = measure('B:0');
+    expect(m.valid).toBe(true);
+    // The hollowed body (2144.823) less the two slabs (288 + 324) less the
+    // 1×1×18 bar the corner plug removes.
+    expect(m.volume).toBeCloseTo(1514.823, 1);
+    const names = faceNames(result);
+    expect(names).not.toContain(top);
+    expect(names).not.toContain(side(l.top));
+    expect(names.filter((n) => n.startsWith(`shell:S:rim:(${top})`)).length).toBeGreaterThan(0);
+    expect(
+      names.filter((n) => n.startsWith(`shell:S:rim:(${side(l.top)})`)).length,
+    ).toBeGreaterThan(0);
+    // Outwards: the corner bar is removed the same way.
+    ok(
+      await runWithShapes(
+        testDocument([
+          ...features,
+          fillet,
+          shell('S', [topRef, backRef], '1 mm', { direction: 'outside' }),
+        ]),
+      ),
+    );
+    expect(measure('B:0').valid).toBe(true);
+    expect(measure('B:0').volume).toBeCloseTo(1821.047, 1);
+  });
+
   it('a body OCCT can’t offset says so in plain words', async () => {
     // Removing a cylinder's whole side leaves nothing to hold the walls.
     const b = new SketchBuilder();

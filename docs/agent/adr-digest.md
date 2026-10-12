@@ -711,11 +711,14 @@ the faces plugs can't open stay refused (status 6). Native harness:
 to "flat" (a crease at any angle): the plug's lateral boundary is the removed
 face's own outline, and the moved cavity only has to land on the neighbour's
 planar inner surface, so an **opening past a slanted neighbour** next to a
-fillet computes (case 2, the harness's `run.sh slanted` corpus). An opening
-through a **curved** face, **two removed faces that share an edge** (their
-bar is left behind; a corner plug needs the cavity shifted by the sum of the
-normals, which doesn't fit `recordPlugged`'s one-plug-per-face history) and
-**round joins with wall sets** stay refused (status 6).
+fillet computes (case 2, the harness's `run.sh slanted` corpus). It also adds
+a **corner plug** where two removed faces share an edge (or three share a
+vertex): their prisms in common, in common with the cavity moved out along
+the **sum of their normals**, so the bar between the openings is removed
+(case 3, `run.sh corners`); the plugs are **fused** into one tool before the
+cut (a compound cut drops the shared region) and `recordPlugged` carries the
+corner plugs' faces into the first removed face's rim. An opening through a
+**curved** face and **round joins with wall sets** stay refused (status 6).
 ADR-0048 (P3-10) added the 3D-print aids (`apps/web/src/print/`, no
 facade or schema-version change): **Place on Bed is its own feature
 `placeOnBed`** (`core/src/place-on-bed.ts`, kernel `features/place-on-bed.ts`,

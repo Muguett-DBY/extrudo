@@ -10,6 +10,7 @@ facade with `#define private public`, so it calls the private helpers too.
     bash spikes/p4-12-shell-faces/run.sh probe       # the table, then round against sharp joins and the plug steps
     bash spikes/p4-12-shell-faces/run.sh plug        # the first plug prototype (the prism alone; see the ADR)
     bash spikes/p4-12-shell-faces/run.sh slanted     # second amendment: openings past a slanted neighbour (case 2)
+    bash spikes/p4-12-shell-faces/run.sh corners     # second amendment: two removed faces that share an edge (case 3)
     bash spikes/p4-12-shell-faces/run.sh faces round3    # a body's faces, numbered, with `tangent=1` where one runs into a neighbour
     bash spikes/p4-12-shell-faces/run.sh trap round3 10 2 raw   # one raw MakeThickSolidByJoin, no refusal
     bash spikes/p4-12-shell-faces/run.sh useq round3:10:2 …     # unguarded shells (build, check, bisection) in one process
@@ -29,7 +30,8 @@ builds `slopeBody(c, r)`: a 20 mm cube whose top-back edge is filleted `r`
 and whose top-front edge is chamfered `c`, the removed face is its top (a
 tangent fillet on one edge, a slanted plane on another); it shells the top
 inside and outside over a grid of `c`, `r` and thicknesses (the second
-amendment's case 2).
+amendment's case 2). `corners` removes two faces that share an edge (the top
+and the back of `one3`, `vert3` and `round3`) with the corner plug (case 3).
 
 Needs Docker and the pinned image (`OCCT_IMAGE`, default `74e2918318e4`).
 The results are in `docs/adr/0046-shell.md`'s amendment.

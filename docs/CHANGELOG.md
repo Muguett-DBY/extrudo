@@ -4,7 +4,7 @@ One line per completed roadmap task, newest first. Dates are absolute.
 
 ## Unreleased
 
-- 2026-10-12 · **Shell: an opening past a slanted neighbour** (ADR-0046's second amendment, P4-12): a flat face whose other edge meets a slanted plane next to a fillet now opens too, where before only a square edge did, so a chamfered neighbour no longer refuses the shell; the plug's lateral boundary is the removed face's own outline and the moved cavity lands on the neighbour's planar inner surface. An opening through a curved face, two removed faces that share an edge, and round joins with wall sets stay refused (recorded as Rejected in the ADR with the evidence).
+- 2026-10-12 · **Shell: openings past a slanted neighbour and between touching removed faces** (ADR-0046's second amendment, P4-12): a flat face whose other edge meets a slanted plane next to a fillet now opens too (before only a square edge did), and two removed faces that share an edge no longer leave the bar between them (a corner plug, the faces' prisms in common with the cavity moved out along the sum of their normals, cut out with the fused plugs). An opening through a curved face and round joins with wall sets stay refused (recorded as Rejected in the ADR with the evidence).
 
 ## v0.6.1 (2026-10-12)
 
