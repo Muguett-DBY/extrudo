@@ -2,7 +2,7 @@
 
 One line per completed roadmap task, newest first. Dates are absolute.
 
-## Next
+## v0.6.0 (2026-10-12)
 
 - 2026-10-12 · **UI review 3, slice I (2 of 2): a tooltip clip for every Modify tile** (R3-16; ADR-0052's amendment): the twelve Modify tiles (Press Pull, Fillet, Chamfer, Shell, Offset Face, Draft, Thread, Move, Mirror, Combine, Split Body, Scale) get clips and Line, Rectangle, Circle and Dimension are re-recorded, so all 37 clips are in the current UI and framed for the tooltip's 236 px; clips are encoded at 200 kbit/s, which looks the same at that size and keeps all of them under 2 MB; `e2e/onboarding.spec.ts` checks that the Dimension clip loads and plays in a sketch in the light theme.
 - 2026-10-12 · **UI review 3, slice I (1 of 2): a tooltip clip for every Solid tile** (R3-16; ADR-0052's amendment): every tile of the Solid tab has a clip, the 16 new ones (Sweep, Loft, Coil, the four primitives, Emboss, Rib, Circular and Path Pattern, Script, Record and Stop Macro, New Component, Joint) and the five it had re-recorded; each is framed round the action so the pick, the handle and the geometry read at the tooltip's 236 px, starts from a small design in `fixtures/demos/` (written through `@extrudo/api` and recomputed by `packages/cli/src/demo-designs.test.ts`), and stays under 150 kB; `demos.test.ts` checks that every tile of the Solid tab has one.
