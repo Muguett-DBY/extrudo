@@ -2,6 +2,10 @@
 
 One line per completed roadmap task, newest first. Dates are absolute.
 
+## Unreleased
+
+- 2026-10-12 · **STEP part names as body names** (ADR-0034's second amendment): an imported STEP file's part names now name the bodies they make, the way its colours already colour them — the facade's new `readStepNames` reads each solid's own label, else its part's, else its assembly instance's, the `import` feature reports them in `ImportReport.names` (empty and generic names dropped, repeats numbered " (2)"), and the app gives a body its file name once, when it first names it, so a body you rename keeps that name on recompute; the guide has a new **Bringing a design over as STEP** section.
+
 ## v0.6.1 (2026-10-12)
 
 - 2026-10-12 · **Fillets and chamfers built from the chains that work** (ADR-0038's and ADR-0043's amendments, ADR-0083's): with `skipLostEdges` on (the .f3d import sets it on every round), a round one of whose tangent chains is too large now keeps the edges that build and warns "2 of 9 edges left out of the fillet: Radius 3 mm is too large for edge 12 (max ≈ 1.2 mm). Use Fix References…" instead of failing whole; it leaves out at most a third of the edges, and without the input or past that bound it fails as before. On the 250-file corpus 127 designs match (was 123), with no design's verdict worse.

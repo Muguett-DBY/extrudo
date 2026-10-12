@@ -64,6 +64,36 @@ These are in the Home tab's **Import** group.
 
 The imported file is stored inside the design, so exporting the design carries it along.
 
+## Bringing a design over as STEP
+
+STEP is the common language between CAD tools. If your part lives in another program, export it
+from there as STEP — **AP214** or **AP242** both work — and open it with **Import Model**, or
+drop it on the home screen's **Import…** card. Extrudo reads the exact surfaces, not a mesh of
+triangles, so the part is a real solid you can keep working on.
+
+What comes across:
+
+- **The solids themselves**, one body each, at the size and in the place they had.
+- **Colours**, as each body's appearance in the browser.
+- **Part names**, as each body's name. If two parts share a name, the second is called
+  "Name (2)" and so on; a name that is only a placeholder is ignored, and the body keeps its
+  default "Body n".
+
+What does not come across:
+
+- **No history and no timeline.** The file is the finished shape: there are no sketches, no
+  parameters and no feature steps to edit. A body that arrives this way has one step, the
+  Import that made it.
+- **No assemblies as assemblies.** Each part of an assembly becomes a body of its own; the
+  assembly structure (which part sits in which group) is not rebuilt. Use components to group
+  the bodies yourself if you want them.
+
+That is still plenty: an imported body behaves like any other. Move it, Combine it with another,
+round its edges with Fillet or Chamfer, hollow it with Shell, or push and pull a face with
+Press-Pull. If you need the history too, a [desktop app](./desktop.md) or a `.f3d` file — which
+Extrudo reads directly, rebuilding its parameters, sketches and features — is the better starting
+point; **Import Model** takes `.f3d` as well.
+
 ## Version history
 
 A version is a named snapshot kept inside the design. Press `Ctrl+S`, or open **Home ›

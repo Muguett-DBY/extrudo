@@ -323,3 +323,77 @@ revisited here; STEP import itself is ADR-0066 §2.
   reported instead.
 - **Repainting on every recompute** from the report: it would undo the user's
   own colour after any change to the import.
+
+## Amendment (2026-10-12): STEP part names as body names
+
+The roadmap's "Importing `.f3d` designs" decision lists "STEP part names as
+body names" as a follow-up to P4-12: the names a STEP file carries now become
+the imported bodies' names, exactly as its colours became their appearance.
+
+### Decisions
+
+1. **Reading.** A new facade call, `readStepNames(text)`, reads the same
+   text as `readStep` through XDE (`STEPCAFControl_Reader`, name mode on,
+   every other mode off, a fresh `TDocStd_Document` per call whose attributes
+   are forgotten before the handle goes). Per solid, **in the order
+   `readStep`'s shape lists them** (the same walk as `readStepColors`), it
+   gives the name of the solid's own sub-shape label (`TDataStd_Name`), else
+   its part's (`PRODUCT`), else the nearest assembly instance's
+   (`NEXT_ASSEMBLY_USAGE_OCCURRENCE`, read by XDE as the reference label's
+   name), as UTF-8, empty for none; a name is never an OCCT type. It is read
+   through `readNamesPtr/Size` as the names joined by `'\0'`, one entry per
+   solid, so `Kernel.readStepNames` splits them back. **Names sit beside
+   colours, not inside them**: `readStepColors` is unchanged, so a file with
+   colours keeps computing as before, and the two reads are separate because
+   the roadmap asked for names only when the file has any `PRODUCT(` name.
+2. **The import feature** calls `readStepNames` only when the text names a
+   product at all (`PRODUCT('…`, a non-empty first argument), so a file
+   without names is read once, as before, and computes exactly as before. The
+   counts of the two readers are matched to `solids(read)` and, on a
+   mismatch, the names are dropped rather than put on the wrong bodies. A
+   body's name follows **its solid, not its position** (its first
+   `import:<id>:face:<n>` names the solid; `Kernel.locate` maps the file's
+   faces to solids). `ImportReport` gains **`names: Record<BodyId, string>`**,
+   empty when the file names none; a name is trimmed and an empty one, a
+   generic one (`SOLID`, `PART`, `Body`, OCCT's `Open CASCADE STEP
+   translator…`) or an all-digits one is left out, and two bodies with the
+   same name get `" (2)"`, `" (3)"`…. The kernel stores nothing.
+3. **The app applies them once**, as it applies colours: `followBodyNames`,
+   when it first names a body (the same amend into the latest undo step as
+   the name), takes the report's name in place of the default "Body n",
+   through `nameBodies`/`requireName`. A body with stored metadata — already
+   named by a person, or simply shown before — keeps what the document says,
+   so a recompute, a re-import or an Up change never renames it. No schema or
+   file-format change.
+4. **The fixture** `fixtures/imports/named-parts.step` is our writer's own
+   assembly (a group "Widget" over three parts) with two parts sharing the
+   name "Lid" and the third part unnamed, named only by its assembly
+   instance ("Base plate"); the kernel test reads two "Lid" bodies and a
+   "Base plate", so the facade read, the body mapping, the repeated-name
+   numbering and the generic-name filter are all exercised. A file whose
+   `PRODUCT` names are all empty is still read once and reports nothing.
+5. **`docs/guide/files.md`** gains "Bringing a design over as STEP", the
+   guide page the same roadmap decision asked for.
+
+### Results
+
+- WASM (`occt-fe317c16457f`): the XDE name read and its string buffer cost
+  almost nothing beyond the XCAF code P4-12 already linked — the published
+  release tarball is 6,766,990 bytes against the previous build's 6,765,325
+  (+1,665 bytes compressed), and the new `extrudo_occt_single.wasm` is
+  20,641,615 bytes raw.
+- A file with a `PRODUCT` name is read twice (the shape, then the names) or
+  three times when it also has colours; a file with neither is still read
+  once.
+
+### Rejected
+
+- **Names in `readStepColors`** (one XDE read for both): the colours reader
+  would then run for a names-only file and `StepColors` would grow a field
+  every caller ignores; the roadmap's "only when the file names a product"
+  gate reads better on a call of its own.
+- **A name's precedence the other way** (instance before part): an instance
+  name is often a placement ("Base plate:1"), which is not what a body is
+  called; the part's own name is.
+- **Keeping a generic name** (`SOLID`, `PART`): every imported body would be
+  named alike, which is worse than the default "Body n".
