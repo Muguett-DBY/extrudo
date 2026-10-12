@@ -217,3 +217,12 @@ The owner's UI review 3 (`docs/plans/ui-review-2026-10-11.md`):
   only when the chips themselves don't fit. `e2e/timeline.spec.ts` drags the marker past the
   last of the PCB enclosure's nine chips at 1440 × 900 and checks `scrollWidth <=
   clientWidth` during and after the drag.
+
+## Amendment 2026-10-11: lost references on a warning
+
+A fillet or chamfer with `skipLostEdges` (ADR-0038's and ADR-0043's
+amendments) is built without the edges it lost and ends with a **warning**,
+not an error. The engine already attaches `FeatureStatus.refs` to any status
+that isn't `ok`, so its lost edges are listed there and Fix References and
+the ghosts of lost geometry work on the warning as they do on an error; this
+amendment only records that a warning may carry `lost` references too.

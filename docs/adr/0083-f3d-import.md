@@ -569,3 +569,49 @@ notice (`importNotices`) shows the reasons only; `corpus.test.ts` writes every s
 feature's reason and detail to `F3D_REPORT=<file>` for bug reports. `reasons.test.ts` covers
 the wording.
 
+## Amendment, 2026-10-11 (lost edges no longer take the whole round down)
+
+Some edges a fillet or chamfer of the file names can't be found in Extrudo's
+body: they lie on an earlier round the kernel couldn't build, or on a face of
+a feature that wasn't imported. One such edge used to fail the whole round
+(ADR-0033), and the rounds after it that needed its faces with it. The
+importer now sets **`skipLostEdges: true`** on every fillet and chamfer it
+writes (ADR-0038's and ADR-0043's amendments of this date): the round is
+built from the edges that are found and warns how many it left out, listing
+them for Fix References; a round none of whose edges is found still fails.
+Features made in the app keep failing loudly, since they don't set it.
+
+Corpus (250 files, on top of the fillet and chamfer edges amendment above;
+baseline the same code without the input): match 122 → 123, match despite
+skips 8, partial 48, mismatch 57 → 56, no bodies 8, no reference 7, no
+errors. Of the fillets and chamfers, 253 → 236 fail, and those that fail on a
+lost edge 52 → 17 (32 → 11 files; the 17 have every edge lost). 18 rounds now
+build (each with a warning: some leave their lost edges out, others find all
+their edges now because an earlier round they stand on builds), 18 get past
+the lost edge to OCCT and fail there ("too large", "can't be chamfered with any
+distance", an edge that "isn't between two faces"), and one round fails that
+built before: a chamfer an earlier fillet, now built on 12 of its 18 edges,
+leaves no room. New match: a shelf whose chamfer was held by one lost edge.
+Eight designs come closer; no verdict got worse, and six volumes moved away
+from the reference by 0.03 to 0.31 percentage points where a round now builds
+on part of its edges while an earlier round it continues still fails (the
+edges on that round are the ones left out). Before the edges amendment the
+same change took 77 lost-edge failures to 17 and three designs to a match: the
+edges amendment's weak-edge rule (next paragraph) already keeps most of the edges that
+would be lost out of the file's rounds.
+
+**With the weak-edge rule.** The edges amendment leaves out an edge named only
+by a guessed fillet or chamfer face name, or by one face, unless its shape is a
+sure line or circle, and drops a weak edge that only continues the tangent
+chain of an edge held by name, both because one lost edge failed the round.
+With `skipLostEdges` a lost edge only drops out with a warning, so that reason
+is gone for imported rounds; what remains is that a weak edge can resolve to
+the *wrong* edge by fingerprint, which a skip doesn't catch (eight rounds
+this change lets past their lost edges now fail on "Edge N can't be filleted:
+it isn't between two faces", an edge that resolved but isn't one the kernel
+can round). Relaxing the
+rule is a measurement for the edges work, not a change made here.
+
+Next: measure the weak-edge rule relaxed for imported rounds (keep guessed
+and chain-continuing edges, let `skipLostEdges` drop the lost ones), against
+the wrong picks it lets in.
