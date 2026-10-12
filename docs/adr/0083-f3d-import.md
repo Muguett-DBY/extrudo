@@ -629,3 +629,13 @@ Corpus (250 files): no bodies 8 → 7, mismatch 56 → 57, every other verdict u
 do not move. Both files that carry more than one segment now read their real design — one
 imports bodies it had none of, the other reads its real design, which is direct-modelled and
 so not built by the feature replay.
+
+## Amendment 2026-10-12 (the imported rounds build what they can)
+
+The import sets `skipLostEdges` on every fillet and chamfer it writes
+(ADR-0038's and ADR-0043's amendments of 2026-10-11). Those rounds now also
+build the chains that work: a round whose one tangent chain is too large keeps
+the rest and warns how many edges were left out and why, instead of failing
+whole (at most a third of the edges; a larger drop fails as before). On the
+250-file corpus this moved four designs from *mismatch* to *match* — match 123
+→ 127 — with no design's verdict worse and no body lost.
