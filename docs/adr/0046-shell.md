@@ -378,3 +378,48 @@ removed faces are refused before OCCT runs. A shell with wall sets takes 20 to
 - Round joins with wall sets: a fillet of the outside corners after the shell
   does it today.
 - A handle per wall set in the view.
+
+## Amendment 2 (P4-12, 2026-10-12): the remaining opening cases
+
+The first amendment's "Open" list: openings through a **curved** face or past
+a **slanted** neighbour, **two removed faces** next to a fillet that share an
+edge, and **round joins with wall sets**. Same method as the first amendment:
+prototype natively in `spikes/p4-12-shell-faces/` (a new `slanted` command),
+keep only what passes the existing result checks on a corpus of variations,
+and record what can't be made robust as **Rejected** with the evidence.
+
+### Design
+
+The plug route (amendment 1) is the base: hollow the body closed, cut each
+removed face's **plug** — the face's prism, from half a wall outside it to
+half a wall past its inner side, in common with the cavity moved out along
+the face's normal by two walls — out of the hollow. The generalization has
+three axes:
+
+1. **The neighbour's slope (case 2).** `pluggable` today needs each of the
+   removed face's other edges to meet a neighbour *square* (or smoothly).
+   That condition is not the one the plug actually needs. The plug is the
+   removed face's outline swept along its normal; its lateral boundary at a
+   neighbour is the removed face's own boundary, and the moved cavity only
+   has to land on the neighbour's *inner* surface. A planar neighbour —
+   square or **slanted** — has a planar inner surface the moved cavity lands
+   on; only a *curved* non-tangent neighbour has none. So the rule becomes:
+   a neighbour is accepted when it runs smoothly into the face (tangent) or
+   is **flat** (a crease at any angle); a curved crease stays refused.
+2. **Two removed faces that share an edge (case 3).** Each plug alone is
+   inset from the shared outer edge (the moved cavity trims to the
+   neighbour's inner surface, and the other removed face is not a neighbour),
+   so the bar between the two openings is left behind. The fix is to add, at
+   each edge (or vertex) shared by removed faces, the plug of the corner:
+   the common of the faces' prisms in common with the cavity moved out along
+   the **sum of their normals**. Whether that composes with `recordPlugged`'s
+   one-plug-per-face history is the open question.
+3. **A curved removed face (case 1).** The primal along a constant direction
+   is a prism; a curved face needs its own **offset solid** (the face's
+   normal field swept by the wall) instead of a prism, and the moved cavity
+   must land on the neighbours' inner surfaces. Tried only if 2 lands.
+
+Round joins with wall sets (case 4) are unchanged from amendment 1's
+rejection: `GeomAbs_Arc` spreads a face's offset over every diverging edge,
+so a set's thickness leaks into its neighbours. Attempted only if the time
+budget allows; a fillet of the outside corners after the shell does it today.
