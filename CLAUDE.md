@@ -1934,7 +1934,8 @@ and keeps `userData/recent.json` — P6-02 adds `slicer:list`/`slicer:open` (`ma
 main builds the Open Recent submenu from its own `list()`, never the
 renderer's. A project opened from a path (Open…, the association, Open Recent)
 or Save-As'd is linked as an **external file** (`LinkedFile.external`, the
-index only) and written back through paths main issued this session
+index only) and written back through paths main issued (kept across restarts in
+`userData/external-paths.json`, seeded from `recent.json`; ADR-0075's 2026-10-12 amendment)
 (`file:write-path`/`file:stat-path`/`file:read-path`, `apps/desktop/src/main/externalFiles.ts`);
 `apps/desktop/electron-builder.yml`
 already carries the `.extrudo` association as data for the packaging slice. Unit

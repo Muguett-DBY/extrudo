@@ -2,6 +2,10 @@
 
 One line per completed roadmap task, newest first. Dates are absolute.
 
+## Next
+
+- 2026-10-12 · **Desktop: a design opened from a file saves back to it after a restart** (ADR-0075's amendment): main keeps the paths it handed out in `userData/external-paths.json` and takes in its recent list at start, so a project reopened from the home screen after a restart or an update no longer has every write-back refused with "Extrudo was not asked to open that file."; a write-back error that repeats on every save is said once.
+
 ## v0.6.0 (2026-10-12)
 
 - 2026-10-12 · **UI review 3, slice I (2 of 2): a tooltip clip for every Modify tile** (R3-16; ADR-0052's amendment): the twelve Modify tiles (Press Pull, Fillet, Chamfer, Shell, Offset Face, Draft, Thread, Move, Mirror, Combine, Split Body, Scale) get clips and Line, Rectangle, Circle and Dimension are re-recorded, so all 37 clips are in the current UI and framed for the tooltip's 236 px; clips are encoded at 200 kbit/s, which looks the same at that size and keeps all of them under 2 MB; `e2e/onboarding.spec.ts` checks that the Dimension clip loads and plays in a sketch in the light theme.
