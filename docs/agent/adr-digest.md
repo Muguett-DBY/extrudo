@@ -413,7 +413,7 @@ for anything an evaluator can't find**, so Fix References can offer it);
 the marker is a slider with drag and keys, chips drag to reorder, menus
 have Roll Back to Here, Move to End, Redefine Plane, Fix References
 (`dialog.edit(id, { fix })` or Redefine Plane for a sketch) and Keep
-Closest Match. ADR-0035 (P2-13) added measuring: `KernelApi.inspect(targets)`
+Closest Match. **Its 2026-10-11 amendment** records that a reference lost only on a warning (a fillet or chamfer built without the edges its `skipLostEdges` dropped, ADR-0038's and ADR-0043's amendments) still goes in `FeatureStatus.refs`, so Fix References and the ghosts of lost geometry work on it as on an error. ADR-0035 (P2-13) added measuring: `KernelApi.inspect(targets)`
 (topology items of the last finished recompute, like export) returns an
 `Inspection` (`packages/kernel/src/inspect.ts`: per item exact volume,
 area, length, radii, normal/axis, centre, tight box; for two, the
@@ -525,7 +525,7 @@ closed, broken or mixed-direction chain gives **no** arrows; swapped, the
 them, since its keydown listener runs before the shell's and prevented the
 default — which is why B8's fourth fillet edge (picked from the back view)
 found nothing. A key with a modifier is a command, so the box takes plain
-typing only (`e2e/fillet.spec.ts` covers Shift+4).
+typing only (`e2e/fillet.spec.ts` covers Shift+4). **Amendments of 2026-10-11 and 2026-10-12 added `skipLostEdges`** (the chamfer takes the same input, ADR-0043's amendments): an optional bool input; with it true the evaluator resolves the edges and builds from the ones still found, and a `too-large`/`unfilletable` diagnosis drops at most a third of the edges (the chains that build), warning which were left out instead of failing the whole feature; the `.f3d` import sets it on every round it writes (`docs/file-format.md` §6.9).
 ADR-0041 (P3-16) added the notification history: the toasts'
 store (`design-system/notifications.ts`, vanilla Zustand, `useToasts()`
 returns it as `notifications`) records every `push` for the session
@@ -623,7 +623,7 @@ ADR-0043's second and fourth amendments), and a distance-and-angle set's
 **Angle** an arc from the reference face's direction towards the other face's
 about the edge (`cross(first, second)` signed so that turn is positive; its
 head sits on the chamfer face; none where the directions can't be read;
-ADR-0043's third amendment)). The Chamfer tile has no default key.
+ADR-0043's third amendment)). The Chamfer tile has no default key. **It also takes the fillet's `skipLostEdges`** (ADR-0038's amendments of 2026-10-11 and 2026-10-12; `docs/file-format.md` §6.9), on the same terms: edges it can still find build, up to a third may be left out with a warning, and the `.f3d` import sets it on every chamfer it writes.
 ADR-0044 (P3-06) added three body features: `combine` (target body + tool
 bodies, join/cut/intersect through `namedBoolean`, tools used up unless
 `keepTools`, strict messages instead of silent no-ops; `core/src/combine.ts`,
@@ -2246,5 +2246,4 @@ design of it (no separate tile, 2026-10-11). The home screen's one **Import…**
 new design that opens with the Import dialog on it (`requestModelImport`). No sample files in the repo: `F3D_SAMPLES=<dir>` runs
 `corpus.test.ts` (`F3D_REPORT=<file>` writes what each file left out, with the technical
 detail). A skipped feature's `reason` is plain words for people (at most `MAX_REASON`, 120
-characters, never a list in braces: `skippedFeature`, R3-18) and `detail` the technical text. Gaps (face profiles, start offsets, holes, revolves,
-patterns, components, sketch dimensions) are in the ADR.
+characters, never a list in braces: `skippedFeature`, R3-18) and `detail` the technical text. **Amendments of 2026-10-11 and 2026-10-12** closed most of the original gaps: components (each a component of the design, ADR-0081), mirrors, rectangular and path patterns, sweeps, splits, modeled threads, naming a copied face, sketch constraints and dimensions, elliptical arcs as exact conics, fillet and chamfer edges read where the file has them, `skipLostEdges` on every round and chamfer (ADR-0038's and ADR-0043's amendments) and reading the segment under the `[Active]` folder (`activeDesignSegment` in `model.ts`). What still does not come across is in the ADR's Consequences (for example faces given as an extrude's profile that cannot be named).

@@ -26,7 +26,7 @@ inspired by that workflow and shares no code or artwork with any such product.
 
 ![A wall bracket in the 3D view, with its timeline and parameters](docs/images/bracket.png)
 
-> **Status:** version 0.4 is the stable app. The core modeling workflow is
+> **Status:** version 0.6 is the stable app. The core modeling workflow is
 > there and tested, but expect rough edges. Things not built yet are listed
 > in [`docs/03-roadmap.md`](docs/03-roadmap.md). Please
 > [report what breaks](https://github.com/zoltanf/extrudo/issues/new/choose).
@@ -151,7 +151,8 @@ stored.
 
 | Path | What |
 |---|---|
-| `apps/web` | The web app (React, Vite, service worker). A desktop build will wrap it later. |
+| `apps/web` | The web app (React, Vite, service worker); the desktop app wraps it. |
+| `apps/desktop` | The Electron desktop app: the same UI in a native window, with a native-file store and menus ([docs](docs/desktop.md)) |
 | `packages/core` | Document model, parameters, expressions, undo. No DOM, no WASM. |
 | `packages/sketch` | Sketch model, constraint solver adapter, profiles, SVG and DXF export |
 | `packages/kernel` | Geometry kernel (OpenCascade WASM) in a Web Worker, recompute engine |
