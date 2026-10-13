@@ -26,7 +26,7 @@ inspired by that workflow and shares no code or artwork with any such product.
 
 ![A wall bracket in the 3D view, with its timeline and parameters](docs/images/bracket.png)
 
-> **Status:** version 0.6 is the stable app. The core modeling workflow is
+> **Status:** the stable app is the [latest release](https://github.com/zoltanf/extrudo/releases/latest). The core modeling workflow is
 > there and tested, but expect rough edges. Things not built yet are listed
 > in [`docs/03-roadmap.md`](docs/03-roadmap.md). Please
 > [report what breaks](https://github.com/zoltanf/extrudo/issues/new/choose).
