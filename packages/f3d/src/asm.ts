@@ -30,6 +30,8 @@ export type AsmValue =
 export interface AsmRecord {
   /** `face`, `plane-surface`, `cone-surface`, `ATTRIB_CUSTOM-attrib`, … */
   type: string;
+  /** The record's own class, before its base classes (`intcurve-curve` for a curve whose last name is a base like `nullbs`). */
+  derived?: string;
   values: AsmValue[];
 }
 
@@ -67,6 +69,7 @@ export function readAsm(bytes: Uint8Array): AsmRecord[] {
   let values: AsmValue[] = [];
   let names: string[] = [];
   let type = '';
+  let derived = '';
   const str = (len: number, at: number) => latin1.decode(bytes.subarray(at, at + len));
   while (p < bytes.length) {
     const t = bytes[p++] as number;
@@ -80,15 +83,19 @@ export function readAsm(bytes: Uint8Array): AsmRecord[] {
         p += 1 + n;
         if (t === 0x0d) {
           type = names.join('-');
+          // The first class name is the record's own type; later names are its
+          // base classes (`intcurve`, `curve`, `spring_int_cur`, … `nullbs`).
+          if (derived === '') derived = type;
           names = [];
         }
         break;
       }
       case 0x11:
-        records.push({ type, values });
+        records.push({ type, derived: derived || type, values });
         if (type === 'End-of-ASM-data') return records;
         values = [];
         type = '';
+        derived = '';
         break;
       case 0x04:
       case 0x15:
@@ -201,6 +208,29 @@ export type AsmSurface =
       /** How much the radius grows per cm along `axis` (tan of the half-angle; 0: a cylinder). */
       slope: number;
     }
+  | {
+      kind: 'sphere';
+      center: [number, number, number];
+      /** The pole axis (the sphere's u/v origin is arbitrary around it). */
+      axis: [number, number, number];
+      radius: number;
+      /** The file wrote a negative radius: the surface normal points inward. */
+      inward: boolean;
+    }
+  | {
+      kind: 'torus';
+      center: [number, number, number];
+      /** The torus axis (the placement's Z). */
+      axis: [number, number, number];
+      /** The direction of the tube centre (the placement's X). */
+      ref: [number, number, number];
+      /** Centre-to-tube-centre radius (as the file writes it, so it can be negative). */
+      major: number;
+      /** Tube radius, made positive. */
+      minor: number;
+      /** The file wrote a negative minor radius: the surface normal points inward. */
+      inward: boolean;
+    }
   | { kind: 'other'; type: string };
 
 /** An edge's curve, in model space (cm). */
@@ -261,6 +291,29 @@ function surfaceOf(r: AsmRecord | undefined): AsmSurface {
       slope: cylinder || Math.abs(cosine) < 1e-12 ? 0 : sine / cosine,
     };
   }
+  // sphere: centre, radius, then the pole axis and the reference direction.
+  if (r.type.endsWith('sphere-surface') && vs[0] && ds[0] !== undefined)
+    return {
+      kind: 'sphere',
+      center: vs[0],
+      axis: vs[1] ?? [0, 0, 1],
+      radius: Math.abs(ds[0]),
+      // A negative radius is the file's way of pointing the normal inward.
+      inward: ds[0] < 0,
+    };
+  // torus: centre, axis, major radius, minor radius, then the tube direction.
+  if (r.type.endsWith('torus-surface') && vs[0] && vs[1] && ds[0] !== undefined)
+    return {
+      kind: 'torus',
+      center: vs[0],
+      axis: vs[1],
+      ref: vs[2] ?? [1, 0, 0],
+      major: ds[0],
+      // A negative minor radius points the tube's normal inward; STEP wants the
+      // radius positive, so the sign is carried separately.
+      minor: Math.abs(ds[1] ?? 0),
+      inward: (ds[1] ?? 0) < 0,
+    };
   return { kind: 'other', type: r.type };
 }
 
@@ -401,4 +454,4 @@ export function asmFaces(records: AsmRecord[]): AsmFace[] {
   return faces;
 }
 
-export { vec as asmVec };
+export { curveOf as asmCurveOf, surfaceOf as asmSurfaceOf, vec as asmVec };

@@ -254,6 +254,14 @@ entity count, flags; three strings and three doubles; then records of tagged
 values (`0x04` int, `0x06` double, `0x07` string, `0x0C` pointer, `0x0D` class
 name, `0x0E` base class, `0x11` end of record, `0x13`/`0x14` three doubles…).
 
+A record writes its own class and then its base classes, each with a `0x0D`
+tag: a straight curve is `intcurve`, `curve` (joined `intcurve-curve`), a
+procedural one continues `spring_int_cur`, `nurbs`, `spline`, `ref`, `cone`,
+`nubs`, `nullbs`. The first name is the record's own type; the rest are its
+ancestors, so a reader that keeps only the last name reads `nullbs` where the
+type is `intcurve-curve`. (`asm.ts` keeps the last in `type`, what the rest of
+this reader was written against, and the first in `derived`.)
+
 A `face` record's first pointer is its attribute chain and its last its
 surface. Faces are tagged with `ATTRIB_CUSTOM`
 `generic_tag_attrib_def`: a group count, then per group a selector, a token
@@ -302,6 +310,40 @@ pointer, a history slot, a spare pointer, then):
 normal, the major axis (as long as the major radius) and the minor-to-major
 ratio (1: a circle). Subtypes (`tedge-edge`, `tvertex-vertex`) end in the
 base type's name.
+
+A `sphere-surface` is a centre, a radius, then the pole axis and a reference
+direction (both unit; the sphere is symmetric about the axis). A
+`torus-surface` is a centre, the axis, the major (centre-to-tube-centre) radius,
+the minor (tube) radius and the tube's reference direction. A negative radius —
+the sphere's, or the torus's minor one — is the file's way of pointing that
+surface's normal inward; a negative torus major radius is not a torus a kernel
+can rebuild.
+
+An `edge` record's pointers and values are: its two vertices, each with its
+parameter on the curve, a coedge, the curve, then a sense flag and a convexity
+string. The sense is true when the edge runs against its curve (the edge's
+start-to-end direction is opposite the curve's own parameter direction), so
+STEP's `EDGE_CURVE` same-sense is its opposite; for a straight curve the two
+vertex positions say the same thing directly. A full-circle edge has one vertex
+and parameters that span 2π; STEP is written with it split at its antipode into
+two half edges.
+
+A `face` record's two trailing flags are its forward sense (true when the face's
+normal runs with its surface's) and a second flag the file writes false
+throughout. STEP's `ADVANCED_FACE` same-sense is the opposite of *reversed*, and
+the file winds a loop the other way round from STEP's surface-normal winding, so
+a not-reversed face's loop is written reversed with same-sense true and a
+reversed face keeps the file's loop with same-sense false.
+
+A stream is one or more solids, grouped `body` → `lump` → `shell` → face chain.
+Each `lump` names its shell and its body, and the shell's face chain is that
+lump's faces; the stream's earlier shells (history) carry no faces. A design
+body reaches its stream through its body container (`CD57BC48…`, the record in
+the design segment the body's `D3937028…` names): the container lists its
+component's bodies in order and points at a record (`74CA4562…` or
+`40DCC3F4…`) whose payload is the stream's `BREP.<uuid>.smb[h]` name. So body
+*i* of the container is the stream's *i*-th `lump`. The container lists the
+visible bodies; a stream can hold a hidden body's solid beside them.
 
 The streams hold more than the solved B-rep: earlier versions of faces (one
 face tag can appear on several faces with different extents) and their

@@ -639,3 +639,101 @@ the rest and warns how many edges were left out and why, instead of failing
 whole (at most a third of the edges; a larger drop fails as before). On the
 250-file corpus this moved four designs from *mismatch* to *match* — match 123
 → 127 — with no design's verdict worse and no body lost.
+
+## Amendment, 2026-10-13: reading a body's B-rep stream as STEP
+
+The file carries each body's solid in an ASM B-rep stream
+(`…/Breps.BlobParts/BREP.<uuid>.smb[h]`). A slice now reads that stream into
+topology and writes the body as AP214 STEP, for bodies a kernel can rebuild
+exactly. It does not change the import: nothing in `map.ts` calls it yet; a
+later change can feed its STEP through the `import` feature (ADR-0066).
+
+**What is read.** `asm-body.ts` walks body → lump → shell → face: each face's
+surface and sense, its loops in order with their coedges and coedge sense, each
+edge's curve and vertices, and the outer/inner loop split (the first loop is the
+outer one, as the file writes it). Each `lump` names its live shell, so the
+lumps in stream order are the solids; history shells carry no faces and are not
+read. A design body reaches its stream through its body container: the container
+lists its component's bodies in order and points at the record whose payload is
+the `BREP.*.smb[h]` file name, so container body *i* pairs with lump *i*. Only
+visible bodies are taken; hidden ones are left out, as a STEP export of the
+design leaves them out.
+
+**What is written.** `brep-step.ts` writes one body as AP214 STEP in mm:
+`PLANE`, `CYLINDRICAL_SURFACE`, `CONICAL_SURFACE`, `LINE`, `CIRCLE` and
+`ELLIPSE`, sharing vertices and edges. A cone whose file slope is negative
+narrows along its axis, while STEP's semi-angle is positive and the cone widens
+along the placement's +Z, so the writer flips the placement axis for a negative
+slope (the radius sits at the centre, which stays put). A body with any other
+surface or curve, an edge with no vertex, a face with no boundary or a loop with
+no edge is not written; `f3dBodiesStep` returns the reason instead, so an open
+shell is never emitted. `ASM` streams also write each record's class followed by
+its base classes (each with a `0x0d` tag); `readAsm` keeps the last name in
+`type` (what the rest of the reader was written against) and the record's own
+class in a new `derived` field, which this reader uses. The two container
+members that name a stream file are the type table's own 36-character GUID
+strings (`74CA4562…`, `40DCC3F41D…` — the latter ten hex digits before its first
+dash, as the file writes it); both are read from the bulk and are needed
+(containers with bodies use both).
+
+**Limits.** Spline, torus and sphere surfaces and intcurve / exp_par_cur curves
+are not carried; they are refused with a reason (the stream often holds an
+approximating NURBS for them, which a later change can read). A stream can hold
+more solids than the visible bodies that name it (a hidden body's solid beside
+them); those are left unwritten rather than pairing by position, since the
+container does not mark the hidden ones.
+
+**Hostile input.** Every walk is bounded: each pointer index is checked against
+the record count, the whole stream is walked once (a shell, face, loop or coedge
+is read at most once — a duplicate shell is skipped, a duplicated face, loop or
+coedge throws `F3dFormatError`), so a crafted stream of many lumps on one shell
+cannot make the read quadratic, and a chain that runs away throws instead of
+looping. The reader shares `readAsm`'s guarantees (no read past the stream's
+end).
+
+## Amendment, 2026-10-13: B-rep orientation, spheres and tori, closed edges
+
+The B-rep writer above was written against the wrong sense on three readings;
+this amendment corrects them and adds two surfaces. It still does not touch the
+importer.
+
+**The edge's own sense.** An `edge` record carries a sense flag. When it is set
+the edge runs against its curve, so `EDGE_CURVE`'s same-sense is the opposite;
+the writer had always written `.T.`. Over the corpus the flag and the vertex
+geometry agree on all but a rare few edges, and for a straight curve the vertex
+positions say the edge's direction directly, so a line's sense is taken from its
+geometry and every other edge's from the flag. This is the change that moved
+most of the previously-written-but-wrong bodies to matching.
+
+**The loop winding and the face sense.** A face record's flag is its forward
+sense: true when the face's normal runs with its surface's. STEP's
+`ADVANCED_FACE` same-sense is the opposite of *reversed*, and the file winds a
+loop the other way round from STEP's surface-normal winding, so a not-reversed
+face's loop is reversed and its same-sense is true, while a reversed face keeps
+the file's loop and same-sense false. The reader stores the flag as `reversed`
+(the complement of the file's) and the writer writes
+`same_sense = reversed ? .F. : .T.`. A body whose loops ran the other way round
+than its surfaces was otherwise written inside-out.
+
+**Closed circle edges.** A full-circle edge (its two vertices at one point) has
+no start-equals-end `EDGE_CURVE` that a kernel reads cleanly; it is now split at
+its antipode into two half edges, as the reference exports do.
+
+**Spheres and tori.** `sphere-surface` (centre, radius, pole axis) and
+`torus-surface` (centre, axis, major radius, minor radius, tube direction) are
+read and written as `SPHERICAL_SURFACE` / `TOROIDAL_SURFACE`. A negative sphere
+radius or torus minor radius is the file's way of pointing that surface's normal
+inward: the writer writes the radius positive and marks the face reversed (the
+same loop/same-sense pair as above). A torus with a negative major radius is
+refused with its own reason, as is a torus whose tube is not smaller than its
+ring (a spindle or horn torus).
+
+**Still refused.** intcurve and spline curves and spline surfaces (the corpus's
+intcurves mostly carry no B-spline at all, and the ones that do carry a
+compound record that is not decoded here), and the degenerate tori. A body is
+still refused when a stream holds a different number of solids than the bodies
+that name it: a stream can hold a hidden body's solid or a construction body's
+solid, and the component's body order lines up with the lumps on only part of
+the corpus (a first implementation matched a few more designs and wrote wrong
+solids for several others), so the extra solids stay unwritten rather than
+guessed.
