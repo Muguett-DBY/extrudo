@@ -379,7 +379,19 @@ one label transferred at a time so products are renamed as before) only when a
 part has a colour — uncoloured exports are byte-identical — and
 `readStepColors(text)` gives per solid (in `readStep`'s solid order) its own,
 part's or assembly instance's colour, face colours only counted; `exportStep`
-takes `{ id, name, color? }` (`StepBody`). `@extrudo/io` has
+takes `{ id, name, color? }` (`StepBody`). **ADR-0034's second amendment
+(2026-10-12)** added **STEP part names as body names**: a sibling facade read
+`readStepNames(text)` (same XDE walk, name mode on, names through
+`readNamesPtr/Size` joined by `'\0'`, never an OCCT type) gives, per solid in
+`readStep` order, the solid's own `TDataStd_Name`, else its part's, else its
+assembly instance's; the import feature reads it only when the text has a
+`PRODUCT('…` name, matches the count to `solids(read)` or drops the names, and
+puts them in **`ImportReport.names`** (`Record<BodyId, string>`, empty when
+none): trimmed, empty/generic (`SOLID`, `PART`, `Body`, OCCT's translator
+name)/all-digits names dropped, repeats numbered `" (2)"`. **The app's
+`followBodyNames` gives a body the report's name in place of "Body n" once,
+when it first names it, so a renamed body keeps its name on recompute** (the
+colours rule). No schema change. `@extrudo/io` has
 `TriangleMesh`, `checkManifold`, `writeStl`/`readStl` (binary) and
 `write3mf`/`read3mf` (fflate; colours as `m:colorgroup` with object
 `pid`/`pindex` and per-triangle `pid`/`p1`). The app's

@@ -33,16 +33,18 @@ const chip = (page: Page, name: string) =>
     .getByRole('list', { name: 'Features' })
     .getByRole('button', { name: new RegExp(`^${name}`) });
 
-/** "Body1:6:60,80,10" per drawn body: its name, face count and size in mm. */
+/**
+ * "Body1:6:60,80,10" per drawn body: its name, face count and size in mm. A
+ * body's name may hold spaces (a file's part name), so the entries are matched
+ * whole rather than split on them.
+ */
 async function bodies(page: Page) {
   const drawn = (await viewport(page).getAttribute('data-bodies')) ?? '';
-  return drawn
-    .split(' ')
-    .filter(Boolean)
-    .map((entry) => {
-      const [name, faces, size] = entry.split(':');
-      return { name: name ?? '', faces: Number(faces), size: (size ?? '').split(',').map(Number) };
-    });
+  return [...drawn.matchAll(/(?:^|\s)([^:]+):(\d+):([-\d.,]+)(?=\s|$)/g)].map((match) => ({
+    name: match[1] ?? '',
+    faces: Number(match[2]),
+    size: (match[3] ?? '').split(',').map(Number),
+  }));
 }
 
 /** The Insert tab's Import tile, then a file through the platform's picker. */
@@ -83,6 +85,8 @@ test('a STEP file becomes one body per solid, and undo takes it away', async ({ 
       [60, 31.8, 60],
     ]);
   expect((await bodies(page)).map((b) => b.faces)).toEqual([6, 6]);
+  // The file's part names became the bodies' names (ADR-0034's amendment).
+  expect((await bodies(page)).map((b) => b.name)).toEqual(['Stand base', 'Stand rest']);
 
   // One undo step: the bodies go with the feature (and its file's record).
   await page.keyboard.press('Control+z');
@@ -193,19 +197,19 @@ test("a STEP file's colours colour the imported bodies once (P4-12)", async ({ p
   await expect(panel).toHaveAttribute('data-preview-status', 'ok', { timeout: 60_000 });
   await panel.getByRole('button', { name: /^OK/ }).click();
   await expect.poll(async () => sizes(page), { timeout: 30_000 }).toEqual([[40, 80, 60]]);
-  await expect(viewport(page)).toHaveAttribute('data-body-appearance', 'Body1:#c81e28:1');
+  await expect(viewport(page)).toHaveAttribute('data-body-appearance', 'Bracket:#c81e28:1');
 
   // Recoloured by the user, it stays so when the import changes (Up y): the
   // document's metadata wins over the file's colour.
-  await colourBody(page, 'Body1', '#22b3c2');
-  await expect(viewport(page)).toHaveAttribute('data-body-appearance', 'Body1:#22b3c2:1');
+  await colourBody(page, 'Bracket', '#22b3c2');
+  await expect(viewport(page)).toHaveAttribute('data-body-appearance', 'Bracket:#22b3c2:1');
   await chip(page, 'Import1').dblclick();
   const edit = dialog(page, 'Edit Import1 dialog');
   await edit.getByRole('combobox', { name: 'Up' }).selectOption('y');
   await expect(edit).toHaveAttribute('data-preview-status', 'ok', { timeout: 60_000 });
   await edit.getByRole('button', { name: /^OK/ }).click();
   await expect.poll(async () => sizes(page), { timeout: 30_000 }).toEqual([[40, 60, 80]]);
-  await expect(viewport(page)).toHaveAttribute('data-body-appearance', 'Body1:#22b3c2:1');
+  await expect(viewport(page)).toHaveAttribute('data-body-appearance', 'Bracket:#22b3c2:1');
 });
 
 test('a file that is not a STEP file says so and cannot be committed', async ({ page }, info) => {

@@ -200,9 +200,13 @@ describe("the import feature's colours (P4-12)", () => {
     expect(byVolume).toEqual({ 1000: '#c81e28', 3000: '#1080ff' });
   });
 
-  it('a file without colours has no report', { timeout: 60_000 }, async () => {
+  it('a file without colours still reports its part names (ADR-0034)', {
+    timeout: 60_000,
+  }, async () => {
     const { report: got, volumes } = await report(design(written(false)));
-    expect(got).toBeUndefined();
+    if (!got) throw new Error('no import report');
+    expect(got.colors).toEqual({});
     expect(Object.keys(volumes)).toHaveLength(3);
+    expect(Object.values(got.names).sort()).toEqual(['Part1', 'Part2', 'Part3']);
   });
 });

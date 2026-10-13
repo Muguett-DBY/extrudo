@@ -1805,6 +1805,29 @@ export class Kernel {
     return { solids, coloredFaces: values[0] ?? 0 };
   }
 
+  /**
+   * The names of a STEP file's solids (ADR-0034's amendment), read through
+   * XDE: per solid in the order `solids(readStep(text))` lists them, its name
+   * (the solid's own label, else its part's, else its assembly instance's) or
+   * `undefined` for none. The names only: the file's colours come from
+   * `readStepColors`.
+   */
+  readStepNames(text: string): (string | undefined)[] {
+    const f = this.#facade;
+    const n = f.readStepNames(text);
+    if (n < 0) throw new KernelError(f.lastError() || "Couldn't read the STEP file's part names.");
+    const bytes = this.#copy(Uint8Array, f.readNamesPtr(), f.readNamesSize());
+    const parts = new TextDecoder().decode(bytes).split('\0');
+    // Every entry ends with '\0', so the split leaves one empty tail.
+    if (parts.length > 0 && parts[parts.length - 1] === '') parts.pop();
+    const solids: (string | undefined)[] = [];
+    for (let i = 0; i < n; i++) {
+      const name = parts[i];
+      solids.push(name === undefined || name === '' ? undefined : name);
+    }
+    return solids;
+  }
+
   release(...shapes: ShapeHandle[]): void {
     for (const shape of shapes) {
       const manifold = this.#meshes.get(shape);

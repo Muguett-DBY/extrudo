@@ -1229,5 +1229,7 @@ don't let Phase 3 features be built without it.
    gives exact solids with colours but no history. Extrudo reads `.f3d` files
    directly with its own decoder (ADR-0083, `@extrudo/f3d`); a test on 250 of
    the owner's designs showed it practical. A plug-in for the authoring
-   application was set aside (ADR-0083, Rejected). Small follow-ups: STEP part
-   names as body names, and a guide page on bringing a design over as STEP.
+   application was set aside (ADR-0083, Rejected). Small follow-ups, both
+   **done 2026-10-12**: ~~STEP part names as body names~~ (ADR-0034's second
+   amendment), and ~~a guide page on bringing a design over as STEP~~
+   (`docs/guide/files.md`).

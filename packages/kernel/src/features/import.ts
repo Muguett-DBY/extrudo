@@ -5,7 +5,7 @@
  * nothing (ADR-0032) and every later feature treats the bodies like any other
  * (Move, Combine, patterns of bodies, a fillet on a solid's faces).
  *
- * **No facade change:** the STEP branch is the facade's `readStep` (P2-12,
+ * **The STEP branch** is the facade's `readStep` (P2-12,
  * ADR-0034: `STEPControl_Reader`, converted to mm, one compound of the file's
  * roots), the mesh branch is manifold-3d (`meshFrom`, ADR-0066 §3), the `up`
  * turn is `transform` (ADR-0044) for both, and one body per piece is
@@ -17,6 +17,15 @@
  * instance's gets it in the feature's `ImportReport`; the app takes it into
  * the body's appearance once, when it first names the body. A face's colour
  * is only counted.
+ *
+ * **Part names as body names** (ADR-0034's second amendment): a STEP file
+ * that names a product is read through XDE for names too (the facade's
+ * `readStepNames`), and each body whose solid has a name of its own, its
+ * part's or its assembly instance's gets it in `ImportReport.names`; the app
+ * takes it as the body's name once, when it first names the body, as it takes
+ * a colour. Empty and generic names (a default `SOLID`, `PART`, `Body`, an
+ * all-digits one) are left out, and two bodies with the same name get
+ * " (2)", " (3)"….
  *
  * **Names:** a STEP file's face `n` (1-based, in the order `TopExp` lists the
  * file's faces before splitting) is `import:<id>:face:<n>`; a mesh body's one
@@ -117,11 +126,19 @@ function evaluateImport(ctx: EvalContext<ImportInputs>): FeatureOutput {
   const read = scope.track(ctx.kernel.readStep(text));
   // A surface model has solids to count, and we only want to know whether it
   // has any: the handles go straight back (after saying which faces each
-  // holds, when the file's colours need it).
+  // holds, when the file's colours or names need it).
   const solids = ctx.kernel.solids(read);
   let colors: StepSolidColors | undefined;
+  let reportNames: (string | undefined)[] | undefined;
+  let faceSolid: Map<number, number> | undefined;
   try {
-    colors = solids.length > 0 ? stepSolidColors(ctx, text, read, solids) : undefined;
+    const wantColors = STEP_COLOR.test(text);
+    const wantNames = STEP_NAME.test(text);
+    if ((wantColors || wantNames) && solids.length > 0) {
+      faceSolid = stepFaceSolid(ctx, read, solids);
+      if (wantColors) colors = stepSolidColors(ctx, text, solids);
+      if (wantNames) reportNames = stepSolidNames(ctx, text, solids);
+    }
   } finally {
     ctx.kernel.release(...solids);
   }
@@ -140,15 +157,28 @@ function evaluateImport(ctx: EvalContext<ImportInputs>): FeatureOutput {
   const names = new Map<BodyId, TopoNames>([[id, importNames(ctx, placed)]]);
   bodies.set(id, scope.keep(placed));
   const output = splitSolids(ctx, scope, { bodies, names });
-  return colors ? { ...output, report: importReport(ctx, colors, output) } : output;
+  return colors || reportNames
+    ? { ...output, report: importReport(ctx, colors, reportNames, faceSolid, output) }
+    : output;
 }
 
-/** Per solid of the file (in `solids(read)` order) its colour, and which solid owns each face. */
+/** The file's colours (P4-12, ADR-0034's amendment), per solid in `solids(read)` order. */
 interface StepSolidColors {
   solids: (string | undefined)[];
   coloredFaces: number;
-  /** Face index in the read shape → solid index. */
-  faceSolid: Map<number, number>;
+}
+
+/** Face index in the read shape → solid index (in `solids(read)` order). */
+function stepFaceSolid(
+  ctx: EvalContext,
+  read: ShapeHandle,
+  solids: readonly ShapeHandle[],
+): Map<number, number> {
+  const faceSolid = new Map<number, number>();
+  solids.forEach((solid, i) => {
+    for (const at of ctx.kernel.locate(solid, read, 'face')) faceSolid.set(at, i);
+  });
+  return faceSolid;
 }
 
 /**
@@ -162,43 +192,89 @@ interface StepSolidColors {
 function stepSolidColors(
   ctx: EvalContext,
   text: string,
-  read: ShapeHandle,
   solids: readonly ShapeHandle[],
 ): StepSolidColors | undefined {
   if (!STEP_COLOR.test(text)) return undefined;
   const found = ctx.kernel.readStepColors(text);
   if (found.solids.length !== solids.length) return undefined;
   if (found.coloredFaces === 0 && found.solids.every((c) => c === undefined)) return undefined;
-  const faceSolid = new Map<number, number>();
-  solids.forEach((solid, i) => {
-    for (const at of ctx.kernel.locate(solid, read, 'face')) faceSolid.set(at, i);
-  });
-  return { solids: found.solids, coloredFaces: found.coloredFaces, faceSolid };
+  return { solids: found.solids, coloredFaces: found.coloredFaces };
+}
+
+/**
+ * The file's part names (ADR-0034's amendment), per solid in `solids(read)`
+ * order, or `undefined` for a file that names no product: only a file with a
+ * `PRODUCT(` name is read through XDE for names, so a file without names
+ * computes exactly as before. The same count guard as colours: a list that
+ * ever mismatched `solids(read)` would name the wrong bodies, so it is left out.
+ */
+function stepSolidNames(
+  ctx: EvalContext,
+  text: string,
+  solids: readonly ShapeHandle[],
+): (string | undefined)[] | undefined {
+  if (!STEP_NAME.test(text)) return undefined;
+  const found = ctx.kernel.readStepNames(text);
+  if (found.length !== solids.length) return undefined;
+  return found;
 }
 
 /** The entities a STEP file colours with (AP214/AP242: `COLOUR_RGB`, `DRAUGHTING_PRE_DEFINED_COLOUR`). */
 const STEP_COLOR = /COLOUR_RGB|DRAUGHTING_PRE_DEFINED_COLOUR/i;
 
+/** A STEP file's `PRODUCT` with a name of its own (ADR-0034's amendment). */
+const STEP_NAME = /PRODUCT\s*\(\s*'[^']/i;
+
+/** Names that are only a file's default and never a part's own (ADR-0034's amendment). */
+const GENERIC_STEP_NAMES = new Set(['part', 'solid', 'body']);
+
+function isGenericStepName(name: string): boolean {
+  return (
+    GENERIC_STEP_NAMES.has(name.toLowerCase()) ||
+    /^\d+$/.test(name) ||
+    /^open cascade step translator/i.test(name)
+  );
+}
+
 /**
- * Each body's colour: a body's faces are named `import:<feature>:face:<n>`
- * after the read shape's face `n`, which says which of the file's solids it
- * came from, whatever order `splitSolids` gave the bodies.
+ * What the import reports about each body (ADR-0034's amendment): its solid's
+ * colour and its solid's name. A body's faces are named
+ * `import:<feature>:face:<n>` after the read shape's face `n`, which says which
+ * of the file's solids it came from, whatever order `splitSolids` gave the
+ * bodies. A name is trimmed; an empty or generic one is left out; two bodies
+ * with the same name get " (2)", " (3)"….
  */
 function importReport(
   ctx: EvalContext,
-  colors: StepSolidColors,
+  colors: StepSolidColors | undefined,
+  reportNames: (string | undefined)[] | undefined,
+  faceSolid: Map<number, number> | undefined,
   output: Pick<FeatureOutput, 'bodies' | 'names'>,
 ): ImportReport {
   const prefix = `import:${ctx.feature.id}:face:`;
-  const out: Record<BodyId, string> = {};
+  const outColors: Record<BodyId, string> = {};
+  const outNames: Record<BodyId, string> = {};
+  const usedNames = new Set<string>();
   for (const [body, table] of output.names ?? []) {
     const first = table.faces.find((name) => name.startsWith(prefix));
     const n = first === undefined ? Number.NaN : Number.parseInt(first.slice(prefix.length), 10);
-    const solid = colors.faceSolid.get(n - 1);
-    const color = solid === undefined ? undefined : colors.solids[solid];
-    if (color !== undefined) out[body] = color;
+    const solid = faceSolid?.get(n - 1);
+    if (solid === undefined) continue;
+    const color = colors?.solids[solid];
+    if (color !== undefined) outColors[body] = color;
+    const raw = reportNames?.[solid]?.trim();
+    if (raw === undefined || raw === '' || isGenericStepName(raw)) continue;
+    let name = raw;
+    for (let k = 2; usedNames.has(name); k++) name = `${raw} (${k})`;
+    usedNames.add(name);
+    outNames[body] = name;
   }
-  return { kind: 'import', colors: out, coloredFaces: colors.coloredFaces };
+  return {
+    kind: 'import',
+    colors: outColors,
+    names: outNames,
+    coloredFaces: colors?.coloredFaces ?? 0,
+  };
 }
 
 /**

@@ -24,6 +24,7 @@ import {
   createBodyActions,
   followBodyNames,
   importedColors,
+  importedNames,
   isSwatch,
   parseBodyColor,
   pendingBodyEntries,
@@ -196,7 +197,12 @@ describe('followBodyNames', () => {
     const { store, model } = setup();
     followBodyNames(store, model as ModelStore<unknown>);
     const imports = (colors: Record<string, string>) => ({
-      B: { kind: 'import' as const, colors: colors as Record<BodyId, string>, coloredFaces: 0 },
+      B: {
+        kind: 'import' as const,
+        colors: colors as Record<BodyId, string>,
+        names: {},
+        coloredFaces: 0,
+      },
     });
     model.getState().computed({
       features: {},
@@ -219,6 +225,40 @@ describe('followBodyNames', () => {
     expect(meta('B:0')?.color).toBe('#22b3c2');
     expect(meta('B:1')?.color).toBeUndefined();
   });
+
+  it("takes a STEP import's part name when it first names a body, and a renamed body keeps it (ADR-0034)", () => {
+    const { store, model, computed } = setup();
+    followBodyNames(store, model as ModelStore<unknown>);
+    const report = (names: Record<string, string>) => ({
+      B: {
+        kind: 'import' as const,
+        colors: {},
+        names: names as Record<BodyId, string>,
+        coloredFaces: 0,
+      },
+    });
+    model.getState().computed({
+      features: {},
+      bodies: live('A:0', 'B:0', 'B:1'),
+      imports: report({ 'B:0': 'Lid', 'B:1': 'Base' }),
+      doc: store.getState().doc,
+    });
+    const meta = (id: string) => store.getState().doc.bodies[bid(id)];
+    expect(meta('B:0')?.name).toBe('Lid');
+    expect(meta('B:1')?.name).toBe('Base');
+    expect(meta('A:0')?.name).toBe('Body1');
+    // The person's rename wins: a later report (a re-import, another Up) renames nothing.
+    store.getState().dispatch(updateBody({ id: bid('B:0'), changes: { name: 'Cover' } }));
+    model.getState().computed({
+      features: {},
+      bodies: live('A:0', 'B:0', 'B:1'),
+      imports: report({ 'B:0': 'Lid', 'B:1': 'Base' }),
+      doc: store.getState().doc,
+    });
+    expect(meta('B:0')?.name).toBe('Cover');
+    computed('A:0', 'B:0', 'B:1');
+    expect(meta('B:0')?.name).toBe('Cover');
+  });
 });
 
 describe('importedColors', () => {
@@ -227,11 +267,27 @@ describe('importedColors', () => {
       ['F' as FeatureId]: {
         kind: 'import',
         colors: { [bid('F:0')]: '#ABCDEF', [bid('F:1')]: 'red' },
+        names: {},
         coloredFaces: 3,
       },
     });
     expect([...colors]).toEqual([['F:0', '#abcdef']]);
     expect(importedColors(undefined).size).toBe(0);
+  });
+});
+
+describe('importedNames', () => {
+  it('merges every import report, dropping blank names', () => {
+    const names = importedNames({
+      ['F' as FeatureId]: {
+        kind: 'import',
+        colors: {},
+        names: { [bid('F:0')]: 'Lid', [bid('F:1')]: '  ' },
+        coloredFaces: 0,
+      },
+    });
+    expect([...names]).toEqual([['F:0', 'Lid']]);
+    expect(importedNames(undefined).size).toBe(0);
   });
 });
 

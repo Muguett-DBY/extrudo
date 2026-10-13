@@ -194,13 +194,16 @@ export function followBodyNames(store: DocumentStore, model: ModelStore<unknown>
     const missing = bodyEntries(doc, bodies, state.origins).filter((e) => !e.stored);
     if (missing.length === 0) return;
     const colors = importedColors(imports);
+    const names = importedNames(imports);
     store.getState().amend(
       nameBodies({
         bodies: Object.fromEntries(
           missing.map((e) => {
             const color = colors.get(e.id);
+            const name = names.get(e.id);
             const meta: BodyMeta = {
               ...e.meta,
+              ...(name !== undefined && { name }),
               ...(color !== undefined && { color }),
               ...(e.component !== undefined && { component: e.component }),
             };
@@ -229,6 +232,25 @@ export function importedColors(
     for (const [id, color] of Object.entries(report.colors) as [BodyId, string][]) {
       const parsed = parseBodyColor(color);
       if (parsed) out.set(id, parsed);
+    }
+  }
+  return out;
+}
+
+/**
+ * The part names STEP imports report for their bodies (ADR-0034's amendment).
+ * Like a body's colour, `followBodyNames` gives it the report's name only when
+ * it first names it: a body with stored metadata (already named by a person,
+ * or simply shown before) keeps what the document says, so a recompute, a
+ * re-import or a change of Up never renames it.
+ */
+export function importedNames(
+  imports: ModelState<unknown>['imports'] | undefined,
+): Map<BodyId, string> {
+  const out = new Map<BodyId, string>();
+  for (const report of Object.values(imports ?? {})) {
+    for (const [id, name] of Object.entries(report.names ?? {}) as [BodyId, string][]) {
+      if (name.trim() !== '') out.set(id, name);
     }
   }
   return out;
