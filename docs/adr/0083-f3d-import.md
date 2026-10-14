@@ -907,3 +907,46 @@ frozen 128 → 140, unchecked 82 → 51, missing 12 → 9. The writer's refusals
 are streams holding more solids than bodies (24) and helices (7); 29 written
 bodies carried an inward-signed surface, which the body check no longer leaves
 unchecked (ADR-0084's amendment of the same day).
+## Amendment, 2026-10-14: imported rounds at their limit
+
+The rounds the import writes (all with `skipLostEdges`) now also build when
+they fail at exactly their size: ADR-0038's and ADR-0043's amendments of this
+date retry a round whose kernel maximum is at least 0.99 of its size a hair
+under it, with a warning. 20 designs' first divergence from the file was such a
+round (job C's divergence report). Replay-only corpus: within 0.5 % volume and
+0.05 mm box 135 → 142, 50 rounds error → built, 2 rounds built → error
+(downstream of a newly built round, on edges next to its faces), one design
+match → mismatch (0.48 % → 0.71 % volume; the newly built 0.33 mm chamfer is
+the file's, on all 42 of its edges, and the design was short of volume for
+another reason).
+
+## Amendment, 2026-10-14: a symmetric extrude's distance is each side's
+
+A symmetric extrude was imported with its `AlongDistance` as the whole length
+(Extrudo's default `symmetricMeasure`), so its caps came in at half the distance
+from the profile. The file's own cap faces (B-rep faces tagged by the feature's
+operations with a normal along the extrude's direction vector) lie the whole
+distance either side of the profile in all 26 symmetric extrudes of the corpus
+(10 designs; FORMAT.md "Extrude"), including the five that showed no divergence
+before only because their caps fall outside the body or on another plane. The
+import now writes `symmetricMeasure: 'half'`. No whole-length symmetric extrude
+is in the corpus, so a flag for one was not found; if a file has one it would
+come in twice as long. Replay corpus: within 0.5 % volume and 0.05 mm box 142 →
+147 (5 designs reach it, none leaves it); Pillar Connector's box error 8.5 mm →
+0; 4 rounds now build, 1 round further down now fails (it had been built on the
+half-length body). Body check on the 10 designs that changed: editable 1 → 6,
+frozen 6 → 1. Test: `map.test.ts` "extrudes a symmetric extrude's distance on
+each side…".
+
+## Amendment, 2026-10-14: an up-to-face offset to a slanted plane
+
+The file measures an up-to-face offset (`Side1Offset`, `Side2Offset`) along the
+target face's normal; Extrudo's `offset` moves the target along the sweep. For
+a plane slanted to the sketch the import now writes the offset divided by the
+cosine between the sweep and the plane's normal (same sign); other faces keep
+it as it is (`alongSweep` in `map.ts`). The corpus has 16 up-to-face extrudes
+with a non-zero offset: 13 to a plane parallel to the sketch (already a
+distance) and 3 in one design to a plane at cosine 0.946 with −9.5 mm, whose end
+faces were 0.5104 mm off the file's and now lie on them. Replay corpus: no
+verdict changes (that design already matched, volume error 0.015 % → 0.010 %).
+Test: `map.test.ts` "measures an up-to-face offset along the sweep…".
