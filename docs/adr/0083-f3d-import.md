@@ -972,3 +972,21 @@ feature status changes. Body check, both amendments together: editable bodies
 faces instead of 7 (two collinear walls had come out as one name), and 3 of its
 bodies now rebuild as the file has them. Test: `map-more.test.ts` "offsets the side
 of the collinear line its plane is rooted at".
+
+## Amendment, 2026-10-14: imported rounds where they meet, and edges no round can take
+
+Of the 29 designs whose first divergence from the file is a round OCCT refuses
+on a body that matches the file (too large with a maximum under 0.9 of the
+size 14, "can't all be built where they meet" 9, "at any size" 6), the import's
+rounds (all with `skipLostEdges`) now build in two more cases (ADR-0038's and
+ADR-0043's amendments of this date): rounds that fail together at exactly
+their size are built a hair under it (5 of the 9 "where they meet"), and the
+smooth edges an imported set can hold are left out instead of failing the
+round. The rest is OCCT's own limit or the facade's trap guard; healing the
+rounds OCCT builds unsound was measured and not kept (no design gained, one
+lost). Replay corpus: within 0.5 % volume and 0.05 mm box 147 → 149 (a pipe
+holder and a hinge reach it), none worse; 12 rounds error → built, none built →
+error. Body check (all 250): after-check matches 225 → 225, harmed 0; bodies
+editable 195 → 198, frozen 159 → 156 (made differently 114 → 111), unchecked
+26 → 26 with the same reasons; the two designs above and a table base's body
+turn from frozen to editable.
