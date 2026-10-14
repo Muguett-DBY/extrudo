@@ -813,6 +813,24 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
   entries) and the browser with a component (first `data-bodies` body, then
   `pickTool(page, 'New Component')`).
 
+### `e2e/readme-shots.spec.ts`
+
+- Skipped unless `RECORD_ASSETS=1`; `pnpm demos -g readme` (`--skip-build`
+  when `dist` is current; add `E2E_GPU=1` where there is a GPU, or the status
+  bar says "Software rendering") records the README's eight scenes (home,
+  model, drawing, sketch, fillet, assembly, print, customizer) at 1440 × 900 into
+  `docs/images/readme/<scene>-<light|dark>.webp`. Each theme is a `describe`
+  with `test.use({ colorScheme })`: the app follows the system scheme while
+  no theme is picked. Shots are WebP q 0.9 encoded by `OffscreenCanvas` in a
+  blank page (256-colour PNGs band the view's gradient), 45-75 kB each.
+- Scenes: wall bracket (`openProject`); drawing: a new sketch on XY zoomed
+  in to camera size ≤ 110, a 60 × 40 rectangle and a circle (snap to grid
+  makes its radius 10, so pick it at r 10) with three dimensions;
+  `chip('Sketch1').dblclick()` and the
+  Sketch palette, `chip('Fillet1').dblclick()` until `data-preview-status=ok`,
+  the hinge fixture imported then F6 (Fit), 3D Print › Print Info until
+  `data-print-state=ready`, Customizer until `data-customizer-state`.
+
 ### `e2e/help-links.spec.ts`
 
 - **Help links e2e** (`e2e/help-links.spec.ts`, P6-06 S9): the docs host is

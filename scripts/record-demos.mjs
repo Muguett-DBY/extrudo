@@ -10,6 +10,7 @@
 //   pnpm demos -g "demo: fillet"  # only what matches (a Playwright --grep)
 //   pnpm demos -g tutorials     # the tutorials' pictures, docs/guide/tutorials/images/
 //   pnpm demos -g guide         # the concept guide's pictures, docs/guide/images/
+//   pnpm demos -g readme        # the README's pictures, docs/images/readme/
 //
 // How it works: `e2e/record-assets.spec.ts` drives the real app in headless
 // Chromium (flows copied from the e2e specs) while `e2e/demo-recorder.ts`
@@ -41,12 +42,17 @@ const grep = passThrough.findIndex((a) => a === '-g' || a === '--grep');
 const mode = grep >= 0 ? passThrough[grep + 1] : undefined;
 const tutorials = mode === 'tutorials';
 const guide = mode === 'guide';
-if (tutorials || guide) passThrough = passThrough.filter((_, i) => i !== grep && i !== grep + 1);
+// `-g readme`: the README's pictures in both themes (e2e/readme-shots.spec.ts).
+const readme = mode === 'readme';
+if (tutorials || guide || readme)
+  passThrough = passThrough.filter((_, i) => i !== grep && i !== grep + 1);
 const target = tutorials
   ? 'e2e/tutorials'
   : guide
     ? 'e2e/guide-shots.spec.ts'
-    : 'e2e/record-assets.spec.ts';
+    : readme
+      ? 'e2e/readme-shots.spec.ts'
+      : 'e2e/record-assets.spec.ts';
 
 function run(command, commandArgs, env = {}) {
   const result = spawnSync(command, commandArgs, {
@@ -73,5 +79,7 @@ console.log(
     ? '\nDone. Look at every picture in docs/guide/tutorials/images/ before committing.'
     : guide
       ? '\nDone. Look at every picture in docs/guide/images/ before committing.'
-      : '\nDone. Review apps/web/public/demos/ and apps/web/src/home/templates/ before committing.',
+      : readme
+        ? '\nDone. Look at every picture in docs/images/readme/ before committing.'
+        : '\nDone. Review apps/web/public/demos/ and apps/web/src/home/templates/ before committing.',
 );

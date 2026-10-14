@@ -22,9 +22,30 @@ It follows the workflow people know from desktop CAD (sketch, features,
 timeline, parameters everywhere) with a faster, friendlier interface. It is
 inspired by that workflow and shares no code or artwork with any such product.
 
-![The home screen, with templates and the tour](docs/images/home.png)
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/images/readme/model-dark.webp">
+  <img src="docs/images/readme/model-light.webp" alt="A wall bracket in the 3D view, with its browser, toolbar and timeline">
+</picture>
 
-![A wall bracket in the 3D view, with its timeline and parameters](docs/images/bracket.png)
+<table>
+<tr><th width="50%">Light</th><th width="50%">Dark</th></tr>
+<tr><td colspan="2"><b>Home</b>: Start a design, open a template or import one</td></tr>
+<tr><td><a href="docs/images/readme/home-light.webp"><img src="docs/images/readme/home-light.webp" alt="Home, light theme"></a></td><td><a href="docs/images/readme/home-dark.webp"><img src="docs/images/readme/home-dark.webp" alt="Home, dark theme"></a></td></tr>
+<tr><td colspan="2"><b>Modeling</b>: A wall bracket with its browser, toolbar and timeline</td></tr>
+<tr><td><a href="docs/images/readme/model-light.webp"><img src="docs/images/readme/model-light.webp" alt="Modeling, light theme"></a></td><td><a href="docs/images/readme/model-dark.webp"><img src="docs/images/readme/model-dark.webp" alt="Modeling, dark theme"></a></td></tr>
+<tr><td colspan="2"><b>Sketching</b>: A dimensioned 2D sketch, top down, with its constraints</td></tr>
+<tr><td><a href="docs/images/readme/drawing-light.webp"><img src="docs/images/readme/drawing-light.webp" alt="Sketching, light theme"></a></td><td><a href="docs/images/readme/drawing-dark.webp"><img src="docs/images/readme/drawing-dark.webp" alt="Sketching, dark theme"></a></td></tr>
+<tr><td colspan="2"><b>Sketch on a model</b>: Editing the bracket's profile sketch in place</td></tr>
+<tr><td><a href="docs/images/readme/sketch-light.webp"><img src="docs/images/readme/sketch-light.webp" alt="Sketch on a model, light theme"></a></td><td><a href="docs/images/readme/sketch-dark.webp"><img src="docs/images/readme/sketch-dark.webp" alt="Sketch on a model, dark theme"></a></td></tr>
+<tr><td colspan="2"><b>Feature dialogs</b>: A fillet with its radius set by expressions and a live preview</td></tr>
+<tr><td><a href="docs/images/readme/fillet-light.webp"><img src="docs/images/readme/fillet-light.webp" alt="Feature dialogs, light theme"></a></td><td><a href="docs/images/readme/fillet-dark.webp"><img src="docs/images/readme/fillet-dark.webp" alt="Feature dialogs, dark theme"></a></td></tr>
+<tr><td colspan="2"><b>Components and joints</b>: A hinge, two components joined by a revolute joint</td></tr>
+<tr><td><a href="docs/images/readme/assembly-light.webp"><img src="docs/images/readme/assembly-light.webp" alt="Components and joints, light theme"></a></td><td><a href="docs/images/readme/assembly-dark.webp"><img src="docs/images/readme/assembly-dark.webp" alt="Components and joints, dark theme"></a></td></tr>
+<tr><td colspan="2"><b>3D printing</b>: Print Info: weight, filament and cost for the chosen material</td></tr>
+<tr><td><a href="docs/images/readme/print-light.webp"><img src="docs/images/readme/print-light.webp" alt="3D printing, light theme"></a></td><td><a href="docs/images/readme/print-dark.webp"><img src="docs/images/readme/print-dark.webp" alt="3D printing, dark theme"></a></td></tr>
+<tr><td colspan="2"><b>Customizer</b>: Sliders for a template's main parameters</td></tr>
+<tr><td><a href="docs/images/readme/customizer-light.webp"><img src="docs/images/readme/customizer-light.webp" alt="Customizer, light theme"></a></td><td><a href="docs/images/readme/customizer-dark.webp"><img src="docs/images/readme/customizer-dark.webp" alt="Customizer, dark theme"></a></td></tr>
+</table>
 
 > **Status:** the stable app is the [latest release](https://github.com/zoltanf/extrudo/releases/latest). The core modeling workflow is
 > there and tested, but expect rough edges. Things not built yet are listed
