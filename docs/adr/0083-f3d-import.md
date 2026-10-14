@@ -791,3 +791,119 @@ refused as `creator in several solids` (they were editable; that design's
 verdict and volume error are unchanged). The crossed
 design now writes each body's own solid (its verdict was already a match: the
 check pairs by geometry), so the frozen body carries the right name.
+## Amendment, 2026-10-14: B-spline curves and surfaces in the B-rep writer
+
+The writer refused every body with an `intcurve` edge or a `spline-surface`
+face, the first blocker in most of the designs whose replay still missed. Those
+records keep, besides their procedure (an intersection, an offset, a blend, an
+extruded profile), the B-spline the file approximates them with; the writer now
+reads that B-spline and writes it. (The previous amendment's note that most
+intcurves carry no B-spline read a record's last class name, `nullbs`, which
+names a parameter curve inside the block; all but the helices do carry one.)
+
+**What is read.** A curve or surface record carries its definition in a subtype
+block, or a reference to a block written earlier in the same stream (counted in
+the order blocks open, nested ones included); `readAsm` now keeps the class names
+inside a block as values in place, since the layout depends on them. The new
+`asm-spline.ts` reads the block's B-spline: degree, form, knots with
+multiplicities (the file writes the end knots `degree` times; STEP's
+`degree + 1` is restored), control points and weights; for a surface the two
+directions and the grid. The procedure is never re-evaluated. The curve record's
+sense (against its B-spline) is folded into the edge's, and the edge's two
+parameters, which the file negates for each reversal, give its stretch of the
+B-spline; a surface record's sense is folded into the face's, as an inward
+sphere's is. `FORMAT.md` ("Spline curves and surfaces") has the layout and how
+it was checked: evaluating the decoded B-spline at each edge's parameters gives
+its vertices to under 1e-6 cm on all 31,484 B-spline edges of the corpus's
+live solids but 43 closed ones whose stretch wraps past the curve's start.
+
+**What is written.** `B_SPLINE_CURVE_WITH_KNOTS` and
+`B_SPLINE_SURFACE_WITH_KNOTS` in mm, as complex rational entities when a weight
+is not 1. A closed B-spline edge is split, like a full circle: at the curve's
+seam when its stretch crosses it, else at the middle of its stretch.
+
+**Still refused.** A helix (a thread's curves and faces) keeps no B-spline and
+is refused as "an intcurve with no B-spline". A lump with more than one shell
+(an outer shell and voids inside it) is now refused as "a solid with an inner
+void": the reader took only the lump's first shell, so such a solid was
+written without its cavities. The spline refusal had hidden this; with splines written,
+eight designs that matched through the replay were frozen to a body 0.7–3.5 %
+too large. Walking the lump's whole shell chain also stops a shell of it that
+an earlier (history) lump record names from being read as a second solid, so ten
+bodies whose stream seemed to hold more solids than bodies now give the void
+reason instead (no verdict changes). Writing the voids (`BREP_WITH_VOIDS`) is left for later.
+
+**Measured** on the 250-design corpus with the body check (replay → probe →
+plan → apply, the reference STEP's volume within 0.5 % and tight box within
+0.05 mm): 165 → 200 designs match of 237 → 239 comparable, 30 → 65 rescued,
+none harmed; bodies written 214 → 294 of 380, editable 131 → 158, frozen 78 →
+128, unchecked 147 → 82, missing 24 → 12. Three of the newly written frozen
+bodies fail OCCT's validity check yet measure as the reference does. The
+blockers now left in front of the body check are the voids (21 bodies),
+degenerate tori (14 with a tube not smaller than its ring, 9 with a negative
+ring radius), streams holding more solids than bodies (22), helices (7), edges
+with no curve (9) and inward-signed surfaces (8).
+
+## Amendment, 2026-10-14: voids, degenerate tori, cone apexes and loop winding in the B-rep writer
+
+The writer still refused four kinds of body after the B-spline amendment;
+three are now written, and a winding error that made inward-signed tori come
+out wrong is fixed. `bodiesStep`'s pairing and `body-check.ts` are unchanged.
+
+**Voids.** A lump's shell chain is its outer shell and the voids inside it.
+The file's order does not say which shell is the outside (the chain's first in
+21 of the corpus's 27 such lumps, its second in 6); in all 27 it is the only
+shell whose box holds every other shell's, so that is the rule, and a lump
+whose shells do not nest that way is refused ("a solid with voids whose outer
+shell is not known"). The voids are written as the file's own STEP export
+writes them: a `BREP_WITH_VOIDS` whose voids are `ORIENTED_CLOSED_SHELL`s
+(`.F.`) over closed shells of the void faces with the file's own senses. The
+kernel reads it as the outer solid less the voids (a synthetic 3 cm box with a
+1 cm cavity measures 26 000 mm³; on the corpus a written body with six voids
+measures exactly its outer shell less six times the void's volume).
+
+**Degenerate tori.** A torus whose tube is not smaller than its ring, or whose
+ring radius is negative, is the tube circle centred at the signed ring radius,
+and the face uses its part on its own side of the axis (all 980 vertices of the
+corpus's 115 such faces sit there). No `TOROIDAL_SURFACE` holds it; the export
+writes each such face it shares vertices with as a rational degree 2 × 2
+B-spline, and so does the writer now: the exact rational B-spline of the tube's
+arc from axis to axis, swept a whole turn, its seam in the middle of the widest
+angle the face's boundary leaves free. Its u × v normal points out of the tube,
+as the file's torus's does, so the face keeps its sense. A lemon whose tube does
+not reach the axis is still refused.
+
+**Loop winding.** The file winds a face's loop against its own surface's
+normal. The writer decided whether to reverse a loop from the face's sense
+after the reader had folded a negative radius (or a spline record's sense) into
+it, so on an inward-signed surface the loop ran the wrong way. A kernel turns a
+single wrong loop round, but on a torus face bounded by two parallel circles the
+winding picks the band: such faces came out as the rest of the torus (473.6 mm²
+where the export has 101.2). The loop now follows the file's own face flag. The
+eight bodies the body check leaves unchecked because of an inward-signed
+surface each measure as the export's solid once read on their own (volume
+within 0.02 %, box exact). The body check's rule that left such bodies
+unchecked was lifted the same day (ADR-0084's amendment): the writer now
+vouches for them. With the rule lifted, the corpus gains eight more matching
+designs and none harmed.
+
+**Cone apexes and earlier lumps.** Every edge with no curve in the corpus (125)
+is a cone's apex, closing the face as a loop of one edge whose two ends are the
+apex; the writer leaves that loop out (a kernel closes the cone itself), and
+any other curveless edge is still refused. A lump record whose shell names
+another lump is an earlier record; two such records reached a shell nothing
+else reaches, whose face chain runs into a live lump's faces, which made the
+whole stream unreadable. The reader now skips them.
+
+**Helices** stay refused: a thread needs both its helix curves and its helix
+surfaces, and neither keeps a B-spline. `FORMAT.md` records what was learned
+(the helix curve's layout reproduces the vertices of 78 of the 84 helix edges;
+the swept-line surface's stored profile vector is not settled).
+
+**Measured** on the 250-design corpus with the body check: 200 → 205 designs
+match of 239 → 240 comparable, 65 → 70 rescued (two with voids, three with
+degenerate tori), none harmed; bodies written 294 → 349, editable 158 → 180,
+frozen 128 → 140, unchecked 82 → 51, missing 12 → 9. The writer's refusals left
+are streams holding more solids than bodies (24) and helices (7); 29 written
+bodies carried an inward-signed surface, which the body check no longer leaves
+unchecked (ADR-0084's amendment of the same day).
