@@ -1573,7 +1573,7 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
 - **Landing page e2e** (`e2e/site.spec.ts`, ADR-0057): serves `apps/site/dist`
   (fresh `pnpm build` builds it with the app) through `startStaticHost`; the
   heading "Parametric CAD for 3D printing, in your browser." (spans `.hl-sketch`
-  and `.hl-solid`), the nav's links (Features, Changelog, GitHub, Open Extrudo),
+  and `.hl-solid`), the nav's links (Apps with its `.new` pill, Features, Changelog, Docs, GitHub, Open Extrudo),
   the `.soon` pill, links "Open Extrudo" (`[data-open-app]`,
   `https://app.extrudo.org/`) and "Try the latest build", the scroll stage.
   `[data-walkthrough]` gains `data-enhanced` when `walkthrough.ts` runs; it builds
@@ -1638,7 +1638,8 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
   what only edge has: take the tags off when a release ships those features. The landing
   page keeps `nav` "Features" (links to `/features/#…`) and `[data-all-features]`, and its
   FAQ is the `region` "Questions and answers" (eleven `<details>`). `/download/` (the
-  hero's pill `[data-download]`, "Available", and the footer's "Desktop app" lead there)
+  hero's pill `[data-download]`, "Available", the nav's "Apps" link, marked current
+  there, and the footer's "Desktop app" lead there)
   has `nav` "Platforms" and the regions "Windows", "macOS" and "Linux"; it names files by
   their ending and links `releases/latest`, never a version. The contrast measurement
   and axe run on all three pages with every `<details>` open and skip `.sr-only` text.
