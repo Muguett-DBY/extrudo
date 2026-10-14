@@ -7,6 +7,7 @@
 import { deflateSync, zipSync } from 'fflate';
 import { describe, expect, it } from 'vitest';
 import { MAX_ENTRIES, MAX_ENTRY_BYTES, MAX_TOTAL_BYTES, previewBytes, unzip } from './archive';
+import { f3dBodiesStep } from './brep-step';
 import { f3dPreview, importF3d } from './index';
 import { readF3dEntries } from './model';
 
@@ -235,5 +236,20 @@ describe('preview (L1, M2)', () => {
     const picture = png(32);
     const entries = unzip(designZip({ [PREVIEW]: picture }));
     expect(previewBytes(entries)).toEqual(picture);
+  });
+});
+
+describe('the importer shares its decode with the B-rep writer', () => {
+  it('gives the same steps from the entries it already unzipped', () => {
+    const bytes = designZip();
+    const imported = importF3d(bytes, 'Part', { bodies: true });
+    expect(imported.steps).toEqual(f3dBodiesStep(bytes));
+    expect(imported.bodies).toEqual([]);
+  });
+
+  it('adds nothing without { bodies: true }', () => {
+    const imported = importF3d(designZip(), 'Part');
+    expect(imported.bodies).toBeUndefined();
+    expect(imported.steps).toBeUndefined();
   });
 });
