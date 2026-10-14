@@ -162,6 +162,7 @@ function evaluateChamfer(ctx: EvalContext<ChamferInputs>): FeatureOutput {
         shape,
         kept.map((p) => p.index),
         kept.map((p) => p.spec),
+        { heal: skip },
       );
     let result: ReturnType<typeof kernel.chamfer>;
     try {

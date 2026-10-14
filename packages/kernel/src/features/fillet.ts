@@ -147,11 +147,13 @@ function evaluateFillet(ctx: EvalContext<FilletInputs>): FeatureOutput {
             shape,
             kept.map((p) => p.index),
             kept.map((p) => [p.radius, p.radiusEnd] as [number, number]),
+            { heal: skip },
           )
         : kernel.fillet(
             shape,
             kept.map((p) => p.index),
             kept.map((p) => p.radius),
+            { heal: skip },
           );
     let result: ReturnType<typeof kernel.fillet>;
     try {

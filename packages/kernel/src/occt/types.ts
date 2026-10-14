@@ -26,6 +26,7 @@ export interface FacadeBinding {
     height: number,
   ): number;
   fillet(shape: number): number;
+  setRoundHealing(on: boolean): void;
   filletVariable(shape: number): number;
   tangentChain(shape: number, edge: number): number;
   chamfer(shape: number): number;
