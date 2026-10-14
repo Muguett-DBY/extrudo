@@ -186,3 +186,5 @@ Extrudo is free software under the [GNU GPL v3.0 or later](LICENSE).
 - The OpenCascade and planegcs WASM files are LGPL-2.1 components built from
   their own sources; [`NOTICE`](NOTICE) lists every third-party component, its
   license, and where the corresponding source is.
+- The Extrudo **name and logo are trademarks**, not covered by the GPL. Forks
+  are welcome under their own name and icon: see [`TRADEMARKS.md`](TRADEMARKS.md).

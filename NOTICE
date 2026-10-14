@@ -202,7 +202,18 @@ app redistributes Electron.
 5. Not third-party
 ------------------
 
-The Extrudo name, logo, icons, the tool demo clips and the template pictures are
-the project's own work and are under the project's license. Extrudo borrows
-ideas and workflow from other CAD programs and contains none of their code,
-icons, text or artwork.
+The tool icons, the tool demo clips and the template pictures are the
+project's own work and are under the project's license. Extrudo borrows ideas
+and workflow from other CAD programs and contains none of their code, icons,
+text or artwork.
+
+The Extrudo name and logo are trademarks and are not licensed under the GPL
+(GPL-3.0 section 7(e); see TRADEMARKS.md). The logo artwork in these files is
+not under the project's license either: you may redistribute it unchanged as
+part of this repository and the official builds, and anything else needs
+permission. A fork replaces them with its own.
+
+  docs/brand/                      the logo files and brand references
+  apps/web/public/favicon.svg, icon-192.png, icon-512.png, og-image.png
+  apps/site/public/favicon.svg, og-image.png
+  apps/desktop/build/icon.png, icon-mac.png

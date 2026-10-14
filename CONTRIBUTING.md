@@ -180,6 +180,10 @@ terms as the part of the project it changes:
 - The C++ facade (`packages/kernel/occt/facade/`) and our planegcs patch are
   under the LGPL-2.1-or-later, like the libraries they are built into.
 
+The Extrudo name and logo are trademarks and the logo files are not under the
+GPL ([`TRADEMARKS.md`](TRADEMARKS.md), [`NOTICE`](NOTICE) §5). Changes to them
+go through the maintainer.
+
 Third-party code and assets you add must be compatible with GPL-3.0-or-later and
 get an entry in [`NOTICE`](NOTICE). [`docs/references.md`](docs/references.md)
 lists projects we looked at and what may be borrowed from each.
