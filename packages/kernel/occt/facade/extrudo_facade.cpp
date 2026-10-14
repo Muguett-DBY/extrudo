@@ -6069,25 +6069,62 @@ private:
 
   /**
    * recordHistory() for a round healed after it was built (healedRound): what
-   * the builder made is followed through the healing's replacements, and a
-   * sub-shape the builder kept but the healing replaced is `modified`.
+   * the builder made is followed into the healed shape, and a sub-shape the
+   * builder kept but the healing replaced is `modified`. ShapeFix rebuilds a
+   * mended face, and its context doesn't always name the face the result
+   * holds, so a sub-shape is found as itself, else as the context's
+   * replacement, else as the result's sub-shapes on the same surface (a face)
+   * or curve (an edge): healing keeps the geometry and mends the topology.
    */
   template <typename Builder>
   void recordHealedHistory(Builder& builder, const TopoDS_Shape& input,
                            const Handle(ShapeBuild_ReShape)& context, const TopoDS_Shape& result) {
     NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> resultMaps[3];
     for (int kind = 0; kind < 3; ++kind) TopExp::MapShapes(result, kindToEnum(kind), resultMaps[kind]);
-    // A replacement of another type (a face split into a shell) counts by its pieces.
-    const auto healedAll = [&](const NCollection_List<TopoDS_Shape>& shapes) {
+    const auto images = [&](const TopoDS_Shape& shape, int kind) {
+      NCollection_List<TopoDS_Shape> out;
+      if (resultMaps[kind].Contains(shape)) {
+        out.Append(shape);
+        return out;
+      }
+      const TopoDS_Shape now = context->Value(shape);
+      if (!now.IsNull()) {
+        for (TopExp_Explorer piece(now, kindToEnum(kind)); piece.More(); piece.Next()) {
+          if (resultMaps[kind].Contains(piece.Current())) out.Append(piece.Current());
+        }
+        if (!out.IsEmpty()) return out;
+      }
+      if (kind == 0) {
+        TopLoc_Location where;
+        const Handle(Geom_Surface) surface = BRep_Tool::Surface(TopoDS::Face(shape), where);
+        for (int i = 1; i <= resultMaps[0].Extent(); ++i) {
+          TopLoc_Location other;
+          if (BRep_Tool::Surface(TopoDS::Face(resultMaps[0](i)), other) == surface && other.IsEqual(where)) {
+            out.Append(resultMaps[0](i));
+          }
+        }
+      } else if (kind == 1) {
+        TopLoc_Location where;
+        double first = 0;
+        double last = 0;
+        const Handle(Geom_Curve) curve = BRep_Tool::Curve(TopoDS::Edge(shape), where, first, last);
+        if (curve.IsNull()) return out;
+        for (int i = 1; i <= resultMaps[1].Extent(); ++i) {
+          TopLoc_Location other;
+          if (BRep_Tool::Curve(TopoDS::Edge(resultMaps[1](i)), other, first, last) == curve && other.IsEqual(where)) {
+            out.Append(resultMaps[1](i));
+          }
+        }
+      }
+      return out;
+    };
+    const auto imagesOf = [&](const NCollection_List<TopoDS_Shape>& shapes) {
       NCollection_List<TopoDS_Shape> out;
       for (NCollection_List<TopoDS_Shape>::Iterator it(shapes); it.More(); it.Next()) {
-        const TopoDS_Shape now = context->Value(it.Value());
-        if (now.IsNull()) continue;
-        if (now.ShapeType() == it.Value().ShapeType()) {
-          out.Append(now);
-          continue;
-        }
-        for (TopExp_Explorer piece(now, it.Value().ShapeType()); piece.More(); piece.Next()) out.Append(piece.Current());
+        const int made = enumToKind(it.Value().ShapeType());
+        if (made < 0) continue;
+        NCollection_List<TopoDS_Shape> found = images(it.Value(), made);
+        out.Append(found);
       }
       return out;
     };
@@ -6105,17 +6142,12 @@ private:
         if (!deleted) {
           const NCollection_List<TopoDS_Shape>& made = builder.Modified(sub);
           if (!made.IsEmpty()) {
-            modified = appendRelation(healedAll(made), resultMaps, 0, kind, i - 1, 0);
-          } else {
-            const TopoDS_Shape now = context->Value(sub);
-            if (!now.IsNull() && !now.IsSame(sub)) {
-              NCollection_List<TopoDS_Shape> one;
-              one.Append(sub);
-              modified = appendRelation(healedAll(one), resultMaps, 0, kind, i - 1, 0);
-            }
+            modified = appendRelation(imagesOf(made), resultMaps, 0, kind, i - 1, 0);
+          } else if (!resultMaps[kind].Contains(sub)) {
+            modified = appendRelation(images(sub, kind), resultMaps, 0, kind, i - 1, 0);
           }
         }
-        appendRelation(healedAll(builder.Generated(sub)), resultMaps, 0, kind, i - 1, 1);
+        appendRelation(imagesOf(builder.Generated(sub)), resultMaps, 0, kind, i - 1, 1);
         if (!deleted && !modified) {
           const int kept = resultMaps[kind].FindIndex(sub);
           if (kept > 0) {
