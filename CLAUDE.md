@@ -42,6 +42,7 @@ worktrees, merged to main one at a time.
 | **`docs/agent/e2e-notes.md`** | Per spec: regions, data attributes, selectors, picking coordinates and traps. Read before writing or fixing an e2e spec |
 | **`docs/agent/dev-environment.md`** | The two dev machines (Arch workstation, Ubuntu machine), OCCT/planegcs WASM builds and CI, the facade, Docker harnesses, fuzzing, and OCCT/planegcs/library facts |
 | `docs/deploy.md`, `docs/release-checklist.md`, `docs/desktop.md` | Hosting, releases, the desktop app |
+| `docs/assets.md` | Recorded and generated assets (README screenshots, tooltip clips, guide and tutorial pictures, generated pages): the command for each and when to redo it |
 | `docs/cli.md`, `docs/api/`, `docs/plugins.md`, `docs/guide/` | The CLI, the document API, plugins, the user guide |
 | `docs/references.md` | Other open-source projects we looked at and their licenses |
 
