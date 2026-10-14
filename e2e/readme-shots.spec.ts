@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { expect, type Page, test } from '@playwright/test';
 import { chip } from './benchmark-helpers';
@@ -19,13 +19,14 @@ import {
 //
 // It writes docs/images/readme/<scene>-<theme>.webp, so it only runs with RECORD_ASSETS=1. The
 // shots are WebP at quality 90 (Chromium's encoder, in a blank page): 256-colour PNGs band the
-// view's gradient. Run with E2E_GPU=1 where there is a GPU, or the status bar says "Software
-// rendering" at 2 fps.
+// view's gradient. The status bar's render rate, recompute time and "Software rendering" are
+// hidden with e2e/screenshot.css, as in the tutorials' pictures.
 test.skip(!process.env.RECORD_ASSETS, 'RECORD_ASSETS=1 rewrites the README pictures');
 test.use({ viewport: { width: 1440, height: 900 } });
 test.describe.configure({ timeout: 120_000 });
 
 const IMAGES = join(process.cwd(), 'docs', 'images', 'readme');
+const STYLE = join(process.cwd(), 'e2e', 'screenshot.css');
 
 /** Re-encodes a PNG screenshot as WebP in a blank page of the same browser. */
 async function webp(page: Page, png: Buffer): Promise<Buffer> {
@@ -54,7 +55,7 @@ async function shoot(page: Page, scene: string, theme: string) {
   await mkdir(IMAGES, { recursive: true });
   await writeFile(
     join(IMAGES, `${scene}-${theme}.webp`),
-    await webp(page, await page.screenshot()),
+    await webp(page, await page.screenshot({ style: await readFile(STYLE, 'utf8') })),
   );
 }
 

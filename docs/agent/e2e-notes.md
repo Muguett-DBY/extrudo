@@ -816,8 +816,9 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
 ### `e2e/readme-shots.spec.ts`
 
 - Skipped unless `RECORD_ASSETS=1`; `pnpm demos -g readme` (`--skip-build`
-  when `dist` is current; add `E2E_GPU=1` where there is a GPU, or the status
-  bar says "Software rendering") records the README's eight scenes (home,
+  when `dist` is current; `E2E_GPU=1` where there is a GPU is faster; the
+  status bar's frame rate, recompute time and renderer are hidden with
+  `e2e/screenshot.css`) records the README's eight scenes (home,
   model, drawing, sketch, fillet, assembly, print, customizer) at 1440 × 900 into
   `docs/images/readme/<scene>-<light|dark>.webp`. Each theme is a `describe`
   with `test.use({ colorScheme })`: the app follows the system scheme while

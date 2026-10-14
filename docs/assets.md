@@ -21,7 +21,7 @@ current. Useful variables:
 
 | Variable | What it does |
 |---|---|
-| `E2E_GPU=1` | Real GPU rendering. Without it Chromium uses software rendering and the README shots say "Software rendering" in the status bar. Local runs only. |
+| `E2E_GPU=1` | Real GPU rendering: faster recordings. Without it Chromium renders in software (the shots hide the status bar's renderer and frame rate either way). Local runs only. |
 | `E2E_PORT=4391` | Another port for the preview server, when 4173 is taken (another worktree running e2e). |
 | `PLAYWRIGHT_CHROMIUM_PATH` | A system Chromium, on the Ubuntu machine `/usr/bin/google-chrome-stable`. |
 
