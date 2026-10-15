@@ -2,7 +2,7 @@
 
 One line per completed roadmap task, newest first. Dates are absolute.
 
-## Unreleased
+## v0.7.0 (2026-10-15)
 
 - 2026-10-15 · **A ghost body shows only its nearest surface** (ADR-0030's amendment): a ghost draws a depth-only pass before its 30 % faces, so where its faces overlap on screen (a cylinder's back, inner walls, standoffs) the grey no longer stacks into darker patches and the inside no longer shows through; edges, sketches and construction behind a ghost still show through it, dimmed.
 - 2026-10-15 · **Section at a flat face: a clean cap** (ADR-0045): a section plane lying in a face (a face picked at 0 mm offset) showed a speckle of face and cap as float rounding decided each pixel; the drawn cut now sits 0.001 mm into the kept side (`CLIP_INSET` in `planeOf`), so the face is cut away whole and the hatched cap covers it.
