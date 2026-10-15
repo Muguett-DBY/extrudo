@@ -653,7 +653,9 @@ undoable; `useSection` (called in `AppShell`) turns it into a
 `Viewport` takes as `sectionClip` and puts in the pick scene
 (`PickScene.clip`). Bodies, edges, silhouettes and dialog previews get
 three.js clipping planes (`clipPlanes`, `localClippingEnabled` only while
-on); the grid, origin and sketches stay unclipped; the cut is capped per
+on; **every drawn plane comes from `planeOf`, which sets it `CLIP_INSET`
+(1e-3 mm) into the kept side** so a face lying in the plane is cut away
+whole and capped, not speckled by float rounding); the grid, origin and sketches stay unclipped; the cut is capped per
 body by the stencil method in `viewport/SectionCap.tsx` (the canvas asks
 for `stencil: true`), tinted through `capColors`. **`pick.ts` skips what
 is clipped and treats what lies behind a cap as occluded** (`capDepth`),

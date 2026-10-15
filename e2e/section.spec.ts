@@ -241,6 +241,70 @@ test('a selected flat face takes the section at once, and stays with the face th
 });
 
 /**
+ * How many of the pixels in a `size` px square at (x, y) are the body's own lit face (dark theme:
+ * a pale blue-grey) rather than the section's cap (teal, its hatch dark).
+ */
+async function facePixels(page: Page, x: number, y: number, size = 12) {
+  const png = await page.screenshot({
+    clip: { x: x - size / 2, y: y - size / 2, width: size, height: size },
+  });
+  return (await page.evaluate(`(async () => {
+    const bin = atob('${png.toString('base64')}');
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const bmp = await createImageBitmap(new Blob([bytes], { type: 'image/png' }));
+    const g = new OffscreenCanvas(bmp.width, bmp.height).getContext('2d');
+    g.drawImage(bmp, 0, 0);
+    const d = g.getImageData(0, 0, bmp.width, bmp.height).data;
+    let n = 0;
+    for (let i = 0; i < d.length; i += 4) {
+      const [r, gr, b] = [d[i], d[i + 1], d[i + 2]];
+      if (r > 100 && gr - r < 40 && b - r < 50) n++;
+    }
+    return n;
+  })()`)) as number;
+}
+
+test('a section at a flat face itself caps the whole face, not a speckle of face and cap', async ({
+  page,
+}) => {
+  await page.addInitScript(() => localStorage.setItem('extrudo.theme', JSON.stringify('dark')));
+  const viewport = await openProject(page, 'wall-bracket');
+  await kernelReady(page);
+  const at = await settledProjector(viewport);
+  // The top of the base plate (z = 2.4, looking up; off y = 0, where Sketch1 lies, and the
+  // holes): a section there at 0 mm lies in the face.
+  const { x, y } = at([30, 10, 2.4]);
+  await page.mouse.move(x, y);
+  await page.mouse.click(x, y);
+  await expect(viewport).toHaveAttribute('data-model-selection', /^face:/);
+  await page.keyboard.press('Shift+S');
+  const tool = panel(page);
+  await tool.getByRole('textbox', { name: 'Offset', exact: true }).fill('0 mm');
+  await tool.getByRole('textbox', { name: 'Offset', exact: true }).press('Enter');
+  await expect(viewport).toHaveAttribute('data-section', /^face:.* offset=0 mm on$/);
+  await expect(viewport).toHaveAttribute('data-section-clip', /:0,0,1$/);
+  await tool.getByRole('button', { name: /^Done/ }).click();
+  await expect(tool).toBeHidden();
+  await page.keyboard.press('Escape');
+  await page.mouse.move(0, 0);
+  await settledProjector(viewport);
+
+  // The face and the plane coincide: every point of the face must come out the same way (the
+  // cap, hatched), not some as the face and some as the cap as rounding decides.
+  for (const p of [
+    [30, 10, 2.4],
+    [35, 30, 2.4],
+    [15, -12, 2.4],
+    [20, -30, 2.4],
+    [10, 25, 2.4],
+  ] as const) {
+    const s = at([...p]);
+    expect(await facePixels(page, s.x, s.y), `face at ${p}`).toBe(0);
+  }
+});
+
+/**
  * Drags the section handle `id` along its arrow (`sign` 1: towards the arrowhead, which points
  * to the side that is cut away), `distance` px in small steps. The arrowheads are listed in
  * `data-section-arrow` in the order the handles are drawn.
