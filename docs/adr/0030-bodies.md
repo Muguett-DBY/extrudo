@@ -369,3 +369,30 @@ are kind of blurred a bit." A ghost draws **no edge lines** (the `edge` colour a
 `e2e/bodies.spec.ts` "a ghost body looks right" keeps the baseline `ghost-body` (the Playwright
 image); `ghostHalo.test.ts` covers the welded normals.
 
+
+## Amendment (2026-10-15): a ghost shows only its nearest surface
+
+The owner: a ghost "looks strange on places where there are overlaps with itself". Its faces
+blended at 30 % without depth, so wherever two of them covered the same pixel (a cylinder's
+front and back, a boss in front of a wall, an enclosure's inner walls and standoffs) the grey
+stacked into darker patches and the inside showed through. A ghost now draws a **depth-only
+pass** of its faces first (`colorWrite: false`, depth written, the faces' polygon offset), then
+its faces at 30 % with the default `LessEqualDepth`, so only the nearest surface is blended:
+one even frosted shell. A ghost behind another ghost is hidden by it like any other surface.
+
+- **Render orders 6.5, 6.6, 6.7** (depth, faces, halo; were 1 and 2 for faces and halo): the
+  depth pass would hide the depth-tested overlays drawn after it, so the ghost comes after
+  edges, sketches, construction, the section box's wire, the origin's planes and the grid (up
+  to 6), which show through it dimmed by its 30 % grey like the bodies behind it, and before
+  the overlays drawn without a depth test on top (body dots 7, the preview 8–9, the origin's
+  axes 10). The canvas's calibration lines (9, depth-tested) are hidden behind a ghost; the
+  ones at 6 drawn without a depth test (joints, the ghosts of lost geometry, edges drawn over)
+  are dimmed where a ghost covers them.
+- The halo is unchanged: the faces still set stencil bit `0x80` before the shells test it.
+
+Rejected: blending once per pixel through the stencil (the faces drawn where bit `0x80` is
+not yet set): no stacking, but the first triangle drawn wins, not the nearest, so inner walls
+still showed faintly; sorting the ghost's triangles back to front each frame (costly, and
+still stacks).
+
+`e2e/bodies.spec.ts` "a ghost body looks right" keeps the baseline `ghost-body`, redone.

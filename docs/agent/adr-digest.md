@@ -304,7 +304,10 @@ body as a vague grey shape at 30 % opacity through a separate `GhostBodies`
 component that takes no part in picking, Fit or any analysis — **no edge lines, a soft
 halo** round its outline since R3-06 (`viewport/ghostHalo.ts`: three back-face shells
 pushed out 2, 4 and 7 CSS px along welded normals in clip space, drawn only where the
-ghost's faces didn't set stencil bit 0x80; baseline `e2e/bodies.spec.ts-snapshots/ghost-body`); the browser
+ghost's faces didn't set stencil bit 0x80; baseline `e2e/bodies.spec.ts-snapshots/ghost-body`); **since
+2026-10-15 a depth-only pass first, so only the nearest surface is blended** (no stacking where
+its faces overlap; render orders 6.5/6.6/6.7 for depth, faces, halo: after the depth-tested
+overlays, up to 6, and before the ones drawn on top, 7 and up — keep that gap); the browser
 row's eye cycles shown → ghost → hidden (`EyeDashed`), `data-ghost-bodies`
 names the ghosts, and the body and marking menus offer the states a body is
 not in. ADR-0031 (P2-09) added sketches on flat

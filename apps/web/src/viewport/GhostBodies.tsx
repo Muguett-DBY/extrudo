@@ -57,9 +57,17 @@ export function GhostBodies({
 /** 30 % opacity: the vague grey a ghost is drawn at. */
 const GHOST_OPACITY = 0.3;
 
-/** After the transparent bodies: the faces mark the stencil before their halo tests it. */
-const FACES_ORDER = 1;
-const HALO_ORDER = 2;
+/**
+ * A depth-only pass first, so the faces show only the ghost's nearest surface:
+ * no inner walls, and no darker patches where its faces overlap on screen. The
+ * ghost writes depth, so it comes after the depth-tested overlays (edges,
+ * sketches, construction, up to 6), which then show through it, and before the
+ * ones drawn on top (dots 7, the preview 8-9, the origin's axes 10). The faces
+ * mark the stencil before their halo tests it.
+ */
+const DEPTH_ORDER = 6.5;
+const FACES_ORDER = 6.6;
+const HALO_ORDER = 6.7;
 
 function GhostBody({
   mesh,
@@ -131,6 +139,16 @@ function GhostBody({
 
   return (
     <group ref={group}>
+      <mesh geometry={faces} renderOrder={DEPTH_ORDER}>
+        <meshBasicMaterial
+          transparent
+          colorWrite={false}
+          polygonOffset
+          polygonOffsetFactor={1}
+          polygonOffsetUnits={1}
+          clippingPlanes={planes}
+        />
+      </mesh>
       <mesh geometry={faces} renderOrder={FACES_ORDER}>
         <meshStandardMaterial
           color={faceColor}
