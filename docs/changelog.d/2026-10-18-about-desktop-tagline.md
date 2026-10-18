@@ -1,1 +1,0 @@
-- 2026-10-18 · **About, desktop**: the tagline says "right on your desktop" in the desktop app instead of "right in your browser".

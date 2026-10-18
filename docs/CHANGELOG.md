@@ -2,6 +2,17 @@
 
 One line per completed roadmap task, newest first. Dates are absolute.
 
+## v0.8.1 (2026-10-18)
+
+- 2026-10-18 · **About, desktop**: the tagline says "right on your desktop" in the desktop app instead of "right in your browser".
+- 2026-10-18 · **Settings › Agents (MCP)**: the MCP server has its own Settings section with the setup text per agent (Claude Code, Codex CLI, opencode, `mcpServers` JSON, or a sentence to give the agent), **Install skill** / **Update skill** into the agent's global skills folder (or Save skill to…), and a working Copy: the desktop app now allows the clipboard write every Copy button needs (ADR-0087 amendment).
+- 2026-10-18 · **Constraint keys**: the 13 sketch constraints have keys, K then a letter (K H Horizontal, K V Vertical, K P Parallel…); a small panel lists the letters after K, and Esc cancels.
+- 2026-10-18 · **Handle drags follow the pointer**: the preview ghost of an extrude, press-pull, box, cylinder or Move stretches, slides or turns with the handle while you drag, and the kernel's previews no longer wait for the pointer to stop.
+- 2026-10-18 · **Site: Docker on the download page**: `/download/` ends with "On your own server, with Docker" (the `docker run` line, the `latest`/`0.8.0`/`edge` tags, the plain-HTTP limit, a link to `docs/deploy.md`), with a Docker entry in the page's jump links.
+- 2026-10-18 · **Site and README refreshed for v0.8.0**: OpenSCAD export, Export Design as Script, the wider .f3d import, the portable Windows app, Homebrew without a Gatekeeper prompt and the desktop's agents (MCP) are on the features, download and FAQ pages, in the README and in the guide's desktop page; the nav's "New" pill is gone.
+- 2026-10-18 · **MCP skill**: `references/tools.md` and SKILL.md show sketch shapes as the objects they are, with the `shape` discriminator (`{ "shape": "polyline", … }`).
+- 2026-10-18 · **Your own keys**: Settings › Keyboard changes any command's keys (one key or a chord such as K then H), warns before taking a key another command uses, and resets per command or all at once; right-click a toolbar tile for "Change shortcut…", or use the key button on a Search row.
+
 ## v0.8.0 (2026-10-18)
 
 - 2026-10-18 · **Docker image**: `docker run -p 8080:80 ghcr.io/zoltanf/extrudo` serves the app on your own machine (`latest`, `X.Y.Z`, `edge`; amd64 and arm64).

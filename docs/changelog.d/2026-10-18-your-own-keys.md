@@ -1,1 +1,0 @@
-- 2026-10-18 · **Your own keys**: Settings › Keyboard changes any command's keys (one key or a chord such as K then H), warns before taking a key another command uses, and resets per command or all at once; right-click a toolbar tile for "Change shortcut…", or use the key button on a Search row.
