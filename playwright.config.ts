@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { filesOfShard, parseShard, WEBKIT_SPEC } from './scripts/e2e-shards';
 
 // E2E_PORT lets several checkouts (git worktrees) run their suites at once:
 // with a shared port, `reuseExistingServer` would test another checkout's build.
@@ -8,6 +9,19 @@ const PORT = Number(process.env.E2E_PORT ?? 4173);
 // browser that `pnpm e2e:install` downloads (useful on distros Playwright
 // does not officially support); E2E_GPU=1 turns on real GPU rendering (below).
 const executablePath = process.env.PLAYWRIGHT_CHROMIUM_PATH;
+
+// CI shards by duration, not by count: E2E_SHARD=<current>/<total> picks this
+// shard's spec files (scripts/e2e-shards.ts, e2e/timings.json). Unset locally.
+const shard = parseShard(process.env.E2E_SHARD);
+const shardFiles = shard ? filesOfShard(shard) : undefined;
+const NONE = /(?!)/;
+/** A testMatch for exactly these e2e files (every file when not sharding). */
+const match = (files: string[] | undefined, fallback: RegExp) =>
+  files === undefined
+    ? fallback
+    : files.length
+      ? new RegExp(`/(?:${files.map((f) => f.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')).join('|')})$`)
+      : NONE;
 
 export default defineConfig({
   testDir: 'e2e',
@@ -21,7 +35,11 @@ export default defineConfig({
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 1 : 0,
-  reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'list',
+  // CI also writes a JSON report: its per-test durations feed e2e/timings.json
+  // (uploaded as the playwright-results-<shard> artifact).
+  reporter: process.env.CI
+    ? [['github'], ['html', { open: 'never' }], ['json', { outputFile: 'playwright-results.json' }]]
+    : 'list',
   use: {
     baseURL: `http://127.0.0.1:${PORT}`,
     trace: 'retain-on-failure',
@@ -48,6 +66,10 @@ export default defineConfig({
     {
       name: 'chromium',
       testIgnore: /webkit-smoke\.spec\.ts/,
+      testMatch: match(
+        shardFiles?.filter((f) => f !== WEBKIT_SPEC),
+        /.*\.spec\.ts/,
+      ),
       use: {
         ...devices['Desktop Chrome'],
         // Opt-in GPU rendering for local runs on a machine with a GPU
@@ -73,7 +95,10 @@ export default defineConfig({
       // with `pnpm e2e --project webkit` after `pnpm exec playwright install
       // --with-deps webkit`.
       name: 'webkit',
-      testMatch: /webkit-smoke\.spec\.ts/,
+      testMatch: match(
+        shardFiles?.filter((f) => f === WEBKIT_SPEC),
+        /webkit-smoke\.spec\.ts/,
+      ),
       use: { ...devices['Desktop Safari'] },
     },
   ],
