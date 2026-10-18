@@ -1043,6 +1043,13 @@ end to end, faster than in established desktop CAD.
     `src/occt/scope.ts` and `memory.test.ts` (the first two are hash inputs,
     so do it in the same rebuild).~~ **Done 2026-10-16** (ADR-0001's addendum): built with 3.1.0,
     same OCCT and emsdk; memory test, check and CI green, no golden changed.
+  - Your own keys (user feedback: no keys for the sketch constraints). **Done
+    2026-10-18** (ADR-0082's amendment of 2026-10-18): Settings › Keyboard lists
+    every command's keys and records new ones (one key, or a chord such as K H),
+    asks before taking a key another command uses in the same mode, and resets per
+    command or all at once; a toolbar tile's right-click "Change shortcut…" and a
+    key button on each Search row open it. The preference `keymap.overrides`
+    holds only the changes.
 
 ---
 

@@ -10,6 +10,7 @@ export type SectionId =
   | 'general'
   | 'plugins'
   | 'marking'
+  | 'keyboard'
   | 'view'
   | 'sketch'
   | 'printing'
@@ -46,6 +47,12 @@ export const SECTIONS: readonly SectionInfo[] = [
     label: 'Marking menu',
     summary: 'The right-click menu: a ring or a list, and the command on each wedge.',
     keys: ['marking.radial', 'marking.slots'],
+  },
+  {
+    id: 'keyboard',
+    label: 'Keyboard',
+    summary: "Every command's keys: change, add or remove them.",
+    keys: ['keymap.overrides'],
   },
   {
     id: 'view',

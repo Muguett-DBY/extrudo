@@ -73,7 +73,22 @@ export const DEFAULT_KEYMAP: Readonly<Record<string, readonly string[]>> = {
 
 const NONE: readonly string[] = [];
 
-/** A command's keys, first the one to show in tooltips and menus. */
+/** The person's own keys (ADR-0082's 2026-10-18 amendment): only the commands they changed. */
+export type KeymapOverrides = Readonly<Record<string, readonly string[]>>;
+
+let overrides: KeymapOverrides = {};
+
+/** Replaces the overrides `keysFor` reads; `commands/keymapStore.ts` is the one caller. */
+export function setKeymapOverrides(next: KeymapOverrides): void {
+  overrides = next;
+}
+
+/** A command's keys, first the one to show in tooltips and menus: the person's, else the default. */
 export function keysFor(id: string): readonly string[] {
+  return overrides[id] ?? DEFAULT_KEYMAP[id] ?? NONE;
+}
+
+/** A command's default keys, for what must not follow one person's choice (generated docs). */
+export function defaultKeysFor(id: string): readonly string[] {
   return DEFAULT_KEYMAP[id] ?? NONE;
 }

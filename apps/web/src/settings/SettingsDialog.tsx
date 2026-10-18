@@ -32,6 +32,7 @@ import { NAV_PRESETS } from '../viewport/navigation';
 import { VISUAL_STYLES, type ViewportSettings } from '../viewport/store';
 import { type DisplayAccess, useDisplaySettings } from './displaySettings';
 import { type SectionId, type SectionInfo, visibleSections } from './inventory';
+import { KeyboardPage } from './KeyboardPage';
 
 const SECTION_KEY = 'settings.section';
 const EXPORT_KEY = 'export.model';
@@ -70,6 +71,8 @@ export interface SettingsDialogProps {
   plugins: PluginsSectionProps;
   /** A section to show each time the dialog opens (Ctrl+K "Plugins…"); else the last one. */
   section?: SectionId | undefined;
+  /** A command whose key the Keyboard section records at once ("Change shortcut…"). */
+  recordKey?: string | undefined;
 }
 
 /**
@@ -168,6 +171,14 @@ function Page({ id, ...props }: SettingsDialogProps & { id: SectionId }): ReactN
       return <PluginsSection {...props.plugins} />;
     case 'marking':
       return <MarkingPage {...props} />;
+    case 'keyboard':
+      return (
+        <KeyboardPage
+          preferences={props.preferences}
+          commands={props.marking?.commands}
+          record={props.recordKey}
+        />
+      );
     case 'view':
       return <View display={props.display} />;
     case 'sketch':

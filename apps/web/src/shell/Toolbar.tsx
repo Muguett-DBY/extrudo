@@ -2,6 +2,7 @@ import { ChevronDown } from 'lucide-react';
 import {
   type ButtonHTMLAttributes,
   forwardRef,
+  type ReactElement,
   useEffect,
   useLayoutEffect,
   useReducer,
@@ -10,7 +11,15 @@ import {
 } from 'react';
 import { keysFor } from '../commands/keymap';
 import { shortcutLabel } from '../commands/shortcuts';
-import { type IconName, Menu, MenuItem, MenuLabel, ToolIcon, Tooltip } from '../design-system';
+import {
+  ContextMenu,
+  type IconName,
+  Menu,
+  MenuItem,
+  MenuLabel,
+  ToolIcon,
+  Tooltip,
+} from '../design-system';
 import { ToolDemo } from '../onboarding/ToolDemo';
 import { isToolReady } from './commands';
 import { measureTileText, TILE_TEXT_WIDTH, tileLabel } from './tileLabel';
@@ -34,6 +43,8 @@ export interface ToolbarProps {
   activeTool?: ToolId;
   /** Runs a tool that works today (see `Tool.comesWith`), or a Home tab file command. */
   onRun(tool: ToolId): void;
+  /** A tile's right-click "Change shortcut…": opens Settings › Keyboard recording its key. */
+  onChangeShortcut?: ((tool: ToolId) => void) | undefined;
   /** Tools a registered feature dialog makes work (P2-05). */
   ready?: ReadonlySet<string>;
   /**
@@ -183,6 +194,7 @@ export function Toolbar({
   tab,
   activeTool,
   onRun,
+  onChangeShortcut,
   ready,
   hidden,
   pluginItems,
@@ -303,6 +315,7 @@ export function Toolbar({
                         shortcut={shortcutFor(id)}
                         pressed={activeTool === id}
                         onRun={() => onRun(id)}
+                        onChangeShortcut={onChangeShortcut && (() => onChangeShortcut(id))}
                         compact
                       />
                     ))}
@@ -318,6 +331,7 @@ export function Toolbar({
                         shortcut={shortcutFor(id)}
                         pressed={activeTool === id}
                         onRun={() => onRun(id)}
+                        onChangeShortcut={onChangeShortcut && (() => onChangeShortcut(id))}
                       />
                     ))}
                   </div>
@@ -450,6 +464,7 @@ function ToolButton({
   shortcut,
   pressed,
   onRun,
+  onChangeShortcut,
   compact = false,
 }: {
   tool: Tool;
@@ -459,6 +474,8 @@ function ToolButton({
   shortcut: string | undefined;
   pressed: boolean;
   onRun(): void;
+  /** Right-click offers "Change shortcut…" (ADR-0082's 2026-10-18 amendment). */
+  onChangeShortcut?: (() => void) | undefined;
   /** An icon-only 30 px button, labelled for assistive tech. */
   compact?: boolean;
 }) {
@@ -472,8 +489,23 @@ function ToolButton({
     demo: <ToolDemo tool={tool.id} />,
     footer: 'F1 for more',
   };
+  const withMenu = (element: ReactElement) =>
+    onChangeShortcut ? (
+      <ContextMenu
+        label={`${tool.label} actions`}
+        trigger={element}
+        // Settings opens on the item: focus stays in it, not back on the tile behind it.
+        onCloseAutoFocus={(event) => event.preventDefault()}
+      >
+        <MenuItem onSelect={onChangeShortcut} {...(shortcut && { shortcut })}>
+          Change shortcut…
+        </MenuItem>
+      </ContextMenu>
+    ) : (
+      element
+    );
   if (compact) {
-    return (
+    return withMenu(
       <Tooltip {...tooltip}>
         <button
           type="button"
@@ -488,13 +520,13 @@ function ToolButton({
         >
           <ToolIcon name={tool.icon} category={tool.category} size={24} />
         </button>
-      </Tooltip>
+      </Tooltip>,
     );
   }
   const full = label ?? tool.label;
   const short = label ?? tool.short ?? tool.label;
   const { lines, cut } = tileLabel(full, short, TILE_TEXT_WIDTH, measureTileText);
-  return (
+  return withMenu(
     <Tooltip {...tooltip}>
       <ToolTile
         data-tool={tool.id}
@@ -511,7 +543,7 @@ function ToolButton({
         <ToolIcon name={tool.icon} category={tool.category} size={32} />
         <TileText lines={lines} />
       </ToolTile>
-    </Tooltip>
+    </Tooltip>,
   );
 }
 

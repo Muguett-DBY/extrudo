@@ -18,6 +18,7 @@ test('Ctrl+, opens Settings and every section opens', async ({ page }) => {
   for (const [id, heading] of [
     ['plugins', 'Plugins'],
     ['marking', 'Marking menu'],
+    ['keyboard', 'Keyboard'],
     ['view', 'View and navigation'],
     ['sketch', 'Sketch'],
     ['printing', '3D printing'],

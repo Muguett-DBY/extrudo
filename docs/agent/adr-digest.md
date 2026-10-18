@@ -2286,7 +2286,19 @@ override**: `print.material.densities` holds only what a person changed
 so an untouched material follows `MATERIALS`; `density` stays the Custom
 material's own (default `1.24`). Print Info's Density field shows for every
 material. Slicer paths are the desktop preference `slicers.paths` main reads per
-call; there is no auto-update switch (the updater has none) and no zoom setting.
+call; there is no auto-update switch (the updater has none) and no zoom setting. Its
+2026-10-18 amendment added **Settings › Keyboard** (`settings/KeyboardPage.tsx`): the
+`keymap.overrides` preference holds **only changed commands** (an empty list = no key;
+writing the default back removes the entry, `cleanOverrides`), and **`keysFor` is the one
+reader** (override, else `DEFAULT_KEYMAP`); `defaultKeysFor` is for what must not follow a
+browser (the generated tool pages). `commands/keymapStore.ts` is one store per
+`Preferences`, created in `App` before anything shows a key; `AppShell`'s command,
+dialog-command and Settings command lists take `useKeymap`'s value as a dependency, so a
+new list built from `keysFor` is how a change reaches the toolbar, menus, search and the
+native menu (whose `toItem` skips keys Electron can't take, such as chords).
+`conflictsFor` blocks a key, or a chord's first key, that another command uses in a mode
+both are offered in, and only notes a cross-mode share; `isReserved` refuses Escape, Tab,
+Enter and the browser's own Ctrl+W/T/N/Tab.
 
 ADR-0081 (P6-05, 2026-10-10 to 11) added **components and as-built joints**: a
 component is a named set of bodies (`doc.components[]`: ID, name, display; **no
