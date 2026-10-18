@@ -1,7 +1,7 @@
 /**
  * The generated tool reference (ADR-0080 §2, §4): one Markdown page per tool in
  * the toolbar, plus the index, built from the app's own catalogue (`TOOLS`,
- * `TABS`), its key map (`keysFor`) and the list of demos (`DEMO_TOOLS`).
+ * `TABS`), its key map (`defaultKeysFor`) and the list of demos (`DEMO_TOOLS`).
  *
  * `pnpm docs:generate` writes these pages under `docs/guide/tools/`, where the
  * site (`apps/site`) builds them into `/docs/tools/`, and
@@ -14,7 +14,7 @@
  * and the web app's own Vitest runs it for the staleness test. The one `node:`
  * import lives in the test, not here.
  */
-import { keysFor } from '../commands/keymap';
+import { defaultKeysFor } from '../commands/keymap';
 import { DEMO_TOOLS } from '../onboarding/demos';
 import { TABS, TOOLS, type Tool, type ToolId } from './tools';
 
@@ -177,7 +177,7 @@ function placements(info: ToolInfo): string {
 
 /** A tool's keys: `Mod` reads as Ctrl, several keys joined by "or", none as "None". */
 function shortcut(id: ToolId): string {
-  const keys = keysFor(id);
+  const keys = defaultKeysFor(id);
   if (keys.length === 0) return 'None';
   return keys.map((key) => key.replace(/Mod/g, 'Ctrl')).join(' or ');
 }

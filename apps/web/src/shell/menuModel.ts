@@ -132,11 +132,12 @@ export function keymapAccelerators(): string[] {
 }
 
 const toItem = (command: AppCommand): MenuItemModel => {
-  const accelerator = command.keys.find(isSingle);
+  // A person's own key may be one Electron can't take (a chord): the web handler runs it.
+  const accelerator = command.keys.map(toAccelerator).find(isElectronAccelerator);
   return {
     id: command.id,
     label: command.label,
-    ...(accelerator && { accelerator: toAccelerator(accelerator) }),
+    ...(accelerator && { accelerator }),
     ...(command.unavailable && { enabled: false }),
   };
 };

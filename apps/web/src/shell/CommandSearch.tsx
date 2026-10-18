@@ -1,4 +1,4 @@
-import { Pin, PinOff, Search } from 'lucide-react';
+import { Keyboard, Pin, PinOff, Search } from 'lucide-react';
 import {
   type KeyboardEvent,
   type ReactNode,
@@ -36,6 +36,8 @@ export interface CommandSearchProps {
   /** The pinned command IDs, in order (the `toolbox.pins` preference). */
   pinned: readonly string[];
   onTogglePin(id: string): void;
+  /** A row's key button: Settings › Keyboard recording that command's key. */
+  onChangeShortcut?: ((id: string) => void) | undefined;
   /** Runs a command the user picked; the search has closed by then. */
   onRun(command: AppCommand): void;
   onClose(): void;
@@ -103,7 +105,14 @@ interface Section {
   results: SearchResult<AppCommand>[];
 }
 
-function SearchBody({ commands, recent, pinned, onTogglePin, onRun }: CommandSearchProps) {
+function SearchBody({
+  commands,
+  recent,
+  pinned,
+  onTogglePin,
+  onChangeShortcut,
+  onRun,
+}: CommandSearchProps) {
   const [query, setQuery] = useState('');
   const [active, setActive] = useState(0);
   // Set when a pin was refused because the pins are full; cleared by the next toggle.
@@ -258,6 +267,7 @@ function SearchBody({ commands, recent, pinned, onTogglePin, onRun }: CommandSea
                   onHover={() => setActive(i)}
                   onRun={() => run(item)}
                   onTogglePin={() => togglePin(item.id)}
+                  onChangeShortcut={onChangeShortcut && (() => onChangeShortcut(item.id))}
                 />
               );
             })}
@@ -293,6 +303,7 @@ function Option({
   onHover,
   onRun,
   onTogglePin,
+  onChangeShortcut,
 }: {
   id: string;
   command: AppCommand;
@@ -305,6 +316,7 @@ function Option({
   onHover(): void;
   onRun(): void;
   onTogglePin(): void;
+  onChangeShortcut?: (() => void) | undefined;
 }) {
   const keys = command.keys[0];
   const PinIcon = pinned ? PinOff : Pin;
@@ -340,6 +352,21 @@ function Option({
       <span className="ml-auto flex shrink-0 items-center gap-2">
         {showGroup && <span className="text-xs text-muted">{command.group}</span>}
         {keys && <Kbd>{shortcutLabel(keys)}</Kbd>}
+        {onChangeShortcut && (
+          // A pointer shortcut like the pin; Settings › Keyboard is the way in for the keyboard.
+          <span
+            aria-hidden="true"
+            data-change-shortcut=""
+            title="Change shortcut"
+            onClick={(event) => {
+              event.stopPropagation();
+              onChangeShortcut();
+            }}
+            className={`grid size-6 place-items-center rounded-control text-muted hover:bg-accent-soft hover:text-ink ${active ? '' : 'invisible group-hover:visible'}`}
+          >
+            <Keyboard size={13} strokeWidth={1.75} />
+          </span>
+        )}
         {/* Pointer shortcut for Shift+Enter, so not a separate stop for assistive tech. */}
         <span
           aria-hidden="true"

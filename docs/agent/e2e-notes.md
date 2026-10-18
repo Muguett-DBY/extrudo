@@ -1613,7 +1613,7 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
 
 - **Settings e2e** (`e2e/settings.spec.ts`, ADR-0082): Ctrl+, opens `dialog`
   "Settings" (also the Menu's App item "Settings…", whose accessible name ends with
-  the key); sections are `[data-settings-section="general|plugins|marking|view|sketch|printing|export|desktop|agents"]`
+  the key); sections are `[data-settings-section="general|plugins|marking|keyboard|view|sketch|printing|export|desktop|agents"]`
   (`desktop` and `agents` only in the desktop build: the web build has neither; the Agents
   page has combobox "Agent", the read-only textbox "Setup for <agent>" `[data-agent-setup="<id>"]`,
   the `status` "Skill state", buttons "Copy", "Install skill" / "Update skill" / "Save skill to…"
@@ -1630,6 +1630,21 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
   number fields write as you type (`fill`, then `blur()`); Print Info's textbox "Density" shows
   the effective density for **every** material. Preferences are localStorage, so a reload keeps
   them; the desktop section isn't in the web build.
+
+### `e2e/settings-keyboard.spec.ts`
+
+- Settings › Keyboard (ADR-0082's 2026-10-18 amendment): the page is
+  `[data-settings-page="keyboard"]`, rows `[data-keymap-row="<id>"]` with
+  `data-keymap-changed="true"` when overridden and `data-keymap-recording` while
+  recording (the recorder listens on `window` in the capture phase, so plain
+  `page.keyboard.press` goes to it). Buttons: "<label>: <key>" per key (`Hole: H`),
+  "Add key to <label>", "Reset <label>", "Reset all keys"; the filter is the textbox
+  "Search commands" (the page's, not Ctrl+K's combobox) and buttons All / Model / Sketch /
+  Changed (n). A same-mode clash is the row's `alert` ("E is Extrude here.") with Replace /
+  Cancel. A tile's right-click: `[data-tool="hole"]` `click({ button: 'right' })`, then the
+  menuitem "Change shortcut…". A Search row's key button is `[data-change-shortcut]`
+  (visible on the active row). Read the preference with
+  `localStorage.getItem('extrudo.keymap.overrides')`.
 
 ### `e2e/shell-feature.spec.ts`
 
