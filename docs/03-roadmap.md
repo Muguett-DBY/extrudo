@@ -1277,6 +1277,20 @@ end to end, faster than in established desktop CAD.
     with its range; changing it in OpenSCAD changes the height.
   - Exporting the same document twice gives the same bytes.
   - `extrudo export --format scad` writes the same file as the app.
+- [x] **P6-10 One app menu** (owner, 2026-10-17; ADR-0090). Done 2026-10-17
+  (`ca0507cc` Settings sections, `108e9464` the panel). The Help menu
+  folds into the app menu: one panel, as wide as its rail, behind the four-squares button
+  with a rail of icon controls on top (mouse presets Crank, Spindle, Glide,
+  Blender, Slicer (disabled until built), Trackpad; a divider, the three toggles, a
+  divider, Theme; every one with a tooltip), two columns always (App:
+  Search…, Settings…, About, Close design/Quit; Learn: Help for \<tool\>
+  when a tool was hovered, User Guide, Tutorial, Online Tutorials, Examples,
+  Tool Reference) and a version strip (update state, version, Check now on
+  the desktop, GitHub). Plugins… and Customize Marking Menu… become
+  Settings sections (Plugins, Marking menu); the Help button leaves the
+  top bar. Acceptance: `pnpm check`, the e2e specs that open either menu
+  updated and green on CI, the docs named in ADR-0090 updated, the mockup
+  in `docs/plans/app-menu-prototypes.html`.
 
 ## Phase 7 — Later (lowest priority, after everything else)
 

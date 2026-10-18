@@ -44,7 +44,7 @@ import type { ViewportStore } from '../viewport/store';
 import { FACES, type FaceName } from '../viewport/viewcube';
 import type { FileActions } from './AppBar';
 import type { DocsPage } from './docsLinks';
-import { toolUnderPointer } from './Toolbar';
+import { lastHoveredTool } from './Toolbar';
 import {
   FILE_COMMANDS,
   type FileCommandId,
@@ -477,13 +477,14 @@ export function buildCommands(ctx: CommandContext): AppCommand[] {
   if (ctx.docs) {
     const open = (page: DocsPage) => ctx.docs?.open(page);
     // F1 (P6-06 S9): the docs page of the tool whose tile was hovered or
-    // focused last, or the user guide when none was.
+    // focused last (the app menu's "Help for <tool>" reads the same,
+    // ADR-0090), or the user guide before any tile was.
     plain(
       'help',
       'Help for this tool',
       'Help',
       () => {
-        const tool = toolUnderPointer();
+        const tool = lastHoveredTool();
         open(tool ? { tool } : 'guide');
       },
       {
@@ -492,14 +493,14 @@ export function buildCommands(ctx: CommandContext): AppCommand[] {
         keywords: 'Help F1 docs tool reference guide learn documentation',
       },
     );
-    // The Help menu's four docs items (P6-06 S9); the same commands in Ctrl+K
+    // The app menu's four docs items (P6-06 S9, ADR-0090); the same commands in Ctrl+K
     // and the desktop's Help menu. F1 is the `help` command's key alone, so
     // the desktop Help menu doesn't list it twice.
     plain('docsGuide', 'User Guide', 'Help', () => open('guide'), {
       icon: icon(BookOpen),
       keywords: 'Help docs user guide manual learn documentation',
     });
-    plain('docsTutorials', 'Tutorials', 'Help', () => open('tutorials'), {
+    plain('docsTutorials', 'Online Tutorials', 'Help', () => open('tutorials'), {
       icon: icon(ListChecks),
       keywords: 'Help docs tutorials walkthroughs lessons learn',
     });

@@ -111,7 +111,6 @@ import {
   preparePluginAttachment,
   specForPluginFeature,
 } from '../plugins/featureSpecs';
-import { PluginsDialog } from '../plugins/PluginsDialog';
 import { createPluginsStore, type DesignPlugin, designPlugins } from '../plugins/plugins';
 import {
   type PluginCommand,
@@ -141,6 +140,7 @@ import { readTopology, selectionRefs, sketchEntityIdsIn } from '../selection/ite
 import { type LookSketch, selectionLookTarget } from '../selection/lookAt';
 import { useModelSelection } from '../selection/useModelSelection';
 import { storeAccess } from '../settings/displaySettings';
+import type { SectionId } from '../settings/inventory';
 import { SettingsDialog } from '../settings/SettingsDialog';
 import type { FontPicker } from '../sketch/addFont';
 import { useBodiesBefore } from '../sketch/baseBodies';
@@ -177,6 +177,7 @@ import { textDraftStore } from '../sketch/textDraft';
 import type { ToolHost } from '../sketch/tools/host';
 import { isPickingTool, isSketchTool } from '../sketch/tools/ids';
 import { IMPORT_DRAWING_TOOL } from '../sketch/tools/importDrawing';
+import { BUILD } from '../version';
 import { boundsOf } from '../viewport/bodyGeometry';
 import { canvasDrawings } from '../viewport/canvasGeometry';
 import { forgetCanvasImages } from '../viewport/canvasImages';
@@ -201,7 +202,6 @@ import {
   pendingBodyEntries,
 } from './bodies';
 import { CommandSearch, type SearchOpen } from './CommandSearch';
-import { CustomizeMarkingMenu } from './CustomizeMarkingMenu';
 import {
   type AppCommand,
   buildCommands,
@@ -217,7 +217,7 @@ import { createViewActions } from './namedViews';
 import { Splitter, usePanel } from './panels';
 import { watchRecomputeErrors } from './recomputeErrors';
 import { Timeline } from './Timeline';
-import { Toolbar, ToolbarTabs, useToolbarTab } from './Toolbar';
+import { lastHoveredTool, Toolbar, ToolbarTabs, useToolbarTab } from './Toolbar';
 import {
   createTimelineSelectionStore,
   hoveredFeatureIds,
@@ -341,7 +341,8 @@ export function AppShell({
   // platform's store, read once here and again after every change the dialog makes.
   const plugins = useMemo(() => createPluginsStore(platform.plugins), [platform]);
   useEffect(() => void plugins.getState().refresh(), [plugins]);
-  const [pluginsOpen, setPluginsOpen] = useState(false);
+  // The Settings dialog: open at its last section, or at a requested one (Plugins…, ADR-0090 §2).
+  const [settingsOpen, setSettingsOpen] = useState<boolean | SectionId>(false);
   const installedPlugins = useStore(plugins, (s) => s.installed);
   // The custom features of the enabled plugins (ADR-0077 §6): a second, dynamic registry of
   // dialogs beside `dialogs`, and the plugin files the design carries (a stored feature's
@@ -438,7 +439,7 @@ export function AppShell({
       exportScript: () => exportScriptRef.current(),
       saveVersion: () => setVersionsOpen(true),
       versionHistory: () => setVersionsOpen(true),
-      plugins: () => setPluginsOpen(true),
+      plugins: () => setSettingsOpen('plugins'),
     }),
     [file],
   );
@@ -1075,8 +1076,6 @@ export function AppShell({
       },
     [desktop, recentNames],
   );
-  const [markingDialog, setMarkingDialog] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   // The About dialog reads the kernel worker's status and WASM heap (the Recomputer's client).
   const kernelClient = kernel?.client;
@@ -1173,7 +1172,7 @@ export function AppShell({
         markingMenu: {
           radial: markingStyle.radial,
           toggle: markingStyle.toggle,
-          customize: () => setMarkingDialog(true),
+          customize: () => setSettingsOpen('marking'),
         },
         ready,
         dialogCommands,
@@ -1292,13 +1291,14 @@ export function AppShell({
   });
   const markingCommands = useMemo(
     () =>
-      markingDialog
+      // Built only while Settings is open: its Marking menu section lists them.
+      settingsOpen !== false
         ? {
             model: relabelRepeat(commandBuilder('model', true)),
             sketch: relabelRepeat(commandBuilder('sketch', true)),
           }
         : { model: [], sketch: [] },
-    [markingDialog, commandBuilder],
+    [settingsOpen, commandBuilder],
   );
   const searchAtPointer = useMemo(
     () => () =>
@@ -2237,14 +2237,21 @@ export function AppShell({
         onSearch={(at) => setSearch(at ? { from: 'button', at } : { from: 'centre' })}
         onTutorial={startTutorial}
         onDocs={(page) => platform.openDocs(docsPath(page))}
-        onHelp={() => commands.find((c) => c.id === 'help')?.run()}
+        helpTool={() => {
+          const tool = lastHoveredTool();
+          const label = tool && commands.find((c) => c.id === tool)?.label;
+          return label
+            ? { label, onHelp: () => platform.openDocs(docsPath({ tool: tool as string })) }
+            : undefined;
+        }}
+        version={BUILD.version}
+        updates={platform.updates}
         {...(platform.updates?.check && { onCheckUpdates: () => platform.updates?.check?.() })}
         markingRadial={markingStyle.radial}
         onMarkingRadial={(radial) => {
           if (radial !== markingStyle.radial) markingStyle.toggle();
         }}
         display={displayAccess}
-        onCustomizeMarking={() => setMarkingDialog(true)}
         onSettings={() => setSettingsOpen(true)}
         onAbout={() => setAboutOpen(true)}
         onSource={() => platform.openSite('repo')}
@@ -2726,8 +2733,10 @@ export function AppShell({
         onOpenChange={setParametersOpen}
       />
       <SettingsDialog
-        open={settingsOpen}
+        open={settingsOpen !== false}
         onOpenChange={setSettingsOpen}
+        section={typeof settingsOpen === 'string' ? settingsOpen : undefined}
+        plugins={{ plugins, files: platform.files, inDesign, onUpdate: updatePlugin }}
         preferences={platform.preferences}
         display={displayAccess}
         doc={doc}
@@ -2735,7 +2744,12 @@ export function AppShell({
         onThemeChange={setChoice}
         markingRadial={markingStyle.radial}
         onMarkingRadial={markingStyle.toggle}
-        onCustomizeMarking={() => setMarkingDialog(true)}
+        marking={{
+          overrides: markingSlots.overrides,
+          commands: markingCommands,
+          assign: markingSlots.assign,
+          resetAll: markingSlots.resetAll,
+        }}
         desktop={platform.desktop !== undefined}
         installedSlicers={platform.installedSlicers}
         agent={platform.agent}
@@ -2746,14 +2760,6 @@ export function AppShell({
         desktop={platform.desktop !== undefined}
         kernelInfo={kernelInfo}
         openLink={platform.openLink}
-      />
-      <CustomizeMarkingMenu
-        open={markingDialog}
-        onClose={() => setMarkingDialog(false)}
-        overrides={markingSlots.overrides}
-        commands={markingCommands}
-        assign={markingSlots.assign}
-        resetAll={markingSlots.resetAll}
       />
       <CommandSearch
         open={search}
@@ -2791,14 +2797,6 @@ export function AppShell({
         notify={notify}
         beforeRestore={endTransaction}
         onOpenCopy={(id) => navigate(projectHref(id))}
-      />
-      <PluginsDialog
-        open={pluginsOpen}
-        onOpenChange={setPluginsOpen}
-        plugins={plugins}
-        files={platform.files}
-        inDesign={inDesign}
-        onUpdate={updatePlugin}
       />
     </div>
   );

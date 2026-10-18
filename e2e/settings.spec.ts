@@ -1,5 +1,5 @@
 import { expect, type Page, test } from '@playwright/test';
-import { appMenu, appSubmenu, kernelReady, openProject, pickTool } from './helpers';
+import { kernelReady, openProject, pickMenuItem, pickTool, railToggle } from './helpers';
 
 // ADR-0082: the Settings dialog. Preferences are per browser (localStorage), so each test
 // starts from the defaults and a reload keeps what it changed.
@@ -16,11 +16,13 @@ test('Ctrl+, opens Settings and every section opens', async ({ page }) => {
   await expect(page.locator('[data-settings-page="general"]')).toBeVisible();
 
   for (const [id, heading] of [
+    ['plugins', 'Plugins'],
+    ['marking', 'Marking menu'],
     ['view', 'View and navigation'],
     ['sketch', 'Sketch'],
     ['printing', '3D printing'],
     ['export', 'Export'],
-    ['general', 'General'],
+    ['general', 'Appearance'],
   ] as const) {
     await section(page, id).click();
     const content = page.locator(`[data-settings-page="${id}"]`);
@@ -34,9 +36,31 @@ test('Ctrl+, opens Settings and every section opens', async ({ page }) => {
   await section(page, 'sketch').click();
   await page.keyboard.press('Escape');
   await expect(dialog(page)).toBeHidden();
-  await appMenu(page).click();
-  await page.getByRole('menuitem', { name: /^Settings…/ }).click();
+  await pickMenuItem(page, 'App', 'Settings…');
   await expect(page.locator('[data-settings-page="sketch"]')).toBeVisible();
+});
+
+test('Plugins… and Customize Marking Menu… open their Settings sections', async ({ page }) => {
+  await openProject(page);
+  await kernelReady(page);
+  await page.keyboard.press('Control+k');
+  await page.getByRole('combobox', { name: 'Search commands' }).fill('plugins');
+  await page.getByRole('option', { name: /^Plugins…/ }).click();
+  await expect(page.locator('[data-settings-page="plugins"]')).toBeVisible();
+  await expect(dialog(page).getByRole('button', { name: 'Install…' })).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(dialog(page)).toBeHidden();
+
+  // The ring editor is inline on the Marking menu page, under the Radial switch.
+  await page.keyboard.press('Control+k');
+  await page.getByRole('combobox', { name: 'Search commands' }).fill('customize marking');
+  await page.getByRole('option', { name: /^Customize Marking Menu/ }).click();
+  const marking = page.locator('[data-settings-page="marking"]');
+  await expect(marking).toBeVisible();
+  await expect(marking.getByRole('checkbox', { name: 'Radial right-click menu' })).toBeChecked();
+  await expect(marking.getByRole('region', { name: 'Customize Marking Menu' })).toBeVisible();
+  await section(page, 'general').click();
+  await expect(dialog(page).getByRole('button', { name: /Customize Marking Menu/ })).toHaveCount(0);
 });
 
 test('PLA density: a tweak shows in Print Info and the weight, Reset brings 1.24 back', async ({
@@ -86,24 +110,26 @@ test('PLA density: a tweak shows in Print Info and the weight, Reset brings 1.24
   await expect(panel.getByRole('textbox', { name: 'Density' })).toHaveValue('1.24');
 });
 
-test('Radial right-click menu matches the gear menu; the theme applies at once', async ({
+test("Radial right-click menu matches the app menu's toggle; the theme applies at once", async ({
   page,
 }) => {
   await openProject(page);
   await kernelReady(page);
   await page.keyboard.press('Control+,');
+  await section(page, 'marking').click();
   const radial = dialog(page).getByRole('checkbox', { name: 'Radial right-click menu' });
   await expect(radial).toBeChecked();
   await radial.uncheck();
   await page.keyboard.press('Escape');
 
-  const menu = await appSubmenu(page, 'Behaviour');
-  await expect(
-    menu.getByRole('menuitemcheckbox', { name: 'Radial right-click menu' }),
-  ).toHaveAttribute('aria-checked', 'false');
+  await expect(await railToggle(page, 'Radial right-click menu')).toHaveAttribute(
+    'aria-pressed',
+    'false',
+  );
   await page.keyboard.press('Escape');
 
   await page.keyboard.press('Control+,');
+  await section(page, 'general').click();
   await dialog(page).getByRole('radio', { name: 'Light' }).check();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
   await dialog(page).getByRole('radio', { name: 'Dark' }).check();
@@ -141,8 +167,7 @@ test('settings survive a reload, and a sketch setting is the palette’s', async
 
 test('the home screen has the same dialog', async ({ page }) => {
   await page.goto('./');
-  await appMenu(page).click();
-  await page.getByRole('menuitem', { name: /^Settings…/ }).click();
+  await pickMenuItem(page, 'App', 'Settings…');
   await expect(dialog(page)).toBeVisible();
   await section(page, 'view').click();
   await dialog(page).getByRole('combobox', { name: 'Projection' }).selectOption('orthographic');
