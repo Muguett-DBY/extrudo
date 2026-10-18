@@ -2,12 +2,12 @@
 title: Export Design as Script
 section: Tools
 category: Home
-order: 13
+order: 12
 ---
 
 # Export Design as Script
 
-Download the design as TypeScript that makes it again with the document API.
+Download the design as code: TypeScript for the document API, or OpenSCAD.
 
 | Where | Shortcut |
 |---|---|

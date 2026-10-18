@@ -96,8 +96,8 @@ brief, voice) is in **`05-brand.md`**. In short:
   printing "mode".
 - **Tabs** (ADR-0079): `HOME` (the design as a whole: New Design, All
   Designs; Save Version, Version History; **Import**: Import .extrudo, Import
-  Model, Import Drawing, Canvas; **Export**: Export .extrudo, Export Model,
-  Export as Script, Save to Linked Folder (two groups since the owner's UI
+  Model, Import Drawing, Canvas; **Export**: Export .extrudo, Export as Script,
+  Export Model, Save to Linked Folder (two groups since the owner's UI
   review 3, R3-09, where there was one Files group); Parameters, Customizer),
   `SOLID` (default: Create, Primitives, Features, Pattern, Program, Component),
   `MODIFY` (Modify, Transform), `CONSTRUCT` (Planes, Axes, Points, and
@@ -556,7 +556,7 @@ Crank or Glide. Since the right button drags, the right-click marking menu
   (no keys; Ctrl+K finds them). The group shows Record while idle and Stop while
   recording; the status bar shows a red dot and "Recording macro · N features".
   Stop opens the Macro dialog (code read only, Copy, Replace with a Script, Keep
-  both, Close). Home › Export as Script downloads `<name>.ts`.
+  both, Close). Home › Export as Script opens a dialog: TypeScript (`<name>.ts`) or OpenSCAD, with a preview and Copy.
 - **Primitives (P2-10, ADR-0032):** Solid › Primitives → Box, Cylinder,
   Sphere, Torus (no keys). The dialog opens on the XY plane ("XY plane"
   in **Plane**) with a live preview; while Plane takes picks the origin
