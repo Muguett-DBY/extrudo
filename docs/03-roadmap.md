@@ -1043,7 +1043,11 @@ end to end, faster than in established desktop CAD.
     `src/occt/scope.ts` and `memory.test.ts` (the first two are hash inputs,
     so do it in the same rebuild).~~ **Done 2026-10-16** (ADR-0001's addendum): built with 3.1.0,
     same OCCT and emsdk; memory test, check and CI green, no golden changed.
-  - Your own keys (user feedback: no keys for the sketch constraints). **Done
+  - ~~Constraint keys: K, then a letter (user feedback, 2026-10-18)~~ **Done
+    2026-10-18** (ADR-0023's amendment of that date): a keymap entry may be a
+    chord ("K H"), the 13 constraints bind K plus a letter, and a hint panel
+    lists the second keys while the chord is pending.
+  - ~~Your own keys (user feedback: no keys for the sketch constraints)~~ **Done
     2026-10-18** (ADR-0082's amendment of 2026-10-18): Settings › Keyboard lists
     every command's keys and records new ones (one key, or a chord such as K H),
     asks before taking a key another command uses in the same mode, and resets per

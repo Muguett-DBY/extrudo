@@ -88,7 +88,7 @@ test("search's key button records a chord", async ({ page }) => {
     .click();
   await expect(row(page, 'measure')).toHaveAttribute('data-keymap-recording', '');
   await page.keyboard.press('k');
-  await page.keyboard.press('m');
-  expect(await stored(page)).toEqual({ measure: ['K M'] });
-  await expect(row(page, 'measure').getByRole('button', { name: 'Measure: K M' })).toBeVisible();
+  await page.keyboard.press('y');
+  expect(await stored(page)).toEqual({ measure: ['K Y'] });
+  await expect(row(page, 'measure').getByRole('button', { name: 'Measure: K Y' })).toBeVisible();
 });
