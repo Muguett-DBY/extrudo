@@ -18,7 +18,7 @@ import type { MenuModel } from '@extrudo/web/menu-model';
 import { app, BrowserWindow, dialog, Menu, type OpenDialogOptions, session, shell } from 'electron';
 import { autoUpdater } from 'electron-updater';
 import { CHANNELS } from '../shared/ipc';
-import { createDialogFiles } from './dialogs';
+import { createDialogFiles, createFolderPicker } from './dialogs';
 import { createDocs } from './docs';
 import { createExternalFiles, createExternalPaths } from './externalFiles';
 import { createFolders } from './folders';
@@ -26,7 +26,8 @@ import { HEADERS } from './headers';
 import { registerIpcHandlers } from './ipc';
 import { createLinks } from './links';
 import { createMcpService } from './mcp/service';
-import { extrudoSkill, SKILL_INSTRUCTIONS } from './mcp/skillFiles';
+import { extrudoSkill, SKILL_FILES, SKILL_INSTRUCTIONS } from './mcp/skillFiles';
+import { createSkillInstaller } from './mcp/skillInstall';
 import {
   buildMenuTemplate,
   hasApplicationMenu,
@@ -36,6 +37,7 @@ import {
 } from './menuTemplate';
 import { isAllowedNavigation } from './navigation';
 import { createOpenQueue, extrudoPathFromArgv, isExtrudoPath } from './openPaths';
+import { allowPermission } from './permissions';
 import { createPreferencesFile } from './preferences';
 import { APP_URL, handleAppProtocol, registerAppScheme } from './protocol';
 import { createRecentFile } from './recent';
@@ -272,10 +274,10 @@ function main(): void {
       }
       callback({ responseHeaders });
     });
-    // Nothing in the app needs a camera, a microphone, a location or a device:
-    // deny every permission request rather than leave the default.
-    session.defaultSession.setPermissionRequestHandler((_contents, _permission, callback) =>
-      callback(false),
+    // Only the clipboard write the Copy buttons need; every other request
+    // (camera, microphone, location, devices) is denied (permissions.ts).
+    session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) =>
+      callback(allowPermission(permission)),
     );
 
     registerIpcHandlers({
@@ -283,6 +285,11 @@ function main(): void {
       store,
       plugins,
       files: createDialogFiles(getWindow),
+      skills: createSkillInstaller({
+        files: SKILL_FILES,
+        home: app.getPath('home'),
+        chooseFolder: createFolderPicker(getWindow),
+      }),
       rescue,
       folders,
       recent,

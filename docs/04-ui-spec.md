@@ -801,7 +801,11 @@ Appearance (the theme), Plugins (install, enable and remove plugins, P6-03; Ctrl
 it), Marking menu (the Radial right-click menu switch above the ring editor: a ring
 per mode, a wedge, then the command it runs; Ctrl+K "Customize Marking Menu…" opens
 it), Keyboard (every command's keys, below), View and navigation, Sketch, 3D printing,
-Export and, on the desktop, Desktop (ADR-0090 §2). The last section is remembered. Controls are the same state as the
+Export and, on the desktop, Desktop (slicers) and Agents (MCP) (the server's switch,
+port and state, then the setup text per agent to copy: Claude Code, Codex CLI,
+opencode, other clients' `mcpServers` JSON, or a sentence for the agent, and the
+skill's state in the agent's skills folder with Install skill / Update skill / Save
+skill to…; ADR-0087's amendment of 2026-10-18). The last section is remembered. Controls are the same state as the
 quick ones elsewhere (app menu, sketch palette, Print Info, Export dialog), so
 the dialog never disagrees with them; numbers are `<ExpressionInput>`s with a
 per-field Reset when they differ from the default.

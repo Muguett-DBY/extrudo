@@ -1,16 +1,18 @@
 import { createDocument, type EvaluateResult, evaluateParameters } from '@extrudo/core';
 import { X } from 'lucide-react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type AgentSetupId, agentSetups } from '../agent/clientSetup';
 import { useAgentStatus } from '../agent/useAgentBridge';
 import type { ThemeChoice } from '../design-system';
 import { Button, Dialog, DialogClose, IconButton, Select, TextInput } from '../design-system';
 import { ExpressionInput } from '../parameters/ExpressionInput';
-import {
-  type AgentBridge,
-  type AgentStatus,
-  clientConfig,
-  type Platform,
-  type Preferences,
+import type {
+  AgentBridge,
+  AgentConfig,
+  AgentSkillTarget,
+  AgentStatus,
+  Platform,
+  Preferences,
 } from '../platform';
 import { SLICERS, type SlicerId } from '../platform/slicer';
 import { PluginsSection, type PluginsSectionProps } from '../plugins/PluginsList';
@@ -188,13 +190,9 @@ function Page({ id, ...props }: SettingsDialogProps & { id: SectionId }): ReactN
     case 'export':
       return <ExportPage preferences={props.preferences} />;
     case 'desktop':
-      return (
-        <DesktopPage
-          preferences={props.preferences}
-          installed={props.installedSlicers}
-          agent={props.agent}
-        />
-      );
+      return <DesktopPage preferences={props.preferences} installed={props.installedSlicers} />;
+    case 'agents':
+      return <AgentsPage preferences={props.preferences} agent={props.agent} />;
   }
 }
 
@@ -625,11 +623,9 @@ function ExportPage({ preferences }: { preferences: Preferences }) {
 function DesktopPage({
   preferences,
   installed,
-  agent,
 }: {
   preferences: Preferences;
   installed?: Platform['installedSlicers'];
-  agent?: AgentBridge | undefined;
 }) {
   const [paths, setPaths] = useState(() =>
     preferences.get<Partial<Record<SlicerId, string>>>(SLICER_PATHS_KEY, {}),
@@ -672,7 +668,6 @@ function DesktopPage({
           />
         </Row>
       ))}
-      {agent && <AgentSettings preferences={preferences} agent={agent} />}
     </>
   );
 }
@@ -697,11 +692,41 @@ export const validPort = (text: string): number | undefined => {
   return Number.isInteger(port) && port >= 1024 && port <= 65535 ? port : undefined;
 };
 
+/** The skill's state in the agent's folder, in one line (undefined while unknown). */
+export function skillStateText(skill: AgentSkillTarget | undefined, known: boolean): string {
+  if (!known)
+    return "The skill teaches the agent how to model here: save it into the agent's skills folder.";
+  if (!skill) return 'Looking…';
+  if (skill.state === 'missing') return `Not installed. Install skill puts it in ${skill.dir}.`;
+  if (skill.state === 'stale')
+    return `Installed in ${skill.dir}: an older version. Update skill replaces it.`;
+  return `Installed in ${skill.dir}, up to date.`;
+}
+
 /**
- * Settings › Desktop › Agents (P6-08, ADR-0087 §6): the MCP server's switch,
- * its port (a plain number: a setting of the app, not a model value, so no
- * expression), its state, and the client config with the token.
+ * Settings › Agents (MCP) (P6-08, ADR-0087 §6 and its amendment of 2026-10-18):
+ * the server's switch, its port (a plain number: a setting of the app, not a
+ * model value, so no expression) and state, then the setup for each popular
+ * agent as a text to copy, every one holding the URL and the token, and the
+ * skill's state in the agent's folder with Install skill / Update skill (or
+ * Save skill to… for an agent with no known folder).
+ *
+ * Test hooks: the page `[data-settings-page="agents"]`, combobox "Agent", the
+ * textbox "Setup for <agent>" (`[data-agent-setup="<id>"]`, read-only), the `status`
+ * "Skill state", buttons "Copy", "Install skill" / "Update skill" / "Save skill to…" and
+ * "Regenerate token", and the `status` with the note.
  */
+function AgentsPage({
+  preferences,
+  agent,
+}: {
+  preferences: Preferences;
+  agent?: AgentBridge | undefined;
+}) {
+  if (!agent) return <p className="text-sm text-muted">Agents connect to the desktop app only.</p>;
+  return <AgentSettings preferences={preferences} agent={agent} />;
+}
+
 function AgentSettings({ preferences, agent }: { preferences: Preferences; agent: AgentBridge }) {
   const status = useAgentStatus(agent);
   const [enabled, setEnabled] = useState(() => preferences.get<boolean>(MCP_ENABLED_KEY, true));
@@ -709,27 +734,84 @@ function AgentSettings({ preferences, agent }: { preferences: Preferences; agent
     String(preferences.get<number>(MCP_PORT_KEY, DEFAULT_MCP_PORT)),
   );
   const [note, setNote] = useState<string>();
+  const [config, setConfig] = useState<AgentConfig>();
+  const [setupId, setSetupId] = useState<AgentSetupId>('claude-code');
+  // The URL follows the port: the config is read once, then again when the status's URL moves.
+  const url = status?.url;
+  useEffect(() => {
+    if (config && (url === undefined || config.url === url)) return;
+    let current = true;
+    agent.config().then(
+      (next) => current && setConfig(next),
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [agent, url, config]);
   const portValue = validPort(port);
   const commitPort = () => {
     if (portValue === undefined) return;
     if (portValue === preferences.get<number>(MCP_PORT_KEY, DEFAULT_MCP_PORT)) return;
     preferences.set(MCP_PORT_KEY, portValue);
   };
-  const copy = (config: Promise<Parameters<typeof clientConfig>[0]>, done: string) => {
-    void config
-      .then((c) => navigator.clipboard.writeText(clientConfig(c)))
-      .then(
-        () => setNote(done),
-        () => setNote("Couldn't copy the client config."),
-      );
+  const setups = config ? agentSetups(config) : [];
+  const setup = setups.find((s) => s.id === setupId) ?? setups[0];
+  // The skill in the picked agent's folder (ADR-0087 amendment 2026-10-18, skills).
+  const [skill, setSkill] = useState<AgentSkillTarget>();
+  const [installing, setInstalling] = useState(false);
+  const target = setup?.skillTarget ? setup.id : undefined;
+  useEffect(() => {
+    setSkill(undefined);
+    if (!target || !agent.skillState) return;
+    let current = true;
+    agent.skillState(target).then(
+      (next) => current && setSkill(next),
+      () => undefined,
+    );
+    return () => {
+      current = false;
+    };
+  }, [agent, target]);
+  const install = () => {
+    if (!agent.installSkill || !setup) return;
+    setInstalling(true);
+    agent.installSkill(target).then(
+      (next) => {
+        setInstalling(false);
+        if (!next) return;
+        if (target) setSkill(next);
+        setNote(`Skill installed in ${next.dir}.${setup.skillNote ? ` ${setup.skillNote}` : ''}`);
+      },
+      () => {
+        setInstalling(false);
+        setNote("Couldn't install the skill.");
+      },
+    );
+  };
+  const copy = () => {
+    if (!setup) return;
+    navigator.clipboard.writeText(setup.text).then(
+      () => setNote(`Copied. ${setup.how}`),
+      () => setNote("Couldn't copy: select the text and copy it by hand."),
+    );
+  };
+  const regenerate = () => {
+    agent.regenerateToken().then(
+      (next) => {
+        setConfig(next);
+        setNote('New token made: agents with the old one are refused. Copy the setup again.');
+      },
+      () => setNote("Couldn't make a new token."),
+    );
   };
   return (
     <>
-      <Heading>Agents (MCP)</Heading>
+      <Heading>Server</Heading>
       <p className="mb-2 text-xs text-muted">
-        AI agents such as Claude Code can read and change the open design through a server on this
+        AI agents such as Claude Code read and change the open design through a server on this
         computer. Only programs here that have the token can connect; every change they make is one
-        undo step.
+        undo step, and the top bar says "Agent connected" while one is.
       </p>
       <Check
         label="Let agents connect"
@@ -758,29 +840,64 @@ function AgentSettings({ preferences, agent }: { preferences: Preferences; agent
           {agentStateText(status, enabled)}
         </p>
       </Row>
+      <Heading>Add it to your agent</Heading>
+      <p className="mb-2 text-xs text-muted">
+        Pick your agent and copy the text. Each one holds the token: anyone who can read it can
+        change your designs while Extrudo runs. Regenerate token locks every agent out until it gets
+        the new text.
+      </p>
+      <Row label="Agent">
+        <Select
+          aria-label="Agent"
+          value={setup?.id ?? setupId}
+          onChange={(event) => setSetupId(event.target.value as AgentSetupId)}
+        >
+          {setups.map((s) => (
+            <option key={s.id} value={s.id}>
+              {s.label}
+            </option>
+          ))}
+        </Select>
+        {setup && <p className="mt-1 text-xs text-muted">{setup.how}</p>}
+      </Row>
+      {setup && (
+        <textarea
+          readOnly
+          aria-label={`Setup for ${setup.label}`}
+          data-agent-setup={setup.id}
+          rows={Math.min(8, setup.text.split('\n').length + 1)}
+          onFocus={(event) => event.target.select()}
+          className="my-1.5 w-full resize-y rounded-input border border-line bg-transparent p-2 font-mono text-xs text-ink focus-visible:border-accent focus-visible:outline-none"
+          value={setup.text}
+        />
+      )}
+      {setup && (
+        <Row label="Skill" hint={target ? setup.skillNote : undefined}>
+          <p role="status" aria-label="Skill state" className="pt-1 text-sm">
+            {skillStateText(target ? skill : undefined, target !== undefined)}
+          </p>
+        </Row>
+      )}
       <div className="flex flex-wrap gap-2 py-1.5">
-        <Button
-          onClick={() =>
-            copy(
-              agent.config(),
-              "Copied. Paste it into your agent's MCP settings: it holds the token.",
-            )
-          }
-        >
-          Copy client config
+        <Button variant="primary" onClick={copy} disabled={!setup}>
+          Copy
         </Button>
-        <Button
-          onClick={() =>
-            copy(
-              agent.regenerateToken(),
-              'New token made and copied: clients with the old one are refused.',
-            )
-          }
-        >
-          Regenerate token
-        </Button>
+        {agent.installSkill && (
+          <Button onClick={install} disabled={!setup || installing}>
+            {target
+              ? skill?.state === 'stale'
+                ? 'Update skill'
+                : 'Install skill'
+              : 'Save skill to…'}
+          </Button>
+        )}
+        <Button onClick={regenerate}>Regenerate token</Button>
       </div>
-      {note && <p className="text-xs text-muted">{note}</p>}
+      {note && (
+        <p role="status" className="text-xs text-muted">
+          {note}
+        </p>
+      )}
     </>
   );
 }
