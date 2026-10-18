@@ -1,1 +1,0 @@
-- 2026-10-16 · **Homebrew cask opens without a Gatekeeper prompt** (ADR-0075): the cask removes the quarantine attribute after every install and upgrade, so Extrudo installed with `brew` opens straight away instead of needing "Open Anyway" after each update.
