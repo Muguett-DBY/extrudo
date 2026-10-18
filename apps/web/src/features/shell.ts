@@ -24,12 +24,12 @@ import {
   shellWallFacesKey,
   shellWallThicknessKey,
 } from '@extrudo/core';
-import { type DialogField, type DialogValues, defineFeatureDialog } from './spec';
+import { type DialogField, type DialogValues, defineFeatureDialog, type ShownValues } from './spec';
 import { defaultInputs } from './values';
 
-const count = (values: DialogValues, field: string) => values.refs[field]?.length ?? 0;
+const count = (values: ShownValues, field: string) => values.refs[field]?.length ?? 0;
 
-const hasWalls = (values: DialogValues, n: number) => count(values, shellWallFacesKey(n)) > 0;
+const hasWalls = (values: ShownValues, n: number) => count(values, shellWallFacesKey(n)) > 0;
 
 /** The fields of wall set `n` (1-based). */
 function wallFields(n: number): DialogField[] {
@@ -48,7 +48,7 @@ function wallFields(n: number): DialogField[] {
           ? 'Faces whose walls get their own thickness, such as a thicker floor. Faces that run smoothly into a picked one come with it.'
           : 'Another set of faces, with its own wall thickness.',
       // A set past the first shows once the one before it has faces.
-      ...(n > 1 && { shown: (v: DialogValues) => hasWalls(v, n - 1) || hasWalls(v, n) }),
+      ...(n > 1 && { shown: (v: ShownValues) => hasWalls(v, n - 1) || hasWalls(v, n) }),
     },
     {
       kind: 'expression',

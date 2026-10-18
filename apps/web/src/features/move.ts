@@ -168,7 +168,7 @@ export function moveManipulators(values: DialogValues, ctx: ManipulatorContext):
         pivot.centre[1] + direction[1] * pivot.half[k as 0 | 1 | 2],
         pivot.centre[2] + direction[2] * pivot.half[k as 0 | 1 | 2],
       ];
-      out.push({ kind: 'distance', field: `d${name}`, origin: face, direction });
+      out.push({ kind: 'distance', field: `d${name}`, origin: face, direction, ghost: 'move' });
       out.push({
         kind: 'angle',
         field: `r${name}`,
@@ -200,7 +200,9 @@ export function moveManipulators(values: DialogValues, ctx: ManipulatorContext):
       Math.hypot(...out) > 1e-9
         ? unit(out)
         : unit(cross(d, Math.abs(d[0]) < 0.9 ? [1, 0, 0] : [0, 1, 0]));
-    return [{ kind: 'angle', field: 'angle', origin: foot, axis: d, zero, fullTurn: true }];
+    return [
+      { kind: 'angle', field: 'angle', origin: foot, axis: d, zero, fullTurn: true, ghost: 'turn' },
+    ];
   }
   return [];
 }

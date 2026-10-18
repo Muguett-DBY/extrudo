@@ -1,0 +1,1 @@
+- 2026-10-18 · **Handle drags follow the pointer**: the preview ghost of an extrude, press-pull, box, cylinder or Move stretches, slides or turns with the handle while you drag, and the kernel's previews no longer wait for the pointer to stop.

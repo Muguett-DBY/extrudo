@@ -73,7 +73,10 @@ export interface RecomputerOptions {
   model: ModelStore<BodyMesh>;
   /** Changes within this time go out as one request. Default 30 ms. */
   delayMs?: number;
-  /** A preview waits this long for the draft to settle. Default 60 ms. */
+  /**
+   * A preview asked for while none is running waits this long, so drafts
+   * made in one go send only the last. Default 0 (the next task).
+   */
   previewDelayMs?: number;
   /**
    * Heap top, in bytes, over which the kernel worker is replaced between
@@ -121,6 +124,13 @@ export interface FontSource {
   used(doc: ExtrudoDocument): Iterable<string>;
   /** A font's bytes, or undefined for an ID no source knows. */
   bytes(id: string): Promise<ArrayBuffer | undefined>;
+}
+
+/** A preview that waits to be sent (`Recomputer.preview`). */
+interface WaitingPreview {
+  timer: ReturnType<typeof setTimeout> | undefined;
+  start(): void;
+  resolve(preview: Preview | undefined): void;
 }
 
 /**
@@ -196,12 +206,11 @@ export class Recomputer {
   #meshes = new Map<BodyId, { version: string; mesh: BodyMesh }>();
   /** The base meshes of the open dialog's last preview (editing), kept while it is open. */
   #baseMeshes = new Map<BodyId, { version: string; mesh: BodyMesh }>();
-  #preview:
-    | {
-        timer: ReturnType<typeof setTimeout>;
-        resolve(preview: Preview | undefined): void;
-      }
-    | undefined;
+  /** The newest draft's preview, waiting until none is running (issue #76). */
+  #preview: WaitingPreview | undefined;
+  /** A preview is with the kernel; the waiting one goes when it is back. */
+  #previewing = false;
+  /** Bumped when the dialog closes, so a running preview's answer is dropped. */
   #previewSequence = 0;
   #disposed = false;
   /** Whether this kernel has manifold-3d (P4-06, ADR-0066 §3); a restart forgets it. */
@@ -235,7 +244,7 @@ export class Recomputer {
     this.#fontSource = options.fonts;
     this.#fileSource = options.files;
     this.#delayMs = options.delayMs ?? 30;
-    this.#previewDelayMs = options.previewDelayMs ?? 60;
+    this.#previewDelayMs = options.previewDelayMs ?? 0;
     this.#heapRecycleBytes = options.heapRecycleBytes ?? HEAP_RECYCLE_BYTES;
     this.#onRecycle = options.onRecycle;
     this.client = new KernelClient(options.spawn, {
@@ -269,9 +278,13 @@ export class Recomputer {
   }
 
   /**
-   * Previews a feature dialog's draft at `index` in the timeline, once the
-   * draft has stayed the same for `previewDelayMs`. Resolves `undefined`
-   * when a newer preview (or `endPreview`) supersedes it or it fails.
+   * Previews a feature dialog's draft at `index` in the timeline. One
+   * preview runs at a time: a draft asked for meanwhile waits for it, and a
+   * newer draft takes the place of a waiting one, which resolves `undefined`
+   * (a handle drag shows every answer the kernel can give, not only the one
+   * after the pointer stops; issue #76). A running preview still resolves
+   * with its own answer. Resolves `undefined` too after `endPreview`, or when
+   * the preview fails.
    */
   preview(
     draft: Feature,
@@ -282,62 +295,77 @@ export class Recomputer {
     // A dialog is open from its first draft until it closes: the worker is not
     // thrown away under it (P4-12 H4).
     this.#drafting = true;
-    const sequence = ++this.#previewSequence;
+    const sequence = this.#previewSequence;
     return new Promise((resolve) => {
-      const timer = setTimeout(async () => {
-        this.#preview = undefined;
-        try {
-          const doc = this.#document.getState().doc;
-          const have = { ...this.#have(), ...this.#baseHave() };
-          // A preview's draft isn't in the document yet, so its file goes now.
-          await this.#sendResources(doc, [draft]);
-          if (sequence !== this.#previewSequence || this.#disposed) {
-            resolve(undefined);
-            return;
-          }
-          const result = await this.client.call((api) =>
-            api.preview({ doc, draft, index, have, ...(options.base && { base: true }) }),
-          );
-          if (sequence !== this.#previewSequence || result.status !== 'done') {
-            resolve(undefined);
-            return;
-          }
-          const bodies: Record<BodyId, BodyMesh> = {};
-          for (const body of result.bodies) {
-            const mesh = body.mesh ?? this.#held(body) ?? this.#heldBase(body);
-            if (mesh) bodies[body.id] = mesh;
-          }
-          let base: Record<BodyId, BodyMesh> | undefined;
-          if (result.base) {
-            base = {};
-            const held = new Map<BodyId, { version: string; mesh: BodyMesh }>();
-            for (const body of result.base) {
-              const mesh = body.mesh ?? this.#held(body) ?? this.#heldBase(body);
-              if (!mesh) continue;
-              base[body.id] = mesh;
-              held.set(body.id, { version: body.version, mesh });
-            }
-            this.#baseMeshes = held;
-          }
-          const own = result.reports[draft.id];
-          resolve({
-            features: result.features,
-            bodies,
-            tools: result.tools ?? [],
-            ...(base && { base }),
-            ...(isConstructionReport(own) && { construction: own }),
-            ...(isCanvasReport(own) && { canvas: own }),
-            ...(isPatternReport(own) && { pattern: own }),
-            ...(isEmbossReport(own) && { emboss: own }),
-            ...(isThreadReport(own) && { thread: own }),
-            ...(isSweepReport(own) && { sweep: own }),
-          });
-        } catch {
-          resolve(undefined);
-        }
-      }, this.#previewDelayMs);
-      this.#preview = { timer, resolve };
+      const waiting: WaitingPreview = {
+        timer: undefined,
+        resolve,
+        start: () => {
+          this.#preview = undefined;
+          this.#previewing = true;
+          this.#runPreview(draft, index, options, sequence)
+            .then(resolve, () => resolve(undefined))
+            .finally(() => {
+              this.#previewing = false;
+              const next = this.#preview;
+              if (next) {
+                clearTimeout(next.timer);
+                next.start();
+              }
+            });
+        },
+      };
+      this.#preview = waiting;
+      if (!this.#previewing) waiting.timer = setTimeout(waiting.start, this.#previewDelayMs);
     });
+  }
+
+  async #runPreview(
+    draft: Feature,
+    index: number,
+    options: { base?: boolean },
+    sequence: number,
+  ): Promise<Preview | undefined> {
+    const ended = () => sequence !== this.#previewSequence || this.#disposed;
+    const doc = this.#document.getState().doc;
+    const have = { ...this.#have(), ...this.#baseHave() };
+    // A preview's draft isn't in the document yet, so its file goes now.
+    await this.#sendResources(doc, [draft]);
+    if (ended()) return undefined;
+    const result = await this.client.call((api) =>
+      api.preview({ doc, draft, index, have, ...(options.base && { base: true }) }),
+    );
+    if (ended() || result.status !== 'done') return undefined;
+    const bodies: Record<BodyId, BodyMesh> = {};
+    for (const body of result.bodies) {
+      const mesh = body.mesh ?? this.#held(body) ?? this.#heldBase(body);
+      if (mesh) bodies[body.id] = mesh;
+    }
+    let base: Record<BodyId, BodyMesh> | undefined;
+    if (result.base) {
+      base = {};
+      const held = new Map<BodyId, { version: string; mesh: BodyMesh }>();
+      for (const body of result.base) {
+        const mesh = body.mesh ?? this.#held(body) ?? this.#heldBase(body);
+        if (!mesh) continue;
+        base[body.id] = mesh;
+        held.set(body.id, { version: body.version, mesh });
+      }
+      this.#baseMeshes = held;
+    }
+    const own = result.reports[draft.id];
+    return {
+      features: result.features,
+      bodies,
+      tools: result.tools ?? [],
+      ...(base && { base }),
+      ...(isConstructionReport(own) && { construction: own }),
+      ...(isCanvasReport(own) && { canvas: own }),
+      ...(isPatternReport(own) && { pattern: own }),
+      ...(isEmbossReport(own) && { emboss: own }),
+      ...(isThreadReport(own) && { thread: own }),
+      ...(isSweepReport(own) && { sweep: own }),
+    };
   }
 
   /**

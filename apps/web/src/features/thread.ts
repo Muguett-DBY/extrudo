@@ -41,6 +41,7 @@ import {
   defineFeatureDialog,
   type FeatureDialogSpec,
   type ProposeContext,
+  type ShownValues,
 } from './spec';
 import { defaultFromInputs, defaultInputs } from './values';
 
@@ -64,9 +65,9 @@ const GROUP_LABELS: Record<string, string> = {
   npt: 'pipe, tapered',
 };
 
-const size = (v: DialogValues) => v.choices.preset ?? AUTO;
-const extent = (v: DialogValues): ThreadExtent => (v.choices.extent ?? 'full') as ThreadExtent;
-const profile = (v: DialogValues): ThreadProfileName =>
+const size = (v: ShownValues) => v.choices.preset ?? AUTO;
+const extent = (v: ShownValues): ThreadExtent => (v.choices.extent ?? 'full') as ThreadExtent;
+const profile = (v: ShownValues): ThreadProfileName =>
   (v.choices.profile ?? 'iso') as ThreadProfileName;
 
 const HINTS: Record<string, string> = {

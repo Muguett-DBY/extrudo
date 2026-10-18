@@ -2623,3 +2623,22 @@ the second architecture needs no emulation; the app is built outside (`pnpm buil
 is **the app only**, not the landing page. CI's job builds and smoke-tests, pushes nothing;
 deploy's job publishes (`edge`; `X.Y.Z`, `X.Y`, `latest` from `git describe`) and is **not gated
 on the Cloudflare secrets**. Pin nginx to a minor, bump by hand.
+
+ADR-0092 (issue #76, 2026-10-18) made **handle drags live**. Files:
+`packages/kernel/src/recomputer.ts` (`preview`, `#runPreview`), `apps/web/src/features/dialog.ts`
+(`requestPreview`, `shownSequence`, `previewInputs`/`previewOf`, `withGhost`),
+`useFeatureDialogs.ts` (`shellParts`, `DialogShell`, `useViewPreview`), `ghost.ts`,
+`viewport/Preview.tsx`, `shell/AppShell.tsx` (`DialogViewport`). **Rules:** the `Recomputer`
+runs **one preview at a time** and keeps only the newest waiting draft (no trailing debounce;
+`previewDelayMs` only while idle); a running preview still answers, `endPreview` drops it. The
+dialog **shows an older draft's answer as `pending`** but never one older than it shows; a
+dialog with `previewDelay` shows only its current draft's. The shell subscribes to
+**`shellParts` (no expressions)**, the view to `previewInputs`; `shown` rules get
+**`ShownValues`** (no `exprs`). A handle declares how the ghost follows it: distance arrows
+`ghost: 'stretch'` (from the plane at `origin` across `direction`, new ÷ shown, never through
+zero) or `'move'`, angle arcs `'turn'`; the dialog keeps the hints of the draft each preview
+came from and `ghostMatrix` moves the shown shapes by the change since, **none while invalid or
+refused**. Marked: one-side and symmetric extrude distance, box length/width/height/rotation,
+cylinder height, primitive X/Y/Offset, Move's free arrows and rotate-mode angle. Not marked
+(wrong as a rigid change): two-sided extrude, diameters, Move's free rings. Coarse meshing
+while dragging was rejected (saves 4–8 ms of ~34).

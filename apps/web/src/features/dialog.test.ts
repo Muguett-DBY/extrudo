@@ -189,16 +189,25 @@ describe('the draft and its preview', () => {
     expect(viewPreview(t.open())?.shapes).toEqual([{ mesh: changed, style: 'cut' }]);
   });
 
-  it('drops a late preview of an older draft, and asks again only when something changed', async () => {
+  it("shows an older draft's preview until the newer one is back, and asks again only when something changed", async () => {
     const t = setupDialogs();
     t.controller.start('fake-press');
     t.controller.select.onClick(faceItem(1), false);
+    // The face's fingerprint arrives first and asks again.
+    await settle();
     t.controller.setExpr('distance', '7 mm');
     const [older, newer] = t.kernel.previews.slice(-2);
-    older?.resolve(preview({ tools: [{ mesh: boxMesh(), style: 'new' }] }));
+    // A handle drag (issue #76): the older answer moves the ghost, still pending.
+    const old = boxMesh();
+    older?.resolve(preview({ tools: [{ mesh: old, style: 'new' }] }));
     await settle();
-    expect(viewPreview(t.open())).toBeUndefined();
-    newer?.resolve(preview());
+    expect(viewPreview(t.open())?.shapes).toEqual([{ mesh: old, style: 'new' }]);
+    expect(t.open()?.preview.pending).toBe(true);
+    const fresh = boxMesh([0, 0, 0], [10, 10, 7]);
+    newer?.resolve(preview({ tools: [{ mesh: fresh, style: 'join' }] }));
+    await settle();
+    expect(t.open()?.preview.pending).toBe(false);
+    expect(viewPreview(t.open())?.shapes).toEqual([{ mesh: fresh, style: 'join' }]);
     const count = t.kernel.previews.length;
     t.controller.pickInto('faces');
     t.controller.activate('distance');
@@ -211,6 +220,46 @@ describe('the draft and its preview', () => {
       }),
     );
     expect(t.kernel.previews.length).toBe(count + 1);
+  });
+
+  it('drops an answer older than the one it shows', async () => {
+    const t = setupDialogs();
+    t.controller.start('fake-press');
+    t.controller.select.onClick(faceItem(1), false);
+    // The face's fingerprint arrives first and asks again.
+    await settle();
+    t.controller.setExpr('distance', '7 mm');
+    const [older, newer] = t.kernel.previews.slice(-2);
+    const fresh = boxMesh([0, 0, 0], [10, 10, 7]);
+    newer?.resolve(preview({ tools: [{ mesh: fresh, style: 'join' }] }));
+    await settle();
+    older?.resolve(preview({ tools: [{ mesh: boxMesh(), style: 'new' }] }));
+    await settle();
+    expect(viewPreview(t.open())?.shapes).toEqual([{ mesh: fresh, style: 'join' }]);
+    expect(t.open()?.preview.pending).toBe(false);
+  });
+
+  it('stretches the shown ghost by what the handle changed until the answer is back (issue #76)', async () => {
+    const t = setupDialogs();
+    t.controller.start('fake-press');
+    t.controller.select.onClick(faceItem(1), false);
+    // The face's fingerprint arrives first and asks again.
+    await settle();
+    t.kernel.previews.at(-1)?.resolve(preview({ tools: [{ mesh: boxMesh(), style: 'join' }] }));
+    await settle();
+    expect(viewPreview(t.open())?.ghost).toBeUndefined();
+    const [hint] = t.open()?.preview.hints ?? [];
+    expect(hint).toMatchObject({ kind: 'stretch', field: 'distance', value: 5 });
+    t.controller.setExpr('distance', '10 mm');
+    const ghost = viewPreview(t.open())?.ghost;
+    if (!hint || hint.kind === 'turn' || !ghost) throw new Error('expected a stretched ghost');
+    // The shown end (5 mm out) goes to 10 mm; the face itself stays.
+    const at = (s: number) => hint.origin.map((o, i) => o + (hint.direction[i] ?? 0) * s);
+    expect(transform(ghost, at(5))).toEqual(at(10).map((v) => expect.closeTo(v, 9)));
+    expect(transform(ghost, at(0))).toEqual(at(0).map((v) => expect.closeTo(v, 9)));
+    t.kernel.previews.at(-1)?.resolve(preview({ tools: [{ mesh: boxMesh(), style: 'join' }] }));
+    await settle();
+    expect(viewPreview(t.open())?.ghost).toBeUndefined();
   });
 
   it('checks expressions in context: parameters, units, and its own name', () => {
@@ -375,8 +424,22 @@ describe('OK and Cancel', () => {
     expect(ctx?.value('distance')).toBe(5);
     const open = t.open() as OpenDialog;
     expect(open.spec.manipulators?.(open.values, ctx as NonNullable<typeof ctx>)).toEqual([
-      { kind: 'distance', field: 'distance', origin: [5, 5, 10], direction: [0, 0, 1] },
+      {
+        kind: 'distance',
+        field: 'distance',
+        origin: [5, 5, 10],
+        direction: [0, 0, 1],
+        ghost: 'stretch',
+      },
     ]);
     expect(t.model.getState().bodies[BOX as BodyId]).toBe(t.mesh);
   });
 });
+
+/** A point through a column-major world matrix. */
+function transform(m: readonly number[], p: readonly number[]): number[] {
+  const [x = 0, y = 0, z = 0] = p;
+  return [0, 1, 2].map(
+    (i) => (m[i] ?? 0) * x + (m[4 + i] ?? 0) * y + (m[8 + i] ?? 0) * z + (m[12 + i] ?? 0),
+  );
+}

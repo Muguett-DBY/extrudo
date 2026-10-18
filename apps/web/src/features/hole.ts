@@ -55,6 +55,7 @@ import {
   type Manipulator,
   type ManipulatorContext,
   type ProposeContext,
+  type ShownValues,
 } from './spec';
 import { defaultFromInputs, defaultInputs } from './values';
 
@@ -71,12 +72,12 @@ const DEFAULT_EXTENT: HoleExtent = 'through';
 
 const CUSTOM = 'custom';
 
-const type = (v: DialogValues): HoleKind => (v.choices.type ?? DEFAULT_TYPE) as HoleKind;
-const extent = (v: DialogValues): HoleExtent => (v.choices.extent ?? DEFAULT_EXTENT) as HoleExtent;
-const noPoints = (v: DialogValues) => (v.refs.points?.length ?? 0) === 0;
+const type = (v: ShownValues): HoleKind => (v.choices.type ?? DEFAULT_TYPE) as HoleKind;
+const extent = (v: ShownValues): HoleExtent => (v.choices.extent ?? DEFAULT_EXTENT) as HoleExtent;
+const noPoints = (v: ShownValues) => (v.refs.points?.length ?? 0) === 0;
 
 /** Whether a size field applies to the hole these values describe. */
-function relevant(name: string, v: DialogValues): boolean {
+function relevant(name: string, v: ShownValues): boolean {
   switch (name) {
     case 'x':
     case 'y':

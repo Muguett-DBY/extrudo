@@ -54,6 +54,13 @@ export interface DialogValues {
   labels: Readonly<Record<string, readonly string[]>>;
 }
 
+/**
+ * The values a field's `shown` reads: all but the expressions, which a handle
+ * drag rewrites on every pointer move. The shell decides what the view
+ * highlights from these without following each move (issue #76).
+ */
+export type ShownValues = Omit<DialogValues, 'exprs'>;
+
 interface FieldBase {
   /** Also the name of the input it fills, unless the spec maps inputs itself. */
   name: string;
@@ -65,7 +72,7 @@ interface FieldBase {
    * make no input. The document is there for a field whose own input is a
    * choice (a mesh's `units`, which only a mesh file has: ADR-0066 §2).
    */
-  shown?(values: DialogValues, ctx?: DialogContext): boolean;
+  shown?(values: ShownValues, ctx?: DialogContext): boolean;
 }
 
 /**
@@ -292,6 +299,13 @@ export interface DistanceManipulator {
   quiet?: boolean;
   /** Other fields (a set's pick field, its toggles) whose focus makes this arrow the active one. */
   follows?: readonly string[];
+  /**
+   * How the preview's ghost follows a drag before the kernel's answer is back
+   * (issue #76, `ghost.ts`): `stretch` from the plane through `origin` across
+   * the direction (an extrude's length, a box's size), `move` along it. Absent:
+   * the ghost waits for the kernel.
+   */
+  ghost?: 'stretch' | 'move';
 }
 
 /**
@@ -327,6 +341,8 @@ export interface AngleManipulator {
   quiet?: boolean;
   /** Other fields (a set's pick field, its toggles) that make this arc the active one. */
   follows?: readonly string[];
+  /** The ghost turns about the axis through `origin` while the kernel works (issue #76). */
+  ghost?: 'turn';
 }
 
 /**

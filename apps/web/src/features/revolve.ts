@@ -37,6 +37,7 @@ import {
   type FeatureDialogSpec,
   type Manipulator,
   type ManipulatorContext,
+  type ShownValues,
 } from './spec';
 import { defaultInputs } from './values';
 
@@ -72,8 +73,8 @@ const PREVIEW_STYLE: Record<RevolveOperation, PreviewToolStyle> = {
 };
 
 /** Turned up to an object (P4-12): one side, no angles. */
-const toObject = (v: DialogValues) => v.choices.extent === 'to-object';
-const twoSides = (v: DialogValues) => !toObject(v) && v.choices.direction === 'two-sides';
+const toObject = (v: ShownValues) => v.choices.extent === 'to-object';
+const twoSides = (v: ShownValues) => !toObject(v) && v.choices.direction === 'two-sides';
 
 // `spec` is the dialog itself, bound after its definition: its `toInputs`
 // uses the default mapping and then drops the measure when it isn't stored.

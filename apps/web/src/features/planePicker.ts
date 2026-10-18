@@ -7,11 +7,12 @@
  */
 import type { SelectionItem, SessionStore, Vec3 } from '@extrudo/core';
 import type { PlanePicker } from '../viewport/Viewport';
-import type { DialogController, OpenDialog } from './dialog';
+import type { DialogController } from './dialog';
 import type { SelectionField } from './spec';
+import type { DialogShell } from './useFeatureDialogs';
 
 /** The open dialog's pick field, when it takes planes (and not edges, M1). */
-function planeField(open: OpenDialog | undefined): SelectionField | undefined {
+function planeField(open: DialogShell | undefined): SelectionField | undefined {
   const field = open?.spec.fields.find((f) => f.name === open.pickField);
   // A field that also takes edges keeps the model picker: an edge can't be
   // picked through `sketchTargetAt`, which offers planes and faces alone (a
@@ -29,7 +30,7 @@ function planeField(open: OpenDialog | undefined): SelectionField | undefined {
  */
 export function dialogPlanePick(
   controller: DialogController | undefined,
-  open: OpenDialog | undefined,
+  open: DialogShell | undefined,
 ): boolean {
   return controller !== undefined && planeField(open) !== undefined;
 }
@@ -37,7 +38,7 @@ export function dialogPlanePick(
 /** The plane picker for an open dialog, or undefined when its pick field doesn't take planes. */
 export function dialogPlanePicker(
   controller: DialogController | undefined,
-  open: OpenDialog | undefined,
+  open: DialogShell | undefined,
   session: SessionStore,
   hover: SelectionItem | undefined,
 ): PlanePicker | undefined {

@@ -31,6 +31,7 @@ import {
   type FeatureDialogSpec,
   type Manipulator,
   type ManipulatorContext,
+  type ShownValues,
 } from './spec';
 import { defaultInputs } from './values';
 
@@ -66,9 +67,9 @@ const PREVIEW_STYLE: Record<ExtrudeOperation, PreviewToolStyle> = {
   intersect: 'intersect',
 };
 
-const twoSides = (v: DialogValues) => v.choices.direction === 'two-sides';
-const symmetric = (v: DialogValues) => v.choices.direction === 'symmetric';
-const extentOf = (v: DialogValues, side: 1 | 2) =>
+const twoSides = (v: ShownValues) => v.choices.direction === 'two-sides';
+const symmetric = (v: ShownValues) => v.choices.direction === 'symmetric';
+const extentOf = (v: ShownValues, side: 1 | 2) =>
   v.choices[side === 1 ? 'extent' : 'extent2'] ?? 'distance';
 
 // `spec` is the dialog itself, bound after its definition: its `toInputs`
@@ -317,6 +318,8 @@ export function extrudeManipulators(values: DialogValues, ctx: ManipulatorContex
         origin: frame.origin,
         direction: dir,
         ...(reach !== 1 && { scale: reach }),
+        // One side grows from the profile's plane; two sides don't stretch as one.
+        ...(sides.length === 1 && { ghost: 'stretch' as const }),
       });
     }
     const end = byDistance ? (ctx.value(distance) ?? 0) * reach : 0;

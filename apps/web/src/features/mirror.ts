@@ -6,9 +6,9 @@
  * are named like the feature's inputs (`MirrorInputs`).
  */
 import { MIRROR_PLANE_KINDS, mirrorFeature, PATTERNABLE_FEATURE_TYPES } from '@extrudo/core';
-import { type DialogValues, defineFeatureDialog } from './spec';
+import { defineFeatureDialog, type ShownValues } from './spec';
 
-const forBodies = (v: DialogValues) => (v.choices.objects ?? 'bodies') === 'bodies';
+const forBodies = (v: ShownValues) => (v.choices.objects ?? 'bodies') === 'bodies';
 
 export const mirrorDialog = defineFeatureDialog({
   ...mirrorFeature,
