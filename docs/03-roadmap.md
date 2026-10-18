@@ -1047,6 +1047,13 @@ end to end, faster than in established desktop CAD.
     2026-10-18** (ADR-0023's amendment of that date): a keymap entry may be a
     chord ("K H"), the 13 constraints bind K plus a letter, and a hint panel
     lists the second keys while the chord is pending.
+  - ~~Your own keys (user feedback: no keys for the sketch constraints)~~ **Done
+    2026-10-18** (ADR-0082's amendment of 2026-10-18): Settings › Keyboard lists
+    every command's keys and records new ones (one key, or a chord such as K H),
+    asks before taking a key another command uses in the same mode, and resets per
+    command or all at once; a toolbar tile's right-click "Change shortcut…" and a
+    key button on each Search row open it. The preference `keymap.overrides`
+    holds only the changes.
 
 ---
 

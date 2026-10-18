@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect } from 'react';
 import { useAgentBridge } from './agent/useAgentBridge';
+import { useKeymap } from './commands/keymapStore';
 import { ExampleOpener } from './home/ExampleOpener';
 import { HomeScreen } from './home/HomeScreen';
 import type { Platform } from './platform';
@@ -22,6 +23,8 @@ export function App({ platform }: { platform: Platform }) {
   const route = useRoute();
   // The desktop MCP server's tool calls (P6-08, ADR-0087): none on the web.
   useAgentBridge(platform);
+  // The person's own keys (ADR-0082's 2026-10-18 amendment), read before anything shows one.
+  useKeymap(platform.preferences);
   switch (route.page) {
     case 'home':
       return <HomeScreen platform={platform} />;

@@ -41,6 +41,7 @@ import {
 import { useStore } from 'zustand';
 import { useAgentHost } from '../agent/useAgentHost';
 import { keysFor } from '../commands/keymap';
+import { useKeymap } from '../commands/keymapStore';
 import { isRepeatable } from '../commands/marking';
 import { isEditable, useShortcuts } from '../commands/shortcuts';
 import { followComponentSession } from '../components/active';
@@ -352,6 +353,15 @@ export function AppShell({
   useEffect(() => void plugins.getState().refresh(), [plugins]);
   // The Settings dialog: open at its last section, or at a requested one (Plugins…, ADR-0090 §2).
   const [settingsOpen, setSettingsOpen] = useState<boolean | SectionId>(false);
+  // "Change shortcut…" (a tile's right-click, a search row): the command Settings › Keyboard
+  // records (ADR-0082's 2026-10-18 amendment).
+  const [recordKey, setRecordKey] = useState<string>();
+  const changeShortcut = (id: string) => {
+    setRecordKey(id);
+    setSettingsOpen('keyboard');
+  };
+  // The person's keys: the command lists below are built again when they change.
+  const keymap = useKeymap(platform.preferences);
   const installedPlugins = useStore(plugins, (s) => s.installed);
   // The custom features of the enabled plugins (ADR-0077 §6): a second, dynamic registry of
   // dialogs beside `dialogs`, and the plugin files the design carries (a stored feature's
@@ -929,6 +939,7 @@ export function AppShell({
     if (canSlicer) tools.add('slicer');
     return tools;
   }, [dialogs, canSlicer]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `keymap` stands for `keysFor`'s overrides
   const dialogCommands = useMemo(
     () =>
       [...dialogs.list(), ...pluginFeatures.map((entry) => entry.spec)].flatMap((spec) => {
@@ -946,7 +957,7 @@ export function AppShell({
           },
         ];
       }),
-    [dialogs, pluginFeatures],
+    [dialogs, pluginFeatures, keymap],
   );
   // A dialog stops a nav tool, like any command.
   useEffect(() => {
@@ -1280,7 +1291,8 @@ export function AppShell({
       poseCommand,
     ],
   );
-  const commands = useMemo(() => commandBuilder(mode, false), [commandBuilder, mode]);
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `keymap` stands for `keysFor`'s overrides
+  const commands = useMemo(() => commandBuilder(mode, false), [commandBuilder, mode, keymap]);
   // The desktop MCP server's tools act on this design (P6-08, ADR-0087 §5): its host is
   // registered while the shell is mounted, desktop only.
   useAgentHost({
@@ -1297,6 +1309,7 @@ export function AppShell({
     },
     toolHost: host,
   });
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `keymap` stands for `keysFor`'s overrides
   const markingCommands = useMemo(
     () =>
       // Built only while Settings is open: its Marking menu section lists them.
@@ -1306,7 +1319,7 @@ export function AppShell({
             sketch: relabelRepeat(commandBuilder('sketch', true)),
           }
         : { model: [], sketch: [] },
-    [settingsOpen, commandBuilder],
+    [settingsOpen, commandBuilder, keymap],
   );
   const searchAtPointer = useMemo(
     () => () =>
@@ -2281,6 +2294,7 @@ export function AppShell({
                 : undefined
         }
         onRun={run}
+        onChangeShortcut={changeShortcut}
         ready={ready}
         hidden={macroHidden}
         pluginItems={pluginItems}
@@ -2736,8 +2750,12 @@ export function AppShell({
       />
       <SettingsDialog
         open={settingsOpen !== false}
-        onOpenChange={setSettingsOpen}
+        onOpenChange={(open) => {
+          setSettingsOpen(open);
+          if (!open) setRecordKey(undefined);
+        }}
         section={typeof settingsOpen === 'string' ? settingsOpen : undefined}
+        recordKey={recordKey}
         plugins={{ plugins, files: platform.files, inDesign, onUpdate: updatePlugin }}
         preferences={platform.preferences}
         display={displayAccess}
@@ -2769,6 +2787,10 @@ export function AppShell({
         recent={recent}
         pinned={pinned}
         onTogglePin={togglePin}
+        onChangeShortcut={(id) => {
+          setSearch(undefined);
+          changeShortcut(id);
+        }}
         onRun={runCommand}
         onClose={() => setSearch(undefined)}
       />

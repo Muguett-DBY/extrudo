@@ -808,14 +808,26 @@ left and the selected page on the right (below 640 px one column with a select);
 Appearance (the theme), Plugins (install, enable and remove plugins, P6-03; Ctrl+K "Plugins…" opens
 it), Marking menu (the Radial right-click menu switch above the ring editor: a ring
 per mode, a wedge, then the command it runs; Ctrl+K "Customize Marking Menu…" opens
-it), View and navigation, Sketch, 3D printing, Export and, on the desktop,
-Desktop (slicers) and Agents (MCP) (the server's switch, port and state, then the
-setup text per agent to copy: Claude Code, Codex CLI, opencode, other clients'
-`mcpServers` JSON, or a sentence for the agent, and the skill's state in the agent's
-skills folder with Install skill / Update skill / Save skill to…; ADR-0087's amendment of 2026-10-18). The last section is remembered. Controls are the same state as the
+it), Keyboard (every command's keys, below), View and navigation, Sketch, 3D printing,
+Export and, on the desktop, Desktop (slicers) and Agents (MCP) (the server's switch,
+port and state, then the setup text per agent to copy: Claude Code, Codex CLI,
+opencode, other clients' `mcpServers` JSON, or a sentence for the agent, and the
+skill's state in the agent's skills folder with Install skill / Update skill / Save
+skill to…; ADR-0087's amendment of 2026-10-18). The last section is remembered. Controls are the same state as the
 quick ones elsewhere (app menu, sketch palette, Print Info, Export dialog), so
 the dialog never disagrees with them; numbers are `<ExpressionInput>`s with a
 per-field Reset when they differ from the default.
+
+**Keyboard** (ADR-0082's amendment of 2026-10-18) lists every command either mode
+offers, grouped as the toolbar groups them, with a text filter and All / Model /
+Sketch / Changed. Clicking a key (or Add key) records: the next key combination,
+then Enter keeps it or a second combination makes a chord ("K H"); Esc cancels;
+Esc, Tab, Enter and the browser's Ctrl+W/T/N/Tab are refused. A key another command
+uses in the same mode shows "E is Extrude here." with Replace and Cancel; one used only
+in the other mode is saved with a note. A changed command shows "changed" and a Reset;
+Reset all keys gives every default back. A toolbar tile's right-click "Change
+shortcut…" and the keyboard button on a Search row open the page recording that
+command (replacing its first key).
 
 ## 6. Home screen
 

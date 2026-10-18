@@ -85,5 +85,42 @@ density's default. The request is really "a density you can tweak, starting at
 ## Consequences
 
 Adding a preference now means placing it in a section (or the exclusion list)
-or `settings/inventory.test.ts` fails. Keyboard shortcut editing, import/export
-of settings and document settings (units, precision) stay out of scope.
+or `settings/inventory.test.ts` fails. Import/export of settings and document
+settings (units, precision) stay out of scope; keyboard shortcut editing came with
+the 2026-10-18 amendment below.
+
+## Amendment, 2026-10-18 (a Keyboard section: your own keys)
+
+User feedback asked for keys for the sketch constraints; the owner asked for a way to
+change any command's keys, the way mainstream CAD does.
+
+1. **The `keymap.overrides` preference** holds only what a person changed, like the
+   density overrides: `{ horizontal: ["H"], trim: [] }`. An entry replaces the command's
+   default keys (an empty list means no key); a command without one follows
+   `DEFAULT_KEYMAP`, so a later change to a default reaches everyone who never touched
+   it. Writing a command's default keys back removes the entry.
+2. **One place resolves keys.** `keysFor(id)` in `commands/keymap.ts` returns the
+   override, else the default; `defaultKeysFor(id)` is for what must not follow a
+   person's browser (the generated tool pages, the native-menu accelerator test).
+   `commands/keymapStore.ts` loads the preference once per `Preferences` (in `App`),
+   writes it and tells subscribers; the shell's command, dialog-command and shortcut lists
+   rebuild on a change, so the toolbar, menus, tooltips, search, the marking menu and the
+   desktop's native menu show the new key at once.
+3. **Settings › Keyboard.** Every command either mode offers (plus Search, Search at the
+   pointer and Help), filtered by text and by All / Model / Sketch / Changed. Click a key
+   (or "Add key") to record: the next key combination, or two in a row for a chord
+   (`K H`); Enter keeps a single key, Esc cancels. Esc, Tab, Enter and the browser's own
+   Ctrl+W/T/N/Tab can't be recorded. Each changed command has a Reset, the page a Reset
+   all.
+4. **Conflicts.** A key another command uses **in the same mode** (or a chord whose first
+   key is someone's single key there) is not saved silently: the row says whose it is and
+   offers Replace (the other command loses it) or Cancel. Sharing a key across modes
+   (H for Hole on the model and Horizontal in a sketch) is allowed and shown as a note.
+5. **In place.** Right-clicking a toolbar tile offers "Change shortcut…", and every row in
+   Search has a key button; both open Settings › Keyboard recording that command.
+6. **The native menu** gets an accelerator only for a key Electron understands; a chord
+   shows in the label's tooltip and runs through the web handler, not the menu.
+
+**Rejected.** Editing the keymap as JSON (no conflict check, easy to break); keys per
+document (keys are about the person, not the design); importing another program's
+keymap (out of scope, and not ours to copy).
