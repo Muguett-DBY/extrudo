@@ -163,7 +163,15 @@ export const fakeSpec: FeatureDialogSpec = defineFeatureDialog({
   manipulators(values, ctx) {
     const frame = faceFrame(ctx.bodies, values.refs.faces?.[0] as GeomRef);
     return frame
-      ? [{ kind: 'distance', field: 'distance', origin: frame.origin, direction: frame.normal }]
+      ? [
+          {
+            kind: 'distance',
+            field: 'distance',
+            origin: frame.origin,
+            direction: frame.normal,
+            ghost: 'stretch',
+          },
+        ]
       : [];
   },
   previewStyle: (values) => values.choices.operation as PreviewToolStyle,

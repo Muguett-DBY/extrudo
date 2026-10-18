@@ -51,7 +51,15 @@ const until = async (condition: () => boolean, ms = 20_000) => {
 let recomputer: Recomputer | undefined;
 afterEach(() => recomputer?.dispose());
 
-function setup(doc: ExtrudoDocument, options: { fonts?: FontSource; files?: FileSource } = {}) {
+function setup(
+  doc: ExtrudoDocument,
+  options: {
+    fonts?: FontSource;
+    files?: FileSource;
+    /** Holds each preview in the kernel until it resolves. */
+    previewGate?: () => Promise<void>;
+  } = {},
+) {
   const requests: RecomputeRequest[] = [];
   /** What went to each kernel, in order: a font or file, then `recompute`. */
   const events: string[] = [];
@@ -100,8 +108,9 @@ function setup(doc: ExtrudoDocument, options: { fonts?: FontSource; files?: File
           events.push('recompute');
           return service.recompute(request, onFeature);
         },
-        preview: (request, onFeature) => {
+        preview: async (request, onFeature) => {
           events.push(`preview:${request.draft.id}`);
+          await options.previewGate?.();
           return service.preview(request, onFeature);
         },
       },
@@ -611,6 +620,37 @@ describe('Recomputer', () => {
 
     const ended = r.preview(testFeature('f3', 'test-hole', { radius: '3 mm' }), 2);
     r.endPreview();
+    expect(await ended).toBeUndefined();
+  });
+
+  it('runs one preview at a time: the newest draft waits, the running one still answers', {
+    timeout: 30_000,
+  }, async () => {
+    let open: (() => void) | undefined;
+    const { model, events } = setup(chainDocument(2), {
+      previewGate: () => new Promise((resolve) => (open = resolve)),
+    });
+    await until(() => ready(model));
+    const r = recomputer as Recomputer;
+    const hole = (id: string, radius: string) => testFeature(id, 'test-hole', { radius });
+    const first = r.preview(hole('a', '1 mm'), 2);
+    await until(() => events.includes('preview:a'));
+    // A handle drag (issue #76): drafts come while the kernel works on the first.
+    const skipped = r.preview(hole('b', '2 mm'), 2);
+    const last = r.preview(hole('c', '3 mm'), 2);
+    expect(await skipped).toBeUndefined();
+    open?.();
+    expect((await first)?.features['a' as FeatureId]).toEqual({ status: 'ok' });
+    await until(() => events.includes('preview:c'));
+    open?.();
+    expect((await last)?.features['c' as FeatureId]).toEqual({ status: 'ok' });
+    expect(events.filter((e) => e.startsWith('preview:'))).toEqual(['preview:a', 'preview:c']);
+
+    // Closing the dialog drops the running preview's answer.
+    const ended = r.preview(hole('d', '4 mm'), 2);
+    await until(() => events.includes('preview:d'));
+    r.endPreview();
+    open?.();
     expect(await ended).toBeUndefined();
   });
 

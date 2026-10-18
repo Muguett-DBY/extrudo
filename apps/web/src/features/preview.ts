@@ -68,6 +68,12 @@ export interface ViewPreview {
   shapes: readonly PreviewShape[];
   /** The last valid result, kept while the input is invalid or the draft fails. */
   dimmed: boolean;
+  /**
+   * Moves the shapes (a column-major world matrix) by what a handle drag
+   * changed since their draft, until the kernel's answer for the current one
+   * is back (issue #76, `ghost.ts`).
+   */
+  ghost?: readonly number[];
   /** The draft's plane, axis or point when it is a construction feature (P3-05). */
   construction?: ConstructionDrawing;
   /** The draft's image when it is a canvas (P4-06, ADR-0066 §5). */

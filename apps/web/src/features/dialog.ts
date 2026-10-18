@@ -61,6 +61,7 @@ import { readTopology, topologyItem } from '../selection/items';
 import { clearPickedHover, createModelSelect } from '../selection/useModelSelection';
 import { canvasDrawing } from '../viewport/canvasGeometry';
 import type { ModelSelect } from '../viewport/Viewport';
+import { type GhostHint, ghostHints, ghostMatrix } from './ghost';
 import type { ViewPreview } from './preview';
 import { draftStatus, type PreviewDrawing, previewDrawing } from './preview';
 import { accepts, itemRef, refItems } from './refs';
@@ -154,6 +155,14 @@ export interface DialogPreview {
   thread?: ThreadReport;
   /** The draft's sweep report from the latest preview (P4-12): where the profile sits. */
   sweep?: SweepReport;
+  /** How the drawing follows its draft's handles (issue #76): their ghost rules and values. */
+  hints?: readonly GhostHint[];
+  /**
+   * The drawing moved by what the handles changed since its draft (column-major
+   * world matrix), while the kernel works on the current one; absent when it
+   * shows the current values.
+   */
+  ghost?: readonly number[];
 }
 
 export interface OpenDialog {
@@ -203,6 +212,16 @@ export function dialogBodies(
   model: Readonly<Record<BodyId, BodyMesh>>,
 ): Readonly<Record<BodyId, BodyMesh>> {
   return open?.base ?? model;
+}
+
+/** Whether two body records hold the same meshes (the kernel client reuses an unchanged one). */
+function sameBodies(
+  a: Readonly<Record<BodyId, BodyMesh>> | undefined,
+  b: Readonly<Record<BodyId, BodyMesh>>,
+): a is Readonly<Record<BodyId, BodyMesh>> {
+  if (!a) return false;
+  const keys = Object.keys(b) as BodyId[];
+  return keys.length === Object.keys(a).length && keys.every((id) => a[id] === b[id]);
 }
 
 export interface DialogState {
@@ -271,34 +290,55 @@ export interface DialogController {
   dispose(): void;
 }
 
-/** The preview the viewport draws for an open dialog, if any. */
-export function viewPreview(open: OpenDialog | undefined): ViewPreview | undefined {
+/**
+ * What the view's preview is made of: the drawing, whether it is dimmed, and
+ * for a canvas the draft it draws itself from. The view compares these one
+ * by one, so a value that doesn't change the preview doesn't render it again
+ * (a handle drag, issue #76).
+ */
+export function previewInputs(open: OpenDialog | undefined) {
   const drawing = open?.preview.drawing;
   if (!open || !drawing) return undefined;
   const invalid = open.checked.first !== undefined || Object.keys(open.typing).length > 0;
-  const dimmed = invalid || open.preview.status?.status === 'error';
+  return {
+    drawing,
+    dimmed: invalid || open.preview.status?.status === 'error',
+    id: open.id,
+    name: open.name,
+    // A canvas draws its own image, from the draft's inputs and the frame the
+    // kernel reported for it (ADR-0066 §5).
+    draft: drawing.canvas ? open.draft : undefined,
+    expressions: drawing.canvas ? open.expressions : undefined,
+    ghost: open.preview.ghost,
+  };
+}
+
+/** The preview the viewport draws for an open dialog, if any. */
+export function viewPreview(open: OpenDialog | undefined): ViewPreview | undefined {
+  const inputs = previewInputs(open);
+  return inputs && previewOf(inputs);
+}
+
+/** The preview the viewport draws, from `previewInputs`. */
+export function previewOf(inputs: NonNullable<ReturnType<typeof previewInputs>>): ViewPreview {
+  const { drawing, dimmed, id, name, draft, expressions, ghost } = inputs;
   return {
     shapes: drawing.shapes,
     dimmed,
+    ...(ghost && { ghost }),
     ...(drawing.construction && {
-      construction: {
-        id: open.id,
-        name: open.name,
-        report: drawing.construction,
-        preview: true,
-        dimmed,
-      },
+      construction: { id, name, report: drawing.construction, preview: true, dimmed },
     }),
-    // A canvas draws its own image, from the draft's inputs and the frame the
-    // kernel reported for it (ADR-0066 §5).
-    ...(drawing.canvas && {
-      canvas: canvasDrawing(
-        { id: open.id, name: open.name, inputs: open.draft.inputs },
-        drawing.canvas,
-        (name) => okValue(open.expressions, name),
-        { preview: true, dimmed },
-      ),
-    }),
+    ...(drawing.canvas &&
+      draft &&
+      expressions && {
+        canvas: canvasDrawing(
+          { id, name, inputs: draft.inputs },
+          drawing.canvas,
+          (field) => okValue(expressions, field),
+          { preview: true, dimmed },
+        ),
+      }),
   };
 }
 
@@ -330,6 +370,8 @@ export function createDialogController(options: DialogControllerOptions): Dialog
   /** Bumped per dialog, so late kernel answers for an older one are dropped. */
   let generation = 0;
   let previewSequence = 0;
+  /** The preview whose answer the dialog shows (an older draft's while a newer one is out). */
+  let shownSequence = 0;
   let previewTimer: ReturnType<typeof setTimeout> | undefined;
   /** The draft and document of the last preview asked for. */
   let previewed: { draft: string; doc: unknown } | undefined;
@@ -434,25 +476,41 @@ export function createDialogController(options: DialogControllerOptions): Dialog
     const valid = checked.first === undefined && Object.keys(typing).length === 0;
     const key = JSON.stringify({ draft, index });
     const wanted = valid && kernel && (previewed?.draft !== key || previewed.doc !== doc);
+    const value = (field: string) => okValue(expressions, field);
     if (wanted) {
       previewed = { draft: key, doc };
       next.preview = { ...next.preview, pending: true };
-      requestPreview(draft, index, open.mode === 'edit');
+      const handles = open.spec.manipulators?.(values, { ...ctx, value }) ?? [];
+      requestPreview(draft, index, open.mode === 'edit', ghostHints(handles, value));
     }
+    // An invalid value leaves the last drawing where it is, dimmed.
+    next.preview = withGhost(next.preview, valid ? value : () => undefined);
     state.setState({ open: next });
   };
 
-  const requestPreview = (draft: Feature, index: number, base: boolean) => {
+  const requestPreview = (
+    draft: Feature,
+    index: number,
+    base: boolean,
+    hints: readonly GhostHint[],
+  ) => {
     const sequence = ++previewSequence;
     const mine = generation;
     clearTimeout(previewTimer);
+    const delay = get()?.spec.previewDelay ?? dialogs.get(draft.type)?.previewDelay ?? 0;
     const run = () => {
       const started = performance.now();
       kernel
         ?.preview(draft, index, base ? { base } : {})
         .then((result) => {
           const open = get();
-          if (!open || mine !== generation || sequence !== previewSequence || !result) return;
+          // An older draft's answer still moves the ghost while the kernel works on
+          // a newer one (a handle drag, issue #76); it stays pending until that is back.
+          // A debounced dialog (a script's) shows only its current draft's answer.
+          const current = sequence === previewSequence;
+          if (!open || mine !== generation || sequence <= shownSequence || !result) return;
+          if (!current && delay) return;
+          shownSequence = sequence;
           performance.measure('extrudo-preview', {
             start: started,
             end: performance.now(),
@@ -466,26 +524,37 @@ export function createDialogController(options: DialogControllerOptions): Dialog
               ? open.preview.drawing
               : previewDrawing(result, bodies, style);
           const pattern = result.pattern;
+          const kept = status?.status === 'error' ? open.preview.hints : hints;
           state.setState({
             open: {
               ...open,
-              preview: {
-                drawing,
-                status,
-                pending: false,
-                ...(pattern && { pattern }),
-                ...(!pattern && open.preview.pattern && { pattern: open.preview.pattern }),
-                ...(result.emboss && { emboss: result.emboss }),
-                ...(result.thread && { thread: result.thread }),
-                ...(result.sweep && { sweep: result.sweep }),
-              },
-              ...(result.base && { base: result.base }),
+              preview: withGhost(
+                {
+                  drawing,
+                  status,
+                  pending: !current,
+                  ...(kept && { hints: kept }),
+                  ...(pattern && { pattern }),
+                  ...(!pattern && open.preview.pattern && { pattern: open.preview.pattern }),
+                  ...(result.emboss && { emboss: result.emboss }),
+                  ...(result.thread && { thread: result.thread }),
+                  ...(result.sweep && { sweep: result.sweep }),
+                },
+                (field) =>
+                  open.checked.first === undefined && Object.keys(open.typing).length === 0
+                    ? okValue(open.expressions, field)
+                    : undefined,
+              ),
+              // The same meshes keep the same record, so the shell (which shows the
+              // base) doesn't render again for every preview of an edit (issue #76).
+              ...(result.base && {
+                base: sameBodies(open.base, result.base) ? open.base : result.base,
+              }),
             },
           });
         })
         .catch(() => {});
     };
-    const delay = get()?.spec.previewDelay ?? dialogs.get(draft.type)?.previewDelay ?? 0;
     if (delay) previewTimer = setTimeout(run, delay);
     else run();
   };
@@ -1171,6 +1240,17 @@ function showSketches(store: DocumentStore, ids: readonly FeatureId[]) {
   if (hidden.length > 0) {
     store.getState().dispatch(setFeatureVisibility({ ids: hidden, visible: true }));
   }
+}
+
+/** The preview with its ghost moved to the values (issue #76); none for a dimmed drawing. */
+function withGhost(
+  preview: DialogPreview,
+  value: (field: string) => number | undefined,
+): DialogPreview {
+  const { ghost: _, ...rest } = preview;
+  // A drawing the kernel refused stays where it was, dimmed.
+  const ghost = preview.status?.status === 'error' ? undefined : ghostMatrix(preview.hints, value);
+  return ghost ? { ...rest, ghost } : rest;
 }
 
 /** An expression's value if it evaluated. */

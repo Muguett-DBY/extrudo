@@ -22,6 +22,7 @@ import type {
   DialogIssue,
   DialogValues,
   FeatureDialogSpec,
+  ShownValues,
 } from './spec';
 
 export const EMPTY_VALUES: DialogValues = {
@@ -91,7 +92,7 @@ export function pickFields(values: Partial<DialogValues>, fields: readonly strin
  */
 export function shownFields(
   spec: FeatureDialogSpec,
-  values: DialogValues,
+  values: ShownValues,
   ctx?: DialogContext,
 ): DialogField[] {
   return spec.fields.filter((field) => field.shown?.(values, ctx) ?? true);

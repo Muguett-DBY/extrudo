@@ -5,6 +5,7 @@ import {
   BufferGeometry,
   Color,
   FrontSide,
+  Matrix4,
   MeshBasicMaterial,
   type Plane,
 } from 'three';
@@ -23,7 +24,9 @@ import type { Rgba, SceneColors } from './colors';
  * depth test), so a cut inside a part shows where it removes material. A
  * section analysis clips them like the bodies (P3-09).
  * The model's bodies stay underneath, drawn and picked as usual. A dimmed
- * preview (invalid input, a failing draft) is fainter.
+ * preview (invalid input, a failing draft) is fainter. During a handle drag
+ * the shapes follow the handle (`ghost`, issue #76) until the kernel's answer
+ * for the current values replaces them.
  */
 export function PreviewShapes({
   preview,
@@ -35,18 +38,24 @@ export function PreviewShapes({
   /** The section's clipping plane, when the view is clipped. */
   planes?: Plane[] | null;
 }) {
+  const ghost = preview?.ghost;
+  const matrix = useMemo(() => (ghost ? new Matrix4().fromArray(ghost) : new Matrix4()), [ghost]);
   if (!preview) return null;
-  return preview.shapes.map((shape, i) => (
-    <PreviewShape
-      // biome-ignore lint/suspicious/noArrayIndexKey: shapes have no identity; a new preview replaces them all.
-      key={i}
-      mesh={shape.mesh}
-      color={styleColor(shape.style, colors)}
-      dimmed={preview.dimmed}
-      faint={shape.style === 'skip'}
-      planes={planes}
-    />
-  ));
+  return (
+    <group matrix={matrix} matrixAutoUpdate={false}>
+      {preview.shapes.map((shape, i) => (
+        <PreviewShape
+          // biome-ignore lint/suspicious/noArrayIndexKey: shapes have no identity; a new preview replaces them all.
+          key={i}
+          mesh={shape.mesh}
+          color={styleColor(shape.style, colors)}
+          dimmed={preview.dimmed}
+          faint={shape.style === 'skip'}
+          planes={planes}
+        />
+      ))}
+    </group>
+  );
 }
 
 export function styleColor(style: PreviewToolStyle, colors: SceneColors): Rgba {

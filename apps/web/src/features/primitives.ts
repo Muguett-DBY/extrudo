@@ -290,25 +290,32 @@ export function primitiveManipulators(
   if (!placed) return [];
   const { frame, plane } = placed;
   const { origin, x, y, normal } = frame;
-  const arrow = (field: string, direction: Vec3, from = origin, reach = 1): Manipulator => ({
+  const arrow = (
+    field: string,
+    direction: Vec3,
+    from = origin,
+    reach = 1,
+    ghost?: 'stretch',
+  ): Manipulator => ({
     kind: 'distance',
     field,
     origin: from,
     direction,
     ...(reach !== 1 && { scale: reach }),
+    ...(ghost && { ghost }),
   });
   let sizes: Manipulator[];
   switch (type) {
     case 'box':
       sizes = [
-        arrow('length', x, origin, 0.5),
-        arrow('width', y, origin, 0.5),
-        arrow('height', normal),
-        { kind: 'angle', field: 'rotation', origin, axis: normal, zero: plane.x },
+        arrow('length', x, origin, 0.5, 'stretch'),
+        arrow('width', y, origin, 0.5, 'stretch'),
+        arrow('height', normal, origin, 1, 'stretch'),
+        { kind: 'angle', field: 'rotation', origin, axis: normal, zero: plane.x, ghost: 'turn' },
       ];
       break;
     case 'cylinder':
-      sizes = [arrow('diameter', x, origin, 0.5), arrow('height', normal)];
+      sizes = [arrow('diameter', x, origin, 0.5), arrow('height', normal, origin, 1, 'stretch')];
       break;
     case 'sphere':
       sizes = [arrow('diameter', x, origin, 0.5)];
@@ -361,6 +368,7 @@ export function positionManipulators(
       origin,
       direction,
       ...(stacked > 0 && { lift: HANDLE_LIFT * stacked }),
+      ghost: 'move',
     };
   });
 }

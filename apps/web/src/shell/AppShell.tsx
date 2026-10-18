@@ -28,6 +28,7 @@ import {
 import type { BodyMesh } from '@extrudo/kernel';
 import type { Matrix12 } from '@extrudo/kernel/matrix';
 import {
+  type ComponentProps,
   type CSSProperties,
   lazy,
   Suspense,
@@ -62,7 +63,7 @@ import { ExportScriptDialog } from '../export/ExportScriptDialog';
 import type { ModelExporter } from '../export/modelExport';
 import { calibrationStore, pickCanvasFile } from '../features/canvas';
 import { DialogOverlay } from '../features/DialogOverlay';
-import { type DialogKernel, dialogBodies, viewPreview } from '../features/dialog';
+import { type DialogController, type DialogKernel, dialogBodies } from '../features/dialog';
 import { DIALOG_COLUMN, FeatureDialog } from '../features/FeatureDialog';
 import { pickImportFile, takeModelImport } from '../features/import';
 import { pickName } from '../features/pickName';
@@ -70,7 +71,7 @@ import { dialogPlanePick, dialogPlanePicker } from '../features/planePicker';
 import { PRESS_PULL, PRESS_PULL_PROMPT, pressPullTarget } from '../features/pressPull';
 import { cornersStore } from '../features/primitiveCorners';
 import { type FeatureDialogs, featureDialogs, specForCommand } from '../features/registry';
-import { useDialogItems, useFeatureDialogs } from '../features/useFeatureDialogs';
+import { useDialogItems, useFeatureDialogs, useViewPreview } from '../features/useFeatureDialogs';
 import { ClearanceOverlay } from '../joints/ClearanceOverlay';
 import { ClearanceSection } from '../joints/ClearanceSection';
 import { clearanceMarks, defaultMinGap } from '../joints/clearance';
@@ -231,6 +232,18 @@ const TOPOLOGY_NOUNS = { face: 'Face', edge: 'Edge', vertex: 'Vertex' } as const
 
 // three.js loads in its own chunk, so the shell paints before it arrives.
 const Viewport = lazy(() => import('../viewport/Viewport').then((m) => ({ default: m.Viewport })));
+
+/**
+ * The view with the open dialog's preview, read here: a new preview renders
+ * the view, not the whole shell (a handle drag, issue #76).
+ */
+function DialogViewport({
+  dialog,
+  ...props
+}: Omit<ComponentProps<typeof Viewport>, 'preview'> & { dialog: DialogController | undefined }) {
+  const preview = useViewPreview(dialog);
+  return <Viewport {...props} preview={preview} />;
+}
 /** The drawing tools: their own chunk, loaded as soon as a project opens (ADR-0014). */
 interface DrawingTools {
   host: ToolHost;
@@ -903,7 +916,6 @@ export function AppShell({
   });
   // Its marks at the pose shown: as built (0) until the pose preview (J2) can show another.
   const dialogItems = useDialogItems(dialogOpen, shownBodies);
-  const preview = useMemo(() => viewPreview(dialogOpen), [dialogOpen]);
   const canSlicer = platform.openInSlicer !== undefined;
   const ready = useMemo(() => {
     const tools = new Set<string>(
@@ -2391,7 +2403,8 @@ export function AppShell({
               />
             }
           >
-            <Viewport
+            <DialogViewport
+              dialog={dialog}
               viewport={viewport}
               namedViews={namedViewEntries}
               bodies={shownBodies}
@@ -2424,7 +2437,6 @@ export function AppShell({
               hover={hover}
               selection={jointItems ?? dialogItems ?? selection}
               modelSelect={modelSelect}
-              preview={preview}
               viewMenu={viewMenu}
               sectionClips={section.clips}
               {...(section.box?.value && {
@@ -2552,7 +2564,7 @@ export function AppShell({
                   frame={sketchPlane}
                 />
               )}
-            </Viewport>
+            </DialogViewport>
             {appearancePopover}
           </Suspense>
         </ViewportBoundary>
