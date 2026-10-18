@@ -132,6 +132,11 @@ export class ComponentMapping {
     return undefined;
   }
 
+  /** The body records a "Body to Component" moves (empty for any other feature). */
+  moves(feature: F3dFeature): number[] {
+    return this.#moves.get(feature.id)?.sources ?? [];
+  }
+
   /** Whether a body is shown: a body that was moved on is shown as its moved copy is. */
   shown(body: F3dBody): boolean {
     const moved = this.#movedTo(body.id);

@@ -63,6 +63,7 @@ import {
   torus,
 } from './map-more';
 import type {
+  F3dBody,
   F3dCircularPattern,
   F3dDesign,
   F3dEdgeFeature,
@@ -213,6 +214,12 @@ interface ImportedExtrude {
   oneSided: boolean;
   /** Which way its side 1 runs along the file's sketch normal: 1 or −1. */
   side1: number;
+  /**
+   * Of a new-body extrude whose profile has several region groups: the
+   * Extrudo body (`${id}:k`) each group became, in the file's group order
+   * (`bodyOrder`).
+   */
+  bodies?: number[];
 }
 
 /**
@@ -449,24 +456,93 @@ export function f3dToDesign(
   };
   /** f3d feature record → the Extrudo feature a pattern can replay for it. */
   const replayable = new Map<number, { id: string; name: string }>();
-  // Extrudo names a body after the feature that made it — and, of several, by
-  // an order the file's need not share — so an f3d body is known here only as
-  // the only body of an imported feature.
+  // Extrudo names a body after the feature that made it, `${id}:k`: the only
+  // body of a feature is `:0`; of several, only an extrude's are known, by
+  // the order its region groups became bodies (`bodyOrder`). The file numbers
+  // a creator's bodies in its group order.
   const bodyRecords = new Map(f3d.bodies.map((b) => [b.id, b]));
-  const madeBy = new Map<number, number>();
-  for (const body of f3d.bodies)
-    if (body.creator !== undefined) madeBy.set(body.creator, (madeBy.get(body.creator) ?? 0) + 1);
+  const madeBy = new Map<number, F3dBody[]>();
+  for (const body of f3d.bodies) {
+    if (body.creator === undefined) continue;
+    const list = madeBy.get(body.creator);
+    if (list) list.push(body);
+    else madeBy.set(body.creator, [body]);
+  }
+  for (const list of madeBy.values()) list.sort((a, b) => a.index - b.index);
   const bodyOf = (record: number): { id: BodyId; index: number; by: string } | undefined => {
     const body = bodyRecords.get(components.aliases.get(record) ?? record);
-    if (body?.creator === undefined || madeBy.get(body.creator) !== 1) return undefined;
+    if (body?.creator === undefined) return undefined;
     const made = replayable.get(body.creator);
-    return made ? { id: `${made.id}:0` as BodyId, index: body.index, by: made.name } : undefined;
+    const siblings = madeBy.get(body.creator) ?? [];
+    if (!made) return undefined;
+    // An extrude whose groups became several bodies, of which the file lists
+    // another number (some joined away or deleted): which is which is unknown.
+    const order = extrudes.get(body.creator)?.bodies;
+    if (order && order.length !== siblings.length) return undefined;
+    let k = 0;
+    if (siblings.length > 1) {
+      if (!order) return undefined;
+      k = order[siblings.indexOf(body)] as number;
+    }
+    return { id: `${made.id}:${k}` as BodyId, index: body.index, by: made.name };
+  };
+  // After a join of several bodies Extrudo keeps the pieces its tool doesn't
+  // bridge apart, the largest under the first one's ID and the rest under the
+  // join's own (`splitSolids`): which ID is which body from then on can't be
+  // told here, so later features that name one of them are left to Extrudo's
+  // default (every body they meet), and none of them is hidden.
+  const unsure = new Set<BodyId>();
+  /** A body that a join of several named (`unsure`), as Extrudo knows it; else undefined. */
+  const unsureBody = (record: number) => {
+    const known = bodyOf(record);
+    return known && unsure.has(known.id) ? known : undefined;
+  };
+  /** A body as Extrudo knows it, unless a join of several named it since. */
+  const sureBodyOf = (record: number) => {
+    const known = bodyOf(record);
+    return known && !unsure.has(known.id) ? known : undefined;
   };
   /** A feature's participant bodies as Extrudo references, when every one is known. */
-  const participants = (records: number[]): GeomRef[] | undefined => {
+  const participants = (
+    records: number[],
+    operation?: string,
+    name?: string,
+  ): GeomRef[] | undefined => {
     const ids = records.map((r) => bodyOf(r)?.id);
-    if (ids.length === 0 || ids.some((id) => id === undefined)) return undefined;
-    return ids.map((id) => ({ kind: 'body', id: id as string }));
+    if (ids.length === 0) return undefined;
+    if (ids.some((id) => id === undefined || unsure.has(id))) {
+      // One of several bodies of an imported feature, or of a join of several:
+      // the file says which, Extrudo's IDs don't.
+      const told = records.some((r, i) => {
+        const body = bodyRecords.get(components.aliases.get(r) ?? r);
+        const id = ids[i];
+        return id !== undefined
+          ? unsure.has(id)
+          : body?.creator !== undefined &&
+              replayable.has(body.creator) &&
+              Math.max(
+                madeBy.get(body.creator)?.length ?? 0,
+                extrudes.get(body.creator)?.bodies?.length ?? 0,
+              ) > 1;
+      });
+      if (told && name)
+        report.notes.push(
+          `${name}: which of the bodies it names is which couldn't be told; it acts on every body it meets.`,
+        );
+      return undefined;
+    }
+    const now = [...new Set(ids as BodyId[])];
+    if (operation === 'join' && now.length > 1) {
+      // In the order Extrudo's default would join them (the earliest made first).
+      const at = new Map(d.doc.features.map((f, i) => [f.id as string, i]));
+      const key = (id: BodyId) => {
+        const [feature, k] = id.split(':');
+        return (at.get(feature as string) ?? 0) * 1e6 + Number(k);
+      };
+      now.sort((a, b) => key(a) - key(b));
+      for (const id of now) unsure.add(id);
+    }
+    return now.map((id) => ({ kind: 'body', id }));
   };
   // Curves the file's own profiles run along are never construction geometry,
   // whatever the flag reading says.
@@ -714,6 +790,11 @@ export function f3dToDesign(
         const reason = components.bodyMove(feature, bodyOf);
         if (reason) report.skipped.push(skippedFeature(feature.name, feature.kind, reason));
         else report.imported.push(feature.name);
+        // `finish` leaves such a body where the feature that made it put it.
+        if (!reason && components.moves(feature).some((b) => unsureBody(b)))
+          report.notes.push(
+            `${feature.name}: a body it moves was joined with others first; it stays in the component that made it.`,
+          );
       } else {
         report.skipped.push({
           name: feature.name,
@@ -750,12 +831,16 @@ export function f3dToDesign(
   for (const body of shownElsewhere ? [] : f3d.bodies) {
     const known = components.shown(body) ? undefined : bodyOf(body.id);
     if (!known || (order.get(known.id.split(':')[0] as string) ?? 0) < lastOpenJoin) continue;
+    // Joined with others here: it may be another body by now.
+    if (unsure.has(known.id)) continue;
     d.state.dispatch(
       updateBody({ id: known.id, changes: { name: `Body${known.index}`, visible: false } }),
     );
     report.notes.push(`Body${known.index} (made by ${known.by}) is hidden, as in the file.`);
   }
-  components.finish(bodyOf);
+  // A body joined with others may be another one by now: it stays in the
+  // component of the feature that made it.
+  components.finish(sureBodyOf);
   // One link per **visible** file body, aligned with the B-rep writer's steps (`bodiesStep`):
   // the Extrudo component the file has it in, and the replayed body its creator link points at.
   // The index alone is not unique across components, so the record is carried too.
@@ -763,7 +848,7 @@ export function f3dToDesign(
   for (const body of f3d.bodies) {
     if (!body.visible) continue;
     const component = components.of(body.component)?.id;
-    const hint = bodyOf(body.id)?.id;
+    const hint = sureBodyOf(body.id)?.id;
     bodies.push({
       record: body.id,
       name: `Body${body.index}`,
@@ -785,6 +870,14 @@ interface PlaneFrame {
 /** Planes made for sketches so far, per design: two sketches on one plane share it. */
 const madePlanes = new WeakMap<Design, Map<string, GeomRef>>();
 const planeKey = (...values: number[]) => values.map((v) => Number(v.toPrecision(9))).join(',');
+
+/** Whether `placeSketch` can place a plane of this normal (the same tests, made nothing). */
+function placeable(N: Vec3): boolean {
+  return (
+    ORIGIN_PLANES.some((p) => Math.abs(Math.abs(dot(N, p.frame.normal as Vec3)) - 1) <= EPS) ||
+    ORIGIN_AXES.some(([, a]) => Math.abs(dot(N, a)) <= EPS)
+  );
+}
 
 /**
  * Picks the Extrudo plane for an f3d sketch frame: an origin plane, or one
@@ -1258,7 +1351,7 @@ function extrude(
   naming: FaceNaming,
   expressionOf: (p: ParameterValue, negate?: boolean) => string,
   movedSketch: (entry: SketchEntry, cm: number, name: string) => SketchEntry | undefined,
-  participants: (records: number[]) => GeomRef[] | undefined,
+  participants: (records: number[], operation?: string, name?: string) => GeomRef[] | undefined,
   report: ImportReport,
 ): string | ImportedExtrude {
   if (!f.solid) return 'surface extrudes are not supported';
@@ -1271,12 +1364,93 @@ function extrude(
   const startFace = f.start === 'face' ? f.faces[0] : undefined;
   const toFace = param('Side1Offset') ? f.faces[startFace ? 1 : 0] : undefined;
   let faceNote = false;
+  /** Some of the file's regions were left out. */
+  let partial = false;
+  // Side 1 runs along the file's sketch normal (1) or against it (−1).
+  const negative = (param('AlongDistance')?.value ?? 0) < 0;
+  const side1 = f.reversed !== negative ? -1 : 1;
+  /**
+   * A cut from a plane face slanted to its sketch: the file sweeps the
+   * profile from where it meets the face on along the normal, so the cut
+   * ends on that face's plane moved by its distance. It starts here from a
+   * copy of the sketch moved to where the whole profile is on the face's
+   * outer side (that wedge is outside the body, as long as nothing of the
+   * body stands over the face there), up to the moved plane.
+   */
+  let slanted: { frame: Matrix } | undefined;
+  const slantedShift = (own: SketchEntry): number | undefined => {
+    const s = startFace?.surface;
+    if (
+      s?.kind !== 'plane' ||
+      // A body face only: a start plane's (datum) orientation says nothing.
+      !startFace?.tags.length ||
+      f.operation !== 'cut' ||
+      f.direction !== 'one-side' ||
+      toFace ||
+      !param('AlongDistance') ||
+      offset?.value
+    )
+      return undefined;
+    const m = own.source.frame;
+    const sweep = scale([m[2] as number, m[6] as number, m[10] as number], side1);
+    const into = dot(sweep, s.normal);
+    if (into > -1e-6) return undefined;
+    const operand = f.profiles[0];
+    if (f.profiles.length !== 1 || !operand?.regions) return undefined;
+    own.pieces ??= sketchPieces(own.source, own.profileCurves);
+    let first = Number.POSITIVE_INFINITY;
+    for (const region of operand.regions) {
+      const lines = regionPieces(own.pieces, region.outerPieces);
+      if (!lines) return undefined;
+      for (const line of lines)
+        for (const [u, v] of line) {
+          // How far along the sweep this profile point meets the face's plane.
+          const p = toModel(m, [u, v, 0]);
+          first = Math.min(first, dot(sub(s.point, p), s.normal) / into);
+        }
+    }
+    if (!Number.isFinite(first)) return undefined;
+    const n = s.normal;
+    const x =
+      norm(cross(n, [1, 0, 0])) > 0.1 ? unit(cross(n, [1, 0, 0])) : unit(cross(n, [0, 1, 0]));
+    const y = cross(n, x);
+    const frame: Matrix = [
+      x[0],
+      y[0],
+      n[0],
+      s.point[0],
+      x[1],
+      y[1],
+      n[1],
+      s.point[1],
+      x[2],
+      y[2],
+      n[2],
+      s.point[2],
+      0,
+      0,
+      0,
+      1,
+    ];
+    // The plane is made only once the extrude is (see below); here only
+    // whether it can be.
+    if (!placeable(n)) return undefined;
+    slanted = { frame };
+    // A millimetre further back: Extrudo wants the plane wholly beyond the profile.
+    return (first - 0.1) * side1;
+  };
   const shiftFor = (own: SketchEntry): number => {
     let cm = offset ? offset.value : 0;
     if (startFace) {
       const at = planeOffset(startFace, own.source.frame);
-      if (at === undefined) faceNote = true;
-      else cm += at;
+      const across = at === undefined ? slantedShift(own) : undefined;
+      if (across !== undefined) cm = across;
+      else if (at === undefined) faceNote = true;
+      // The offset runs along a body face's normal, against the sketch's when
+      // the face looks the other way. A start plane (origin or construction:
+      // no tags) has no outside, and its stored axes may face either way: its
+      // offset runs along the sketch's normal.
+      else cm = at + cm * (startFace.tags.length ? facing(startFace, own.source.frame) : 1);
     }
     return Math.abs(cm) > 1e-9 ? cm : 0;
   };
@@ -1289,7 +1463,10 @@ function extrude(
       const sketch = shift ? movedSketch(own, shift, `${f.name} start`) : own;
       return sketch ?? 'its offset start plane is not along an origin axis';
     },
-    (text) => report.notes.push(`${f.name}: ${text}`),
+    (text) => {
+      partial = true;
+      report.notes.push(`${f.name}: ${text}`);
+    },
   );
   if (typeof selected === 'string') return selected;
   const { profiles, entry } = selected;
@@ -1305,13 +1482,22 @@ function extrude(
 
   // Side 1 runs along the file's sketch normal, reversed by the flag or a
   // negative distance; Extrudo's runs along its plane's normal unless flipped.
-  const negative = (along?.value ?? 0) < 0;
   const flip = placement.opposite !== (f.reversed !== negative);
   const inputs: Record<string, unknown> = { profiles, operation: f.operation };
-  if (f.direction === 'one-side' && toFace) {
+  const stop = slanted && along && placeSketch(d, slanted.frame, report, `${f.name} start face`);
+  if (stop && along) {
+    inputs.extent = 'to-object';
+    inputs.toObject = stop.plane;
+    inputs.offset = expressionOf(along, negative);
+    report.notes.push(
+      `${f.name}: starts from a face slanted to its sketch; cut from beyond the face to its plane moved by the distance.`,
+    );
+  } else if (f.direction === 'one-side' && toFace) {
     // Up to a face: a plane parallel to the start becomes the distance to it
     // (past it by the offset); another face is named if it can be.
-    const past = param('Side1Offset')?.value ?? 0;
+    // From a start face, the file's offset counts the other way: short of the
+    // face where positive.
+    const past = (param('Side1Offset')?.value ?? 0) * (startFace ? -1 : 1);
     const to = planeOffset(toFace, entry.source.frame);
     if (to !== undefined) {
       const total = to + Math.sign(to) * past;
@@ -1379,16 +1565,129 @@ function extrude(
   if (taper && Math.abs(taper.value) > 1e-12) inputs.taper = expressionOf(taper);
   if (flip && !(f.direction === 'one-side' && toFace)) inputs.flip = true;
   // The bodies the file joined, cut or intersected; Extrudo's default is every one it meets.
-  const bodies = f.operation === 'new-body' ? undefined : participants(f.participants);
+  const bodies =
+    f.operation === 'new-body' ? undefined : participants(f.participants, f.operation, f.name);
   if (bodies) inputs.bodies = bodies;
   const made = d.extrude(inputs as Parameters<Design['extrude']>[0], { name: f.name });
+  // Several bodies only from a new body; every side the same length (a
+  // distance, through everything, or up to a plane taken as a distance), no taper.
+  const even =
+    f.operation === 'new-body' &&
+    !partial &&
+    // A taper widens each outline about itself, not about the centre of its box.
+    !inputs.taper &&
+    !inputs.taper2 &&
+    inputs.extent !== 'to-object' &&
+    inputs.extent2 !== 'to-object';
+  const order = even ? bodyOrder(f, entry) : undefined;
   return {
     id: made.id,
     sketch: entry,
     curves: regionCurves(entry, profiles),
     oneSided: f.direction === 'one-side',
     side1: f.reversed !== negative ? -1 : 1,
+    ...(order ? { bodies: order } : {}),
   };
+}
+
+/**
+ * Along the axis that orders two solids, the kernel calls centres no further
+ * apart than this (mm) a tie and goes on to the next axis (`ORDER_TOLERANCE`
+ * in the kernel's `naming/names.ts`).
+ */
+const ORDER_TIE = 1e-6;
+/**
+ * Centres further apart than the tie but closer than this (mm) on the axis
+ * that orders them may come out either way in the kernel's measure (its box
+ * of a curved outline is not exact): such an order is not trusted.
+ */
+const ORDER_SLACK = 0.01;
+
+/**
+ * Which Extrudo body each region group of a new-body extrude becomes. Extrudo
+ * numbers the separate solids of an extrude by the centre of each one's box,
+ * x first, then y, then z (`newBodies`); the file numbers the bodies in the
+ * order of its profile's region groups (each group is one body). The sides
+ * of every body run equally far along the normal, so the centres compare as
+ * the boxes of the groups' outlines do. Undefined when that can't be told
+ * for certain: one operand of regions only, every region's outline found,
+ * every centre finite, and no two neighbours in that order closer than
+ * `ORDER_SLACK` on the axis that orders them. A tie on an axis passes to the
+ * next only for outlines of lines and arcs: a spline's or an ellipse's box is
+ * loose in the kernel, so a tie there could be broken either way.
+ */
+export function bodyOrder(f: F3dExtrude, entry: SketchEntry): number[] | undefined {
+  const operand = f.profiles[0];
+  if (f.profiles.length !== 1 || !operand?.regions || operand.text !== undefined) return undefined;
+  entry.pieces ??= sketchPieces(entry.source, entry.profileCurves);
+  const curved = new Set(
+    [...entry.source.splines, ...(entry.source.ellipses ?? [])]
+      .map((c) => c.tag)
+      .filter((t): t is bigint => t !== undefined)
+      .map(String),
+  );
+  const boxes = new Map<number, number[]>();
+  const loose = new Set<number>();
+  for (const region of operand.regions) {
+    if (region.outline) continue;
+    const lines = regionPieces(entry.pieces, region.outerPieces);
+    if (!lines) return undefined;
+    const group = region.group ?? 0;
+    if (region.outerPieces.flat().some((piece) => curved.has(String(piece.tag)))) loose.add(group);
+    const box = boxes.get(group) ?? [
+      Number.POSITIVE_INFINITY,
+      Number.POSITIVE_INFINITY,
+      Number.POSITIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+      Number.NEGATIVE_INFINITY,
+    ];
+    for (const line of lines)
+      for (const [u, v] of line) {
+        const p = toModel(entry.source.frame, [u, v, 0]);
+        for (let i = 0; i < 3; i++) {
+          box[i] = Math.min(box[i] as number, (p[i] as number) * 10);
+          box[i + 3] = Math.max(box[i + 3] as number, (p[i] as number) * 10);
+        }
+      }
+    boxes.set(group, box);
+  }
+  if (boxes.size < 2) return undefined;
+  const centres = new Map<number, number[]>();
+  for (const [group, b] of boxes) {
+    const c = [0, 1, 2].map((i) => ((b[i] as number) + (b[i + 3] as number)) / 2);
+    // An empty group (no outline points) has no centre to order by.
+    if (!c.every(Number.isFinite)) return undefined;
+    centres.set(group, c);
+  }
+  const groups = [...boxes.keys()].sort((a, b) => a - b);
+  const delta = (a: number, b: number, i: number) =>
+    ((centres.get(a) as number[])[i] as number) - ((centres.get(b) as number[])[i] as number);
+  const sorted = [...groups].sort((a, b) => {
+    for (let i = 0; i < 3; i++) {
+      const d = delta(a, b, i);
+      if (Math.abs(d) > ORDER_TIE) return d;
+    }
+    return 0;
+  });
+  // Each neighbour pair of that order: the axis that decides it, and how surely.
+  for (let n = 1; n < sorted.length; n++) {
+    const a = sorted[n - 1] as number;
+    const b = sorted[n] as number;
+    let decided = false;
+    for (let i = 0; i < 3 && !decided; i++) {
+      const d = Math.abs(delta(a, b, i));
+      if (d <= ORDER_TIE) {
+        if (loose.has(a) || loose.has(b)) return undefined;
+        continue;
+      }
+      if (d < ORDER_SLACK) return undefined;
+      decided = true;
+    }
+    if (!decided) return undefined;
+  }
+  const rank = new Map(sorted.map((g, i) => [g, i]));
+  return groups.map((g) => rank.get(g) as number);
 }
 
 /**
@@ -1401,7 +1700,7 @@ function faceExtrude(
   f: F3dExtrude,
   naming: FaceNaming,
   expressionOf: (p: ParameterValue, negate?: boolean) => string,
-  participants: (records: number[]) => GeomRef[] | undefined,
+  participants: (records: number[], operation?: string, name?: string) => GeomRef[] | undefined,
   report: ImportReport,
 ): string | { id: string } {
   if (!f.solid) return 'surface extrudes are not supported';
@@ -1423,7 +1722,8 @@ function faceExtrude(
   else inputs.extent = 'through-all';
   if (taper && Math.abs(taper.value) > 1e-12) inputs.taper = expressionOf(taper);
   if (f.reversed !== negative) inputs.flip = true;
-  const bodies = f.operation === 'new-body' ? undefined : participants(f.participants);
+  const bodies =
+    f.operation === 'new-body' ? undefined : participants(f.participants, f.operation, f.name);
   if (bodies) inputs.bodies = bodies;
   const made = d.extrude(inputs as Parameters<Design['extrude']>[0], { name: f.name });
   return { id: made.id };
@@ -1729,7 +2029,7 @@ function revolve(
   f: F3dRevolve,
   sketches: Map<number, SketchEntry>,
   expressionOf: (p: ParameterValue, negate?: boolean) => string,
-  participants: (records: number[]) => GeomRef[] | undefined,
+  participants: (records: number[], operation?: string, name?: string) => GeomRef[] | undefined,
   report: ImportReport,
 ): string | ImportedRevolve {
   if (!f.axis) return 'its axis was not found';
@@ -1755,7 +2055,8 @@ function revolve(
   const inputs: Record<string, unknown> = { profiles, axis: axis.ref, operation: f.operation };
   if (along) inputs.angle = expressionOf(along, negative);
   if (axis.sign < 0 !== negative) inputs.flip = true;
-  const bodies = f.operation === 'new-body' ? undefined : participants(f.participants);
+  const bodies =
+    f.operation === 'new-body' ? undefined : participants(f.participants, f.operation, f.name);
   if (bodies) inputs.bodies = bodies;
   const made = d.revolve(inputs as Parameters<Design['revolve']>[0], { name: f.name });
   return {
@@ -1823,6 +2124,13 @@ function planeOffset(face: F3dFace, m: Matrix): number | undefined {
   return dot(sub(s.point, O), N);
 }
 
+/** 1 when a plane face looks along a sketch's normal, −1 against it. */
+function facing(face: F3dFace, m: Matrix): number {
+  const s = face.surface;
+  if (s?.kind !== 'plane') return 1;
+  return dot(s.normal, [m[2] as number, m[6] as number, m[10] as number]) < 0 ? -1 : 1;
+}
+
 /**
  * An up-to-face offset (cm) as Extrudo measures it, along the sweep: the file
  * measures it along a target plane's normal, so a plane slanted to the sketch
@@ -1844,6 +2152,7 @@ const cross = (a: Vec3, b: Vec3): Vec3 => [
   a[0] * b[1] - a[1] * b[0],
 ];
 const norm = (a: Vec3) => Math.hypot(a[0], a[1], a[2]);
+const unit = (a: Vec3): Vec3 => scale(a, 1 / norm(a));
 
 /** An f3d sketch point (cm, sketch frame) in model space (cm). */
 function toModel(m: Matrix, p: Vec3): Vec3 {
