@@ -1,5 +1,6 @@
-// Mesh to Solid (P4-13, ADR-0095 §3), faceted: a mesh body's triangles go
-// through the facade into one B-rep solid whose coplanar facets are merged.
+// Mesh to Solid (P4-13, ADR-0095 §3): a mesh body's triangles go through the
+// facade into one B-rep solid. Faceted merges coplanar facets; prismatic
+// recognises planes and cylinders and rebuilds the body from exact surfaces.
 // Real OCCT, a real manifold module and `strictLeaks`: a mesh handle or a
 // solid a test forgets fails the `afterEach`.
 import { readStl, type TriangleMesh } from '@extrudo/io';
@@ -152,15 +153,234 @@ describe('Kernel.meshToSolid, faceted', { timeout: 300_000 }, () => {
       kernel.release(box);
     }
   });
+});
 
-  it("says prismatic isn't built yet", () => {
-    const mesh = cube();
+/** An OCCT solid meshed (fine or coarse) as a mesh body; the solid is released. */
+function meshOfSolid(solid: ShapeHandle, linear: number, angular: number): ShapeHandle {
+  const mesh = kernel.exportMesh(solid, { linearDeflection: linear, angularDeflection: angular });
+  kernel.release(solid);
+  return kernel.meshFrom(mesh);
+}
+
+/** Converts with prismatic and releases the mesh; the caller releases the shape. */
+function prismatic(mesh: ShapeHandle, tolerance = 0.01) {
+  try {
+    return kernel.meshToSolid(mesh, { method: 'prismatic', tolerance });
+  } finally {
+    kernel.release(mesh);
+  }
+}
+
+/** Prismatic's refusal of `mesh` (released), with how long it took. */
+function refusal(mesh: ShapeHandle, tolerance = 0.01): { message: string; ms: number } {
+  const start = performance.now();
+  try {
+    kernel.release(prismatic(mesh, tolerance).shape);
+  } catch (error) {
+    expect(error).toBeInstanceOf(KernelError);
+    return { message: (error as Error).message, ms: performance.now() - start };
+  }
+  throw new Error('the mesh converted');
+}
+
+/** The radii of the cylinder faces. */
+function radii(shape: ShapeHandle): number[] {
+  return Array.from({ length: kernel.count(shape, 'face') }, (_, i) =>
+    kernel.surfaceGeometry(shape, i),
+  )
+    .filter((g) => g.type === 'cylinder')
+    .map((g) => g.radius as number);
+}
+
+const sorted = (list: string[]) => [...list].sort();
+
+/** A 40 x 30 x 5 plate with a through hole of radius 3 at its centre. */
+function plate(): ShapeHandle {
+  const box = kernel.box([40, 30, 5]);
+  const drill = kernel.cylinder(3, 7, [20, 15, -1]);
+  const cut = kernel.cut(box, drill).shape;
+  kernel.release(box);
+  kernel.release(drill);
+  return cut;
+}
+const PLATE_VOLUME = 6000 - 45 * Math.PI;
+
+/** The 32-gon cylinder r 5, h 20, its nodes moved radially by up to ±0.005 mm (deterministic). */
+function noisyCylinder(): ShapeHandle {
+  const solid = manifold.Manifold.cylinder(20, 5, 5, 32);
+  const gl = solid.getMesh();
+  solid.delete();
+  const positions = new Float64Array(gl.numVert * 3);
+  for (let i = 0; i < gl.numVert; i++) {
+    const x = gl.vertProperties[gl.numProp * i] as number;
+    const y = gl.vertProperties[gl.numProp * i + 1] as number;
+    const z = gl.vertProperties[gl.numProp * i + 2] as number;
+    const r = Math.hypot(x, y);
+    const scale = (r + 0.005 * Math.sin(1.7 * i + 0.3)) / r;
+    positions.set([x * scale, y * scale, z], 3 * i);
+  }
+  return kernel.meshFrom({ positions, indices: Uint32Array.from(gl.triVerts) });
+}
+
+describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
+  it('1: turns cube.stl into six exact planes', () => {
+    const { shape, report } = prismatic(cube());
     try {
-      expect(() => kernel.meshToSolid(mesh, { method: 'prismatic', tolerance: 0.01 })).toThrow(
-        "Prismatic conversion isn't built yet.",
-      );
+      expect(kernel.count(shape, 'face')).toBe(6);
+      expect(kinds(shape)).toEqual(Array(6).fill('plane'));
+      expect(kernel.isValid(shape)).toBe(true);
+      expect(kernel.properties(shape).volume).toBeCloseTo(8000, 6);
+      expect(report).toEqual({
+        method: 'prismatic',
+        faces: 6,
+        planes: 6,
+        cylinders: 0,
+        cones: 0,
+        spheres: 0,
+        tori: 0,
+        unfit: { regions: 0, triangles: 0, fraction: 0 },
+      });
     } finally {
-      kernel.release(mesh);
+      kernel.release(shape);
     }
+  });
+
+  // 2-4: the same cylinder at 32, 360 (the fine trap: facets 1 degree apart)
+  // and 16 segments (coarse: its polygon is 2.5 % short of the circle).
+  for (const segments of [32, 360, 16]) {
+    it(`${segments === 32 ? 2 : segments === 360 ? 3 : 4}: rebuilds a ${segments}-gon cylinder as 2 planes and an exact cylinder`, () => {
+      const { shape, report } = prismatic(meshOf(manifold.Manifold.cylinder(20, 5, 5, segments)));
+      try {
+        expect(kernel.count(shape, 'face')).toBe(3);
+        expect(sorted(kinds(shape))).toEqual(['cylinder', 'plane', 'plane']);
+        const [radius] = radii(shape);
+        expect(Math.abs((radius as number) - 5)).toBeLessThan(1e-6);
+        const volume = kernel.properties(shape).volume;
+        expect(Math.abs(volume / (Math.PI * 25 * 20) - 1)).toBeLessThan(0.001);
+        expect(report).toMatchObject({ faces: 3, planes: 2, cylinders: 1, unfit: { regions: 0 } });
+      } finally {
+        kernel.release(shape);
+      }
+    });
+  }
+
+  it('5: rebuilds a plate with a hole: the hole is a circle and takes a fillet', () => {
+    const { shape } = prismatic(meshOfSolid(plate(), 0.001, 0.05));
+    try {
+      expect(kernel.count(shape, 'face')).toBe(7);
+      expect(sorted(kinds(shape))).toEqual(sorted([...Array(6).fill('plane'), 'cylinder']));
+      expect(Math.abs(kernel.properties(shape).volume / PLATE_VOLUME - 1)).toBeLessThan(0.001);
+      const topCircle = Array.from({ length: kernel.count(shape, 'edge') }, (_, i) => i).find(
+        (i) => {
+          const g = kernel.edgeGeometry(shape, i);
+          return g.type === 'circle' && Math.abs((g.points[0]?.[2] ?? 0) - 5) < 1e-6;
+        },
+      );
+      expect(topCircle).toBeDefined();
+      const filleted = kernel.fillet(shape, [topCircle as number], 1).shape;
+      try {
+        expect(kernel.isValid(filleted)).toBe(true);
+        expect(kernel.count(filleted, 'face')).toBe(8);
+      } finally {
+        kernel.release(filleted);
+      }
+    } finally {
+      kernel.release(shape);
+    }
+  });
+
+  // 6: the tangency trap: a fillet's cylinder touches both its planes.
+  for (const [name, linear, angular] of [
+    ['fine', 0.001, 0.05],
+    ['coarse (8 segments)', 1, Math.PI / 16 + 1e-3],
+  ] as const) {
+    it(`6: rebuilds a box with a filleted edge, meshed ${name}`, () => {
+      const box = kernel.box([20, 20, 20]);
+      const rounded = kernel.fillet(box, [0], 2).shape;
+      kernel.release(box);
+      const exact = kernel.properties(rounded).volume;
+      const { shape, report } = prismatic(meshOfSolid(rounded, linear, angular));
+      try {
+        expect(kernel.count(shape, 'face')).toBe(7);
+        expect(sorted(kinds(shape))).toEqual(sorted([...Array(6).fill('plane'), 'cylinder']));
+        expect(Math.abs((radii(shape)[0] as number) - 2)).toBeLessThan(1e-3);
+        expect(Math.abs(kernel.properties(shape).volume / exact - 1)).toBeLessThan(0.001);
+        expect(report).toMatchObject({ planes: 6, cylinders: 1 });
+      } finally {
+        kernel.release(shape);
+      }
+    });
+  }
+
+  it('7: refuses a sphere: one region fits no plane or cylinder', () => {
+    const { message } = refusal(meshOf(manifold.Manifold.sphere(10, 48)));
+    expect(message).toBe(
+      "Mesh to Solid couldn't close the body: 1 region (100 % of the surface) fits no plane or cylinder. Use Faceted, or simplify the mesh in your slicer.",
+    );
+  });
+
+  it('8: refuses a 602-face staircase over the 500-surface cap, quickly', () => {
+    // 299 steps: the bottom, the back, 299 risers and 299 treads, and the two caps.
+    const steps = 299;
+    const outline: [number, number][] = [
+      [0, 0],
+      [steps, 0],
+    ];
+    for (let i = 0; i < steps; i++) outline.push([steps - i, i + 1], [steps - i - 1, i + 1]);
+    const section = new manifold.CrossSection([outline]);
+    const solid = section.extrude(5);
+    section.delete();
+    const { message, ms } = refusal(meshOf(solid));
+    console.log(`prismatic: the staircase refused in ${ms.toFixed(0)} ms`);
+    expect(message).toBe(
+      'This mesh has 602 surfaces; Extrudo rebuilds up to 500. Use Faceted, or simplify the mesh in your slicer.',
+    );
+    expect(ms).toBeLessThan(3000);
+  });
+
+  it('9: suggests a tolerance for a noisy cylinder, and converts at that tolerance', () => {
+    const { message } = refusal(noisyCylinder(), 0.001);
+    const match = /Raise the tolerance to ([0-9.]+) mm, or use Faceted\.$/.exec(message);
+    expect(message).toMatch(
+      /^Mesh to Solid couldn't close the body: 1 region \(\d+ % of the surface\) fits no plane or cylinder\./,
+    );
+    expect(match).not.toBeNull();
+    const suggested = Number(match?.[1]);
+    expect(suggested).toBeGreaterThanOrEqual(0.005);
+    expect(suggested).toBeLessThanOrEqual(0.02);
+    const { shape, report } = prismatic(noisyCylinder(), 0.02);
+    try {
+      expect(sorted(kinds(shape))).toEqual(['cylinder', 'plane', 'plane']);
+      expect(report).toMatchObject({ planes: 2, cylinders: 1 });
+    } finally {
+      kernel.release(shape);
+    }
+  });
+
+  it('11: converts a 20k-triangle plate in under 3 s and refuses a 500k-triangle sphere in under 10 s', () => {
+    const mesh = meshOfSolid(plate(), 0.0002, 0.0025);
+    const triangles =
+      kernel.exportMesh(mesh, { linearDeflection: 1, angularDeflection: 1 }).indices.length / 3;
+    let start = performance.now();
+    const { shape } = prismatic(mesh);
+    const convert = performance.now() - start;
+    try {
+      expect(kernel.count(shape, 'face')).toBe(7);
+    } finally {
+      kernel.release(shape);
+    }
+    start = performance.now();
+    const sphere = meshOf(manifold.Manifold.sphere(10, 1000));
+    const sphereTriangles =
+      kernel.exportMesh(sphere, { linearDeflection: 1, angularDeflection: 1 }).indices.length / 3;
+    const { message, ms } = refusal(sphere);
+    console.log(
+      `prismatic: plate ${triangles} triangles converted in ${convert.toFixed(0)} ms; sphere ${sphereTriangles} triangles refused in ${ms.toFixed(0)} ms`,
+    );
+    expect(triangles).toBeGreaterThan(15_000);
+    expect(sphereTriangles).toBeGreaterThan(400_000);
+    expect(message).toContain('fits no plane or cylinder');
+    expect(convert).toBeLessThan(3000);
+    expect(ms).toBeLessThan(10_000);
   });
 });

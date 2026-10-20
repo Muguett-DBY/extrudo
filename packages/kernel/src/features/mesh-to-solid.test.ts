@@ -1,4 +1,4 @@
-// The Mesh to Solid feature (P4-13, ADR-0095, slice 2) through the recompute
+// The Mesh to Solid feature (P4-13, ADR-0095, slices 2 and 3) through the recompute
 // engine: an imported mesh body becomes a solid under its own ID, fillets
 // like a native solid, refuses a solid body and a bad tolerance, and gives
 // the mesh back when suppressed. Real OCCT, a real manifold module and
@@ -179,14 +179,22 @@ describe('the Mesh to Solid feature (P4-13, ADR-0095)', { timeout: 300_000 }, ()
     );
   });
 
-  it("says prismatic isn't built yet", async () => {
+  it('converts with prismatic, the default method, into six exact planes', async () => {
     const feature: Feature = {
       ...testFeature('MeshToSolid1', 'meshToSolid'),
       inputs: meshToSolidInputs(CUBE_BODY, 'prismatic'),
     };
-    const result = await recompute([importMesh('Import1'), feature]);
-    expect(status(result, 'MeshToSolid1')?.status).toBe('error');
-    expect(status(result, 'MeshToSolid1')?.message).toBe("Prismatic conversion isn't built yet.");
+    const result = ok(await recompute([importMesh('Import1'), feature]));
+    expect(kernel.isMesh(bodyShape(CUBE_BODY))).toBe(false);
+    expect(kernel.properties(bodyShape(CUBE_BODY)).volume).toBeCloseTo(8000, 6);
+    expect(result.reports['MeshToSolid1' as FeatureId]).toMatchObject({
+      kind: 'meshToSolid',
+      method: 'prismatic',
+      faces: 6,
+      planes: 6,
+      cylinders: 0,
+      unfit: { regions: 0, triangles: 0, fraction: 0 },
+    });
   });
 
   it('gives the mesh body back when it is suppressed', async () => {
