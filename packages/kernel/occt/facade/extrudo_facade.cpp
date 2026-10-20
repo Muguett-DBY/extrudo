@@ -63,6 +63,9 @@
 #include <BndLib_Add2dCurve.hxx>
 #include <Bnd_Box2d.hxx>
 #include <ShapeFix_Solid.hxx>
+#include <ShapeFix_Shape.hxx>
+#include <BRepBuilderAPI_MakeShapeOnMesh.hxx>
+#include <Poly_Triangle.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
 #include <BRepBuilderAPI_MakeVertex.hxx>
 #include <BRepBuilderAPI_MakeWire.hxx>
@@ -2566,6 +2569,52 @@ public:
       return failFromException("STEP import failed");
     }
   }
+
+  // ---------------------------------------------------------- mesh to solid --
+
+  /**
+   * Mesh to Solid's input buffers (ADR-0095 §3), written in place by the
+   * kernel right after it reads each pointer: nodes as x, y, z doubles,
+   * triangles as three 0-based uint32 node indices each, facing outward.
+   * Returns 1, or 0 for a count out of range.
+   */
+  int meshNodes(int count) {
+    if (count <= 0 || count > 3000000) return fail("Mesh to Solid failed: the mesh has too many or no nodes.");
+    meshNodes_.assign(3 * static_cast<size_t>(count), 0.0);
+    return 1;
+  }
+  uintptr_t meshNodesPtr() const { return reinterpret_cast<uintptr_t>(meshNodes_.data()); }
+
+  int meshTriangles(int count) {
+    if (count <= 0 || count > 1000000) return fail("Mesh to Solid failed: the mesh has too many or no triangles.");
+    meshTriangles_.assign(3 * static_cast<size_t>(count), 0u);
+    return 1;
+  }
+  uintptr_t meshTrianglesPtr() const { return reinterpret_cast<uintptr_t>(meshTriangles_.data()); }
+
+  /**
+   * Turns the staged mesh into a solid (ADR-0095 §3). method 0 = faceted (one
+   * planar face per coplanar patch), 1 = prismatic (not built yet). Frees the
+   * input buffers either way. Returns a handle, or 0; the report
+   * (meshReportPtr/Size) is filled on success.
+   */
+  int meshToSolid(int method, double tolerance) {
+    beginOp();
+    meshReport_.clear();
+    (void)tolerance;
+    const int handle = method == 0   ? facetedFromMesh()
+                       : method == 1 ? fail("Prismatic conversion isn't built yet.")
+                                     : fail("Mesh to Solid failed: unknown method.");
+    meshNodes_.clear();
+    meshNodes_.shrink_to_fit();
+    meshTriangles_.clear();
+    meshTriangles_.shrink_to_fit();
+    return handle;
+  }
+
+  /** Mesh to Solid's report, 10 doubles: faces, planes, cylinders, cones, spheres, tori, unfit regions, unfit triangles, unfit fraction, suggested tolerance (-1 = none). */
+  uintptr_t meshReportPtr() const { return reinterpret_cast<uintptr_t>(meshReport_.data()); }
+  int meshReportSize() const { return static_cast<int>(meshReport_.size()); }
 
   /**
    * The colours of a STEP file's solids (P4-12, ADR-0034's amendment): the
@@ -5398,6 +5447,82 @@ private:
   std::vector<int32_t> describeInts_;
   std::vector<double> describeNumbers_;
   std::vector<double> geometry_;
+  /** Mesh to Solid's input (meshNodes, meshTriangles) and its report. */
+  std::vector<double> meshNodes_;
+  std::vector<uint32_t> meshTriangles_;
+  std::vector<double> meshReport_;
+  /** Faceted refuses a result with more faces than this (ADR-0095 §3). */
+  static constexpr int FACETED_FACE_CAP = 2000;
+
+  /** meshToSolid's faceted method (ADR-0095 §3), over the staged buffers. */
+  int facetedFromMesh() {
+    static const char* const notClosed =
+        "Mesh to Solid couldn't make a closed solid from this mesh: repair it in your slicer or a mesh tool and try again.";
+    try {
+      const int nodes = static_cast<int>(meshNodes_.size() / 3);
+      const int triangles = static_cast<int>(meshTriangles_.size() / 3);
+      if (nodes == 0 || triangles == 0) return fail("Mesh to Solid failed: the mesh is empty.");
+      Handle(Poly_Triangulation) mesh = new Poly_Triangulation(nodes, triangles, false);
+      for (int i = 0; i < nodes; ++i) {
+        mesh->SetNode(i + 1, gp_Pnt(meshNodes_[3 * i], meshNodes_[3 * i + 1], meshNodes_[3 * i + 2]));
+      }
+      for (int i = 0; i < triangles; ++i) {
+        const uint32_t a = meshTriangles_[3 * i], b = meshTriangles_[3 * i + 1], c = meshTriangles_[3 * i + 2];
+        const uint32_t n = static_cast<uint32_t>(nodes);
+        if (a >= n || b >= n || c >= n) {
+          return fail("Mesh to Solid failed: the mesh refers to a node it doesn't have.");
+        }
+        mesh->SetTriangle(i + 1, Poly_Triangle(a + 1, b + 1, c + 1));
+      }
+      BRepBuilderAPI_MakeShapeOnMesh maker(mesh);
+      maker.Build();
+      if (!maker.IsDone()) return fail("Mesh to Solid failed: OCCT couldn't build faces on this mesh.");
+      // The faces share their edges, so a shell is just a container for them.
+      BRep_Builder builder;
+      TopoDS_Shell shell;
+      builder.MakeShell(shell);
+      for (TopExp_Explorer face(maker.Shape(), TopAbs_FACE); face.More(); face.Next()) builder.Add(shell, face.Current());
+      shell.Closed(BRep_Tool::IsClosed(shell));
+      BRepBuilderAPI_MakeSolid makeSolid(shell);
+      if (!makeSolid.IsDone()) return fail(notClosed);
+      ShapeFix_Solid fixSolid(makeSolid.Solid());
+      fixSolid.Perform();
+      TopoDS_Shape solid = fixSolid.Solid();
+      if (solid.IsNull()) return fail(notClosed);
+      if (volumeOf(solid) < 0) solid.Reverse();
+      if (!BRepCheck_Analyzer(solid).IsValid()) return fail(notClosed);
+      ShapeUpgrade_UnifySameDomain unify(solid, true, true, true);
+      unify.SetLinearTolerance(1e-3);
+      unify.SetAngularTolerance(1e-3);
+      unify.Build();
+      TopoDS_Shape result = unify.Shape();
+      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+      TopExp::MapShapes(result, TopAbs_FACE, faces);
+      if (faces.Extent() > FACETED_FACE_CAP) {
+        const std::string message = "Faceted would give " + std::to_string(faces.Extent()) +
+                                    " faces; Extrudo converts up to 2,000. Use Prismatic, or simplify the mesh in your slicer.";
+        return fail(message.c_str());
+      }
+      if (!BRepCheck_Analyzer(result).IsValid()) {
+        ShapeFix_Shape healer(result);
+        healer.Perform();
+        result = healer.Shape();
+        BRepLib::BuildCurves3d(result);
+        if (!BRepCheck_Analyzer(result).IsValid()) return fail(notClosed);
+        faces.Clear();
+        TopExp::MapShapes(result, TopAbs_FACE, faces);
+      }
+      int planes = 0;
+      for (int i = 1; i <= faces.Extent(); ++i) {
+        if (BRepAdaptor_Surface(TopoDS::Face(faces(i))).GetType() == GeomAbs_Plane) ++planes;
+      }
+      meshReport_ = {static_cast<double>(faces.Extent()), static_cast<double>(planes), 0, 0, 0, 0, 0, 0, 0, -1};
+      return store(result);
+    } catch (...) {
+      return failFromException("Mesh to Solid failed");
+    }
+  }
+
   /** Staged path pieces (pathLine and friends). */
   std::vector<TopoDS_Edge> pathEdges_;
   /** Where each face's record starts in profileRecords_, while sketchProfiles runs. */
