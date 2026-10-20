@@ -83,6 +83,7 @@ export const ICON_NAMES = [
   'press-pull',
   'offset-face',
   'split-body',
+  'mesh-to-solid',
   'draft',
   'remove',
   'combine',
