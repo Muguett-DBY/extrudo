@@ -193,16 +193,15 @@ knob-like part with rounds (for the fallback path), and the sphere for the cap.
 
 ## Decisions for the owner
 
+Decided 2026-10-20 (owner): **2.1** Solid › Modify tile "Mesh to Solid" plus
+"Convert to solid…" on a Mesh body's context menu; **4.1** when prismatic
+can't close the body, refuse with the counts (unfit regions stay highlighted
+in the preview) and offer Faceted or a higher tolerance; **5.1** a Phase 4
+task (next to P4-12, its own ID and FR-IO-10). Open:
+
 1. **Scope of the first release:** 1.1 stages 1+2 together (faceted + prismatic,
    planes and cylinders) — recommended; 1.2 stage 1 only first (box-like parts
    convert, curved ones warn), ship, then 2.
-2. **Where it lives:** 2.1 Solid › Modify tile "Mesh to Solid" + context menu
-   on a Mesh body — recommended; 2.2 an option of the Import dialog only.
 3. **Caps:** 3.1 faceted ≤ 2,000 faces after unify, prismatic ≤ 500 recognised
    surfaces, input ≤ the existing 1,000,000 triangles — recommended; 3.2 other
    numbers.
-4. **Fallback when prismatic can't close the body:** 4.1 refuse with the
-   count and suggest Faceted / a higher tolerance — recommended; 4.2 silently
-   fall back to faceted (slow surprises).
-5. **Roadmap placement:** 5.1 new task in P4-12's backlog (import area);
-   5.2 a Phase 7 task. The ADR number is the next free one at branch time.
