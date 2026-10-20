@@ -340,6 +340,7 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
 
   it('9: suggests a tolerance for a noisy cylinder, and converts at that tolerance', () => {
     const { message } = refusal(noisyCylinder(), 0.001);
+    console.log(`prismatic: the noisy cylinder at 0.001 mm: ${message}`);
     const match = /Raise the tolerance to ([0-9.]+) mm, or use Faceted\.$/.exec(message);
     expect(message).toMatch(
       /^Mesh to Solid couldn't close the body: 1 region \(\d+ % of the surface\) fits no plane or cylinder\./,
