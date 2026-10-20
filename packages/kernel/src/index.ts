@@ -20,6 +20,11 @@ export {
   type SpawnKernel,
 } from './client';
 export type { ExtrudeOutputData } from './features/extrude';
+export {
+  isMeshToSolidReport,
+  kernelMeshToSolid,
+  type MeshToSolidFeatureReport,
+} from './features/mesh-to-solid';
 export type { SmoothFaces } from './features/offset-face';
 export type { PrimitiveOutputData } from './features/primitives';
 export type { RevolveOutputData } from './features/revolve';

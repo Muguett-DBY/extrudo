@@ -52,6 +52,7 @@ import {
   type SpawnKernel,
 } from './client';
 import type { SmoothFaces } from './features/offset-face';
+import { isMeshToSolidReport } from './features/mesh-to-solid';
 import type { SmoothKind, SubShapeKind } from './history';
 import type { Inspection, InspectTarget } from './inspect';
 import type { Interference } from './interference';
@@ -729,6 +730,8 @@ export class Recomputer {
       else if (isCanvasReport(report)) canvases[id] = report;
       else if (isImportReport(report)) imports[id] = report;
       else if (isThreadReport(report)) continue;
+      // Mesh to Solid's report goes with the feature status, not the model store.
+      else if (isMeshToSolidReport(report)) continue;
       else sketches[id] = report;
     }
     const bodies = Object.fromEntries([...meshes].map(([id, { mesh }]) => [id, mesh]));
