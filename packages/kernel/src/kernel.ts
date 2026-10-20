@@ -120,6 +120,35 @@ export class MeshBodyError extends KernelError {
   override name = 'MeshBodyError';
 }
 
+/** Mesh to Solid's options (ADR-0095 §3): the method, and its fitting tolerance in mm. */
+export interface MeshToSolidOptions {
+  method: 'faceted' | 'prismatic';
+  tolerance: number;
+}
+
+/** What Mesh to Solid made (ADR-0095 §4). */
+export interface MeshToSolidReport {
+  method: 'faceted' | 'prismatic';
+  faces: number;
+  planes: number;
+  cylinders: number;
+  cones: number;
+  spheres: number;
+  tori: number;
+  unfit: { regions: number; triangles: number; fraction: number };
+  /** The tolerance that would have fitted the largest unfit region, when there is one. */
+  suggestedTolerance?: number;
+}
+
+export interface MeshToSolidResult {
+  shape: ShapeHandle;
+  report: MeshToSolidReport;
+}
+
+/** ADR-0095 §3: faceted refuses more faces than this, prismatic more surfaces than this. */
+export const FACETED_FACE_CAP = 2000;
+export const PRISMATIC_SURFACE_CAP = 500;
+
 /**
  * The message a refused operation shows: `Mesh needs a solid body: this body
  * is a mesh (imported, or combined with a mesh).`
@@ -1829,6 +1858,59 @@ export class Kernel {
     } finally {
       f.clearExport();
     }
+  }
+
+  /**
+   * Turns a mesh body into a B-rep solid (ADR-0095 §3). The mesh handle is
+   * untouched; the caller owns the returned shape.
+   */
+  meshToSolid(shape: ShapeHandle, options: MeshToSolidOptions): MeshToSolidResult {
+    if (!this.isMesh(shape)) {
+      throw new KernelError('Mesh to Solid needs a mesh body: this body is already a solid.');
+    }
+    const gl = this.#manifoldOf(shape).getMesh();
+    const f = this.#facade;
+    const nodes = gl.numVert;
+    const stride = gl.numProp;
+    const props = gl.vertProperties;
+    const triangles = gl.triVerts.length / 3;
+    if (!f.meshNodes(nodes)) throw new KernelError(f.lastError());
+    // Read the pointer and write at once: memory growth moves the heap.
+    const xyz = new Float64Array(
+      this.#oc.wasmMemory.buffer as ArrayBuffer,
+      f.meshNodesPtr(),
+      3 * nodes,
+    );
+    for (let i = 0; i < nodes; i++) {
+      xyz[3 * i] = props[stride * i] as number;
+      xyz[3 * i + 1] = props[stride * i + 1] as number;
+      xyz[3 * i + 2] = props[stride * i + 2] as number;
+    }
+    if (!f.meshTriangles(triangles)) throw new KernelError(f.lastError());
+    new Uint32Array(
+      this.#oc.wasmMemory.buffer as ArrayBuffer,
+      f.meshTrianglesPtr(),
+      3 * triangles,
+    ).set(gl.triVerts);
+    const handle = this.#check(
+      f.meshToSolid(options.method === 'faceted' ? 0 : 1, options.tolerance),
+    );
+    const r = this.#copy(Float64Array, f.meshReportPtr(), f.meshReportSize());
+    const at = (i: number) => r[i] as number;
+    return {
+      shape: handle,
+      report: {
+        method: options.method,
+        faces: at(0),
+        planes: at(1),
+        cylinders: at(2),
+        cones: at(3),
+        spheres: at(4),
+        tori: at(5),
+        unfit: { regions: at(6), triangles: at(7), fraction: at(8) },
+        ...(at(9) >= 0 ? { suggestedTolerance: at(9) } : {}),
+      },
+    };
   }
 
   /** Reads STEP text into one shape (a compound of its roots). Release it when done. */

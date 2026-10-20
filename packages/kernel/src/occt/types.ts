@@ -231,6 +231,13 @@ export interface FacadeBinding {
   pushStepGroupName(name: string): void;
   writeStep(): number;
   readStep(text: string): number;
+  meshNodes(count: number): number;
+  meshNodesPtr(): number;
+  meshTriangles(count: number): number;
+  meshTrianglesPtr(): number;
+  meshToSolid(method: number, tolerance: number): number;
+  meshReportPtr(): number;
+  meshReportSize(): number;
   readStepColors(text: string): number;
   readStepNames(text: string): number;
   clearExport(): void;
