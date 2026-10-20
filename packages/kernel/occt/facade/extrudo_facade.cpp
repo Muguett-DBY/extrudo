@@ -6265,6 +6265,9 @@ private:
     BOPAlgo_MakerVolume maker;
     maker.SetArguments(faces);
     maker.SetIntersect(true);
+    // A face's margin that bounds nothing (a flap past a tangent line, a
+    // cylinder's end inside a plate) would stay in its cell as an internal face.
+    maker.SetAvoidInternalShapes(true);
     maker.SetRunParallel(false);
     maker.Perform();
     if (maker.HasErrors()) return fail(rebuildFailed.c_str());
@@ -6333,9 +6336,13 @@ private:
     if (kept.empty()) return fail(rebuildFailed.c_str());
 
     // Merge the kept cells: a face two of them share is inside the body.
+    auto bounding = [](const TopoDS_Shape& face) {
+      return face.Orientation() == TopAbs_FORWARD || face.Orientation() == TopAbs_REVERSED;
+    };
     NCollection_IndexedDataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher> uses;
     for (const TopoDS_Shape& cell : kept) {
       for (TopExp_Explorer e(cell, TopAbs_FACE); e.More(); e.Next()) {
+        if (!bounding(e.Current())) continue;
         const int found = uses.FindIndex(e.Current());
         if (found == 0) uses.Add(e.Current(), 1);
         else uses(found)++;
@@ -6346,7 +6353,7 @@ private:
     builder.MakeShell(shell);
     for (const TopoDS_Shape& cell : kept) {
       for (TopExp_Explorer e(cell, TopAbs_FACE); e.More(); e.Next()) {
-        if (uses.FindFromKey(e.Current()) == 1) builder.Add(shell, e.Current());
+        if (bounding(e.Current()) && uses.FindFromKey(e.Current()) == 1) builder.Add(shell, e.Current());
       }
     }
     shell.Closed(BRep_Tool::IsClosed(shell));

@@ -5,6 +5,7 @@
 #include "build/facade_public.cpp"
 
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
@@ -250,6 +251,77 @@ int main(int argc, char** argv) {
   if (want("11")) {
     int h = run(f, "11b sphere, 500k triangles", sphere(10, 500, 500), 0.01);
     if (h) f.release(h);
+  }
+  if (want("x")) {
+    // Extra shapes beyond the slice's matrix.
+    auto exact = [](const TopoDS_Shape& s) { return ExtrudoFacade::volumeOf(s); };
+    TopoDS_Shape bracket = BRepAlgoAPI_Cut(BRepPrimAPI_MakeBox(30, 20, 20).Shape(),
+                                           BRepPrimAPI_MakeBox(gp_Pnt(5, -1, 5), 30, 22, 20).Shape()).Shape();
+    int h = run(f, "x1 L-bracket", meshOf(bracket, 0.01, 0.1), 0.01, exact(bracket));
+    if (h) f.release(h);
+    for (int coarse = 0; coarse < 2; ++coarse) {
+      TopoDS_Shape box = BRepPrimAPI_MakeBox(40, 30, 10).Shape();
+      BRepFilletAPI_MakeFillet fillet(box);
+      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edges;
+      TopExp::MapShapes(box, TopAbs_EDGE, edges);
+      for (int i = 1; i <= edges.Extent(); ++i) {
+        BRepAdaptor_Curve c(TopoDS::Edge(edges(i)));
+        gp_Vec d(c.Value(c.FirstParameter()), c.Value(c.LastParameter()));
+        if (std::fabs(d.Z()) > 1) fillet.Add(3.0, TopoDS::Edge(edges(i)));
+      }
+      TopoDS_Shape rounded = fillet.Shape();
+      h = run(f, coarse ? "x2b box, 4 vertical edges filleted r3, coarse" : "x2a box, 4 vertical edges filleted r3, fine",
+              coarse ? meshOf(rounded, 1, M_PI / 16 + 1e-3) : meshOf(rounded, 0.001, 0.05), 0.01, exact(rounded));
+      if (h) f.release(h);
+    }
+    {
+      TopoDS_Shape top = BRepPrimAPI_MakeBox(40, 30, 10).Shape();
+      BRepFilletAPI_MakeFillet fillet(top);
+      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edges;
+      TopExp::MapShapes(top, TopAbs_EDGE, edges);
+      for (int i = 1; i <= edges.Extent(); ++i) {
+        BRepAdaptor_Curve c(TopoDS::Edge(edges(i)));
+        if (c.Value(c.FirstParameter()).Z() > 9.9 && c.Value(c.LastParameter()).Z() > 9.9) fillet.Add(2.0, TopoDS::Edge(edges(i)));
+      }
+      TopoDS_Shape rounded = fillet.Shape();
+      h = run(f, "x3 box, 4 top edges filleted r2 (corners are not cylinders)", meshOf(rounded, 0.01, 0.2), 0.01, exact(rounded));
+      if (h) f.release(h);
+    }
+    {
+      TopoDS_Shape box = BRepPrimAPI_MakeBox(40, 30, 5).Shape();
+      TopoDS_Shape drill = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(20, 15, -1), gp_Dir(0, 0, 1)), 3, 7).Shape();
+      TopoDS_Shape plate = BRepAlgoAPI_Cut(box, drill).Shape();
+      h = run(f, "x4 plate with a coarse hole (12-gon)", meshOf(plate, 1, M_PI / 6 - 1e-3), 0.01, exact(plate));
+      if (h) f.release(h);
+    }
+    {
+      // A slot: two half cylinders tangent to two parallel walls.
+      TopoDS_Shape box = BRepPrimAPI_MakeBox(40, 30, 5).Shape();
+      TopoDS_Shape a = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(12, 15, -1), gp_Dir(0, 0, 1)), 4, 7).Shape();
+      TopoDS_Shape b = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(28, 15, -1), gp_Dir(0, 0, 1)), 4, 7).Shape();
+      TopoDS_Shape mid = BRepPrimAPI_MakeBox(gp_Pnt(12, 11, -1), 16, 8, 7).Shape();
+      TopoDS_Shape slot = BRepAlgoAPI_Fuse(BRepAlgoAPI_Fuse(a, b).Shape(), mid).Shape();
+      ShapeUpgrade_UnifySameDomain u(slot, true, true, false); u.Build();
+      TopoDS_Shape plate = BRepAlgoAPI_Cut(box, u.Shape()).Shape();
+      h = run(f, "x5 plate with a slot", meshOf(plate, 0.01, 0.1), 0.01, exact(plate));
+      if (h) f.release(h);
+    }
+    {
+      TopoDS_Shape box = BRepPrimAPI_MakeBox(40, 30, 5).Shape();
+      TopoDS_Shape boss = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(20, 15, 4), gp_Dir(0, 0, 1)), 6, 10).Shape();
+      TopoDS_Shape part = BRepAlgoAPI_Fuse(box, boss).Shape();
+      ShapeUpgrade_UnifySameDomain u(part, true, true, false); u.Build();
+      h = run(f, "x6 plate with a boss", meshOf(u.Shape(), 0.01, 0.1), 0.01, exact(u.Shape()));
+      if (h) f.release(h);
+    }
+    {
+      // A tube: two coaxial cylinders.
+      TopoDS_Shape outer = BRepPrimAPI_MakeCylinder(10, 20).Shape();
+      TopoDS_Shape inner = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -1), gp_Dir(0, 0, 1)), 6, 22).Shape();
+      TopoDS_Shape tube = BRepAlgoAPI_Cut(outer, inner).Shape();
+      h = run(f, "x7 tube", meshOf(tube, 0.01, 0.1), 0.01, exact(tube));
+      if (h) f.release(h);
+    }
   }
   std::cout << "live shapes " << f.liveShapes() << "\n";
   return failures;
