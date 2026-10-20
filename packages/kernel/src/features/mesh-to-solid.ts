@@ -50,6 +50,7 @@ function evaluateMeshToSolid(ctx: EvalContext<MeshToSolidInputs>): FeatureOutput
   const settings = meshToSolidSettings(ctx.inputs);
   if (!settings.body) throw new KernelError('Pick the mesh body to convert.');
   const [id] = existing(ctx, [settings.body], 'convert');
+  if (id === undefined) throw new KernelError('Pick the mesh body to convert.');
   const shape = ctx.bodies.get(id) as ShapeHandle;
   if (!kernel.isMesh(shape)) {
     // The kernel throws the same text; checking first keeps the feature's

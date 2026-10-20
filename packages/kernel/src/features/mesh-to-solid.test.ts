@@ -126,7 +126,7 @@ describe('the Mesh to Solid feature (P4-13, ADR-0095)', { timeout: 300_000 }, ()
     );
     expect(kernel.properties(bodyShape(CUBE_BODY)).volume).toBeCloseTo(8000, 6);
     // The report (ADR-0095 §4).
-    expect(result.reports['MeshToSolid1']).toEqual({
+    expect(result.reports['MeshToSolid1' as FeatureId]).toEqual({
       kind: 'meshToSolid',
       method: 'faceted',
       faces: 6,
