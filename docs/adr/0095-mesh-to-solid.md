@@ -120,6 +120,97 @@ The facade never falls back from one method to the other on its own
 (owner's 4.1 against a silent faceted fallback): what the user chose is what
 runs, and a refusal says what to choose instead.
 
+#### Amendment, 2026-10-21: prismatic as built (slice 3)
+
+Measured natively first (`bash spikes/stl-to-solid/run.sh prismatic`: the
+facade itself, nodes rounded to float32 as `Kernel.meshFrom` keeps them),
+then in Vitest (`packages/kernel/src/mesh-to-solid.test.ts`). What changed
+from the plan above, and why:
+
+- **Segmentation.** Planar regions grow from the largest unassigned
+  triangle over shared edges; a neighbour joins when its corners are within
+  `tolerance` of the *seed's* plane and its normal within 1° of the seed's
+  (a sliver narrower than `tolerance` / 100 has no reliable normal, so its
+  corners decide alone). The region's plane is its facets' area-weighted
+  normal through their area-weighted centroid (else least squares, else the
+  seed's): a least-squares plane over the nodes let a fine fillet's slivers
+  tilt the plane next to it (−0.011 % volume on the fine filleted box).
+  Regions whose normals are under 30° apart are *smooth* neighbours, and a
+  smooth cluster of regions is fitted whole (one plane, else one cylinder).
+  **The fine-tessellation rule:** when a cluster fits nothing whole, its
+  regions of 4 × the cluster's median region area or more are planes of
+  their own (the planes a fillet's facets lean on: 46 × on the 20 mm box
+  with an 8-segment r 2 fillet), and the rest is fitted again, component by
+  component. A finely tessellated cylinder's facets are thin regions of one
+  size, so none is large and they stay one cylinder (360 segments, facets
+  1° apart: one cylinder); a 16-gon's strips the same. A component of fewer
+  than 4 regions that fits nothing is kept as planes (a draft or a shallow
+  bevel, not a cylinder); a larger one is unfit.
+- **Fits** as planned: the cylinder's axis is the smallest eigenvector of the
+  facet normals' area-weighted covariance, the circle an algebraic fit of
+  the nodes projected along it plus Gauss–Newton; accepted when every node
+  is within `tolerance`. The chord error of a cylinder is
+  `r (1 − cos(θ/2))`, θ its largest facet-to-facet angle.
+- **Rebuild: MakerVolume, with snapping; no sewing.** Before the faces are
+  made, each cylinder is snapped to its neighbouring planes: to a plane it
+  is tangent to (axis parallel within 1°, distance within `tolerance` of the
+  radius) its axis is made parallel and its distance exactly the radius; to
+  two non-parallel tangent planes (a fillet) its axis is their offset
+  planes' intersection; between two opposite tangent walls (a slot's end)
+  its radius is half the gap; else to a plane it is square to (an end cap,
+  a hole's plate) its axis is that plane's normal. Without the snap the
+  coarse box with four r 3 vertical fillets and the plate with a slot fail
+  (MakerVolume leaves the nearly tangent faces apart); with it all shapes
+  measured close. The faces are grown by 10 × `tolerance` **plus twice the
+  largest chord error** (a 12-gon hole's true circle leaves the polygon's
+  box by its sag). `BOPAlgo_MakerVolume` runs with `SetAvoidInternalShapes`
+  (a margin that bounds nothing, such as a flap past a tangent line or a
+  boss's cylinder inside the plate, otherwise stays in its cell as an
+  internal face). The cells kept are decided by sample points: about 3,000
+  triangle centroids (plus each region's largest), each moved inside and
+  outside along its normal by 3 × `tolerance` + twice its surface's chord
+  error, counted for the cell that holds it; a cell keeps when more inside
+  points than outside fell in it, and a cell no point reached asks the mesh
+  about its centre (ray parity, three rays). The kept cells are merged by
+  dropping the faces two of them share, and `ShapeUpgrade_UnifySameDomain`
+  **is** needed after all: the cells split a surface where another face's
+  margin crossed it (an L-bracket's faces, a boss's wall), and unify makes
+  it one face again. `ShapeFix_Shape` only when the result is invalid.
+- **Verification:** valid; every n-th mesh node (up to 2,000) within
+  `tolerance` of the solid (projected on each nearby face's plane or
+  cylinder and classified in the face, `BRepExtrema_DistShapeShape` for a
+  node no face takes); and **the volume rule**: |V − V_mesh| at most the
+  larger of 1 % of the mesh's volume and Σ (area × chord error) over the
+  cylinders + `tolerance` × the mesh's area (a 16-gon cylinder is 2.5 %
+  under its circle: 1 % alone refuses it).
+- **The report** on success counts the result's faces by kind (planes,
+  cylinders); on a refusal after segmentation it holds the recognised counts
+  and the unfit regions, triangles and area fraction (0–1), for slice 4's
+  preview; the kernel reads it on success only for now.
+- The suggested tolerance is the largest unfit region's best plane or
+  cylinder deviation × 1.1, rounded up to 0.001 mm, when under 10 ×
+  `tolerance`.
+
+Measured, native (ms in the pinned image under node). In Vitest (CI's
+WASM, this machine) the 20,124-triangle plate converts in 248 ms, the
+500,000-triangle manifold sphere is refused in 306 ms and the staircase in
+1 ms (case 11 and 8 print them); every case of the matrix passes:
+
+| Mesh | Triangles | Result | ms |
+|---|---|---|---|
+| `cube.stl` | 12 | 6 planes, 8,000 mm³ exact | 141 |
+| cylinder r 5 h 20, 32 / 360 / 16 segments | 124 / 1,436 / 60 | 2 planes + cylinder r 5 (±1e-8), volume ±2e-7 % | 49 / 90 / 13 |
+| plate 40 × 30 × 5, hole r 3, fine / ~5k | 1,024 / 5,044 | 6 planes + 1 cylinder, ±2e-8 %; r 1 fillet on the hole's circle valid | 146 / 341 |
+| box 20³, edge filleted r 2, fine / 8 segments | 264 / 76 | 6 planes + cylinder r 2, −3e-4 % / −5e-9 % | 53 / 36 |
+| sphere r 10 / 499k triangles | 2,208 / 499,000 | refused, 1 region (100 %) | 2 / 292 |
+| staircase, 602 faces | 2,396 | refused, 602 surfaces | 1 |
+| 32-gon, nodes ±0.005 mm, tolerance 0.001 / 0.02 | 124 | refused, "Raise the tolerance to 0.006 mm" / 2 planes + cylinder | 0.1 / 8 |
+| L-bracket | 20 | 8 planes, exact | 16 |
+| box, 4 vertical edges r 3, fine / 8 segments | 1,020 / 268 | 6 planes + 4 cylinders, ±3e-5 % | 279 / 102 |
+| box, 4 top edges r 2 (spherical corners) | 196 | refused, 1 region (11 %): the corners are slice 4's | 0.2 |
+| plate, 12-gon hole / slot / boss | 116 / 528 / 516 | 7 / 10 / 8 faces, ±3e-7 % | 21 / 280 / 33 |
+| tube r 10 / r 6 | 1,008 | 2 planes + 2 cylinders | 48 |
+
 ### 4. The report
 
 `FeatureOutput.report` of kind `meshToSolid`: `{ method, faces, planes,

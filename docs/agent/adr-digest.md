@@ -2770,5 +2770,20 @@ tolerance, the slicer); `MAX_MESH_TRIANGLES` stays the input cap; the report
 regions/triangles/fraction, suggestedTolerance) goes out unchanged through
 the feature status and MCP; the preview colours regions by kind through
 `Kernel.meshRegions` without building a solid. A converted body is a plain
-solid: STEP export includes it, Remove Faces works on it. The feature lives
+solid: STEP export includes it, Remove Faces works on it. **Prismatic as
+built** (2026-10-21 amendment, `prismaticFromMesh`/`rebuildPrismatic` in the
+facade): planar regions grow against the seed's plane (corners within the
+tolerance, normal within 1°) and take the area-weighted plane; smooth
+clusters (normals under 30°) fit whole as one plane or cylinder, else their
+regions of 4 × the median area or more become planes and the rest is
+refitted (the fine-tessellation rule; fewer than 4 leftover regions stay
+planes); cylinders are **snapped** to tangent and square planes before the
+faces are made (MakerVolume fails on nearly tangent faces without it; no
+sewing path); faces grow by 10 × tolerance + twice the largest chord error;
+MakerVolume with `SetAvoidInternalShapes`; cells kept by inside/outside
+sample points; shared faces dropped, then `UnifySameDomain`; verified by
+validity, sampled nodes within the tolerance and the volume within
+max(1 %, Σ area × chord error + tolerance × area). Measure a change with
+`bash spikes/stl-to-solid/run.sh prismatic` (the facade natively, float32
+nodes) before a CI build. The feature lives
 on branch `claude/stl-import-native-solid-e60e8c` until one pull request.
