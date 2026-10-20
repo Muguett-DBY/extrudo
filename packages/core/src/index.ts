@@ -53,6 +53,7 @@ export * from './import';
 export * from './joints';
 export * from './loft';
 export * from './media-types';
+export * from './mesh-to-solid';
 export {
   DocumentLoadError,
   type DocumentLoadErrorCode,
