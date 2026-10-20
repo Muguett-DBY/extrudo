@@ -2746,3 +2746,29 @@ paths — with the message "An axis has no length or middle; pick a sketch line.
 `SketchEdit.error` path; the origin point is still accepted by all of them, and Collinear,
 Perpendicular, Symmetric and Tangent take an axis line.
 A line's distance to an axis hangs on the line: `distanceEnds` runs from the sketch line's middle to its foot on the axis whichever was picked first (an axis's middle is arbitrary). The Dimension tool keeps the hovered pick visible: with a line picked, `preview()` hides the length dimension while a second pick is under the cursor (`tools/dimension.ts`). A fresh axis pick counts as a datum in the tool's view: `DimensionTool.#view` adds a stand-in projection (`view:<pick id>` → `{ ref, curves: { axis } }`) for a synthetic line pick whose model is a datum, so its stand-in line is treated like the stored axis (anchor, measure) and the label placed for it stays put once the axis is stored; the host's pending-dimension re-measure keeps `projections` in its view for the same reason (`tools/host.ts` `resolveEdit`). A stored datum axis line is never drawn as a segment, even highlighted: `EntityHighlight` skips `isDatumLine(sketch, id)` (core, `dimensions.ts`) and `curveSegments` hides datum lines; Dimension and Constraint tools show the fresh-axis marker instead (`storedDatumMarker` in `tools/tool.ts`, `Pick.marker` → `modelHover`/`modelPicked`); the origin keeps its point highlight.
+
+ADR-0095 (P4-13, issue #95) adds **Mesh to Solid**: feature `meshToSolid`
+(`packages/kernel/src/features/mesh-to-solid.ts`, core `meshToSolidFeature`)
+with `body` (one mesh body), `method` `prismatic` | `faceted` and
+`tolerance` (mm), `bodyAccess: 'write'`; the result **replaces the mesh body
+under its own `BodyId`** and its faces are named `toSolid:<feature>:face:<n>`
+in the result's face order (edges and vertices derived, no history into the
+mesh). `Kernel.meshToSolid(shape, options)` takes a mesh handle only, feeds
+the facade through its `meshNodes`/`meshTriangles` buffers written in place
+(read the pointer, write at once: memory growth moves the heap), and returns
+`{ shape, report }`; the facade's `meshToSolid(method, tolerance)` does
+`BRepBuilderAPI_MakeShapeOnMesh` → shell → `MakeSolid` + `ShapeFix_Solid` →
+`UnifySameDomain` (1e-3) → `ShapeFix_Shape` only when invalid, for `faceted`,
+and segmentation + plane/cylinder/cone/sphere fits + `BOPAlgo_MakerVolume` +
+verification for `prismatic`. **Rules:** never fall back from one method to
+the other (the user's choice runs or is refused); refuse faceted above
+`FACETED_FACE_CAP` (2,000 faces after unify, counted before the heavy fix)
+and prismatic above `PRISMATIC_SURFACE_CAP` (500) or with any unfit region,
+each message naming the count and the way out (the other method, a higher
+tolerance, the slicer); `MAX_MESH_TRIANGLES` stays the input cap; the report
+(`kind: 'meshToSolid'`: faces, planes, cylinders, cones, spheres, tori, unfit
+regions/triangles/fraction, suggestedTolerance) goes out unchanged through
+the feature status and MCP; the preview colours regions by kind through
+`Kernel.meshRegions` without building a solid. A converted body is a plain
+solid: STEP export includes it, Remove Faces works on it. The feature lives
+on branch `claude/stl-import-native-solid-e60e8c` until one pull request.

@@ -1057,6 +1057,24 @@ end to end, faster than in established desktop CAD.
 
 ---
 
+- [ ] **P4-13 Mesh to Solid: an imported mesh becomes a B-rep body.** FR-IO-10
+  (issue #95; #78 and #79 need it for STLs). Added 2026-10-20 (ADR-0095,
+  plan `docs/plans/stl-to-solid-2026-10-20.md`). On its own branch until the
+  whole feature lands in one pull request. *AC:* feature `meshToSolid`
+  (Solid › Modify, and "Convert to solid…" on a Mesh body) replaces a mesh
+  body with a solid under the same body ID; `faceted` merges coplanar
+  triangles into planar faces (≤ 2,000 faces, else a refusal naming the
+  count); `prismatic` recognises planes and cylinders (cones, spheres, tori
+  after) within a tolerance and rebuilds exact faces through
+  `BOPAlgo_MakerVolume` (≤ 500 surfaces), refusing with the unfit regions'
+  count and a suggested tolerance when it can't close the body; the dialog
+  previews the regions by kind and reports the face kinds; faces named
+  `toSolid:<feature>:face:<n>`; a converted body fillets, shells, takes a
+  sketch and exports to STEP like any solid; Vitest on box, cylinder and
+  bracket fixtures, e2e for the dialog and a fillet on the result.
+  *Slices:* (1) facade faceted + kernel; (2) feature, dialog, API, docs,
+  e2e; (3) facade prismatic; (4) preview, more surfaces, clip, guide.
+
 ## Phase 5 — Programmatic design (→ v0.6)
 
 - [x] **P5-01 Public document API** (`@extrudo/api`), generated from the feature
