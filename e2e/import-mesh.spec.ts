@@ -497,7 +497,7 @@ test('Convert to Solid… turns the mesh into a six-face solid that fillets', as
   const toSolid = page.getByRole('region', { name: 'Mesh to Solid dialog' });
   await expect(toSolid).toBeVisible();
   await expect(toSolid.getByRole('button', { name: 'Body', exact: true })).toHaveText('Body1');
-  await expect(toSolid.getByRole('combobox', { name: 'Method' })).toHaveValue('faceted');
+  await expect(toSolid.getByRole('combobox', { name: 'Method' })).toHaveValue('prismatic');
   await expect(toSolid).toHaveAttribute('data-preview-status', 'ok', { timeout: 90_000 });
   await ok(page, toSolid);
   await expect(chip(page, 'Mesh to Solid1')).toBeVisible();

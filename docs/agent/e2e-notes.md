@@ -1035,7 +1035,7 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
   the same pattern as `e2e/bodies.spec.ts`), which opens the region "Mesh to
   Solid dialog" with the body already picked — the `Body` button reads
   "Body1", not the "Pick a mesh body" prompt — and the `Method` combobox is
-  `toHaveValue('faceted')`; wait up to 90 s for `data-preview-status="ok"` and
+  `toHaveValue('prismatic')` (the default since slice 3; the cube converts to 6 planes either way); wait up to 90 s for `data-preview-status="ok"` and
   commit through `ok()`. The chip is "Mesh to Solid1"; the converted body
   keeps the name "Body1" and polls to `faces: 6, size: [20, 20, 20]`, its row
   losing `data-body-mesh` and the "Mesh" text. The fillet after it:
