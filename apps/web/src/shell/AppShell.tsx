@@ -592,6 +592,8 @@ export function AppShell({
   const startImportRef = useRef<(picked?: File) => void>(() => {});
   /** The File menu's Export Design as Script (P5-05). */
   const exportScriptRef = useRef<() => void>(() => {});
+  /** A body menu's Convert to Solid… (P4-13): selection and `run` live later in the component. */
+  const convertToSolidRef = useRef<(id: BodyId) => void>(() => {});
   /** Canvas's tool, which picks its picture before its dialog opens. */
   const startCanvasRef = useRef<() => void>(() => {});
   // Feature dialogs (P2-05): one controller; while a dialog is open, picks go to its fields.
@@ -742,6 +744,9 @@ export function AppShell({
       ...createBodyActions({ store, session }, () => bodyListRef.current, notify),
       // A body's menu exports it (P2-12).
       exportBodies: (ids: readonly BodyId[]) => setModelExport({ bodies: ids }),
+      // A body's menu opens Mesh to Solid with the body picked (P4-13, ADR-0095 §5);
+      // the selection and `run` are defined later, so the menu reaches them through a ref.
+      convertToSolid: (id: BodyId) => convertToSolidRef.current(id),
     }),
     [store, session, notify],
   );
@@ -2204,6 +2209,13 @@ export function AppShell({
         : projecting
           ? project.select
           : (measureSelect ?? sessionSelect);
+  // A body menu's Convert to Solid… selects the body the way a browser row's click
+  // does, then runs the tool the way a tile click does (P4-13, ADR-0095 §5): the
+  // dialog pre-selects from the session's selection.
+  convertToSolidRef.current = (id) => {
+    modelSelect?.onClick({ kind: 'body', id }, false);
+    runRef.current('meshToSolid');
+  };
   // Body rows show the bodies in the selection (the dialog's picks while one is open).
   const selectedBodies = useMemo(
     () => new Set(shownSelection.filter((i) => i.kind === 'body').map((i) => i.id)),
