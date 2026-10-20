@@ -93,6 +93,7 @@ Every tool in the toolbar, by tab. On a Mac, Ctrl is ⌘.
 - [Offset Face](./offsetFace.md) — Move faces along their normals; the faces next to them follow. A curved wall changes its radius.
 - [Draft](./draft.md) — Tilt faces by a few degrees about a plane, so the part comes off the bed or out of a mould.
 - [Thread](./thread.md) — A real, printable screw thread on a shaft or in a hole: ISO metric or inch, with a print clearance.
+- [Mesh to Solid](./meshToSolid.md) — Turn an imported mesh into a solid with real faces, so it fillets, shells and takes sketches like any body.
 
 ### Transform
 
@@ -101,7 +102,6 @@ Every tool in the toolbar, by tab. On a Mac, Ctrl is ⌘.
 - [Combine](./combine.md) — Join, cut or intersect a target body with tool bodies.
 - [Split Body](./splitBody.md) — Cut bodies in two along a plane or a flat face; each side becomes a body. Keep both or one.
 - [Scale](./scale.md) — Make bodies larger or smaller about a point, by one factor or one per axis.
-- [Mesh to Solid](./meshToSolid.md) — Turn an imported mesh into a solid with real faces, so it fillets, shells and takes sketches like any body.
 
 ## Construct
 

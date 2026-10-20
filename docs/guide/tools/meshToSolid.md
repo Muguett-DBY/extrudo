@@ -2,7 +2,7 @@
 title: Mesh to Solid
 section: Tools
 category: Modify
-order: 50
+order: 45
 ---
 
 # Mesh to Solid
@@ -11,7 +11,7 @@ Turn an imported mesh into a solid with real faces, so it fillets, shells and ta
 
 | Where | Shortcut |
 |---|---|
-| Modify › Transform | None |
+| Modify › Modify | None |
 
 <!-- notes -->
 <!-- /notes -->
