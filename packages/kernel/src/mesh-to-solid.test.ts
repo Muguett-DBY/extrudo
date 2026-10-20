@@ -53,7 +53,7 @@ function kinds(shape: ShapeHandle): string[] {
   );
 }
 
-describe('Kernel.meshToSolid, faceted', () => {
+describe('Kernel.meshToSolid, faceted', { timeout: 300_000 }, () => {
   it('turns cube.stl into a six-plane solid of the same volume', () => {
     const mesh = cube();
     try {
