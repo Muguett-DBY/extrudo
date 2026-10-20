@@ -102,6 +102,7 @@ const EXAMPLE_INPUTS: Readonly<Record<string, string>> = {
   import: `{ file: step }`,
   plugin: `{ plugin: 'att-name-plate', handler: 'name-plate', inputs: { width: '60 mm', rounded: true, plane: d.origin.xy } }`,
   loft: `{ sections }`,
+  meshToSolid: `{ body, method: 'faceted' }`,
   midplane: `{ planes: [d.origin.xy, d.origin.yz] }`,
   midplaneAngled: `{ planes: [d.origin.xy, d.origin.yz] }`,
   mirror: `{ plane: d.origin.yz, bodies: [body] }`,

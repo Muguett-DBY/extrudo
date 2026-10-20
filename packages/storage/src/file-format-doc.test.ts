@@ -49,7 +49,9 @@ import {
   LengthUnitSchema,
   loadDocument,
   loftFeature,
+  MESH_TO_SOLID_METHODS,
   MOVE_MODES,
+  meshToSolidFeature,
   mirrorFeature,
   moveBodiesFeature,
   NamedViewSchema,
@@ -154,6 +156,7 @@ const FEATURES = [
   sphereFeature,
   torusFeature,
   ribFeature,
+  meshToSolidFeature,
   ...Object.values(CONSTRUCTION_FEATURES),
 ];
 
@@ -276,6 +279,7 @@ describe('docs/file-format.md', () => {
       ...THREAD_HANDS,
       ...EMBOSS_MODES,
       ...RIB_SIDES,
+      ...MESH_TO_SOLID_METHODS,
     ];
     const origin = [...ORIGIN_PLANES.map((p) => p.id), ...ORIGIN_AXES.map((a) => a.id)];
     expect(missing([...inputs, ...choices, ...origin])).toEqual([]);

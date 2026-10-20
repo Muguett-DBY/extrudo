@@ -31,6 +31,7 @@ import type {
   HoleInputs,
   ImportInputs,
   LoftInputs,
+  MeshToSolidInputs,
   MidplaneAngledInputs,
   MidplaneInputs,
   MirrorInputs,
@@ -110,6 +111,7 @@ export const FEATURE_TYPES = [
   'rib',
   'import',
   'canvas',
+  'meshToSolid',
   'script',
   'plugin',
 ] as const;
@@ -162,6 +164,7 @@ export const FEATURE_METHOD_DESCRIPTIONS: Readonly<Record<string, string>> = {
   rib: 'Rib (create): one feature of the timeline.',
   import: 'Import (create): one feature of the timeline.',
   canvas: 'Canvas (create): one feature of the timeline.',
+  meshToSolid: 'Mesh to Solid (modify): one feature of the timeline.',
   script: 'Script (create): one feature of the timeline.',
   plugin: 'Plugin feature (create): one feature of the timeline.',
 };
@@ -224,6 +227,8 @@ export interface FeatureFaceRoles {
   rib: 'cap:start' | 'cap:end' | `side:${string}` | `side:${string}:end0` | `side:${string}:end1`;
   /** Import: `face:<n>`, `mesh`. */
   import: `face:${string}` | 'mesh';
+  /** Mesh to Solid: `face:<n>`. */
+  meshToSolid: `face:${string}`;
 }
 
 /**
@@ -1330,6 +1335,20 @@ export interface FeatureMethods {
    */
   canvas(inputs: PlainInputs<CanvasInputs>, options?: FeatureOptions): FeatureHandle<'canvas'>;
   /**
+   * Mesh to Solid (modify): one feature of the timeline.
+   *
+   * @param inputs.body The mesh body to convert. Required.
+   * @param inputs.method prismatic recognises planes and cylinders within the tolerance and rebuilds exact faces; faceted keeps every flat facet as a face. Default prismatic.
+   * @param inputs.tolerance How far a facet may sit from a fitted surface, in mm (prismatic only). Default 0.01.
+   *
+   * The faces it makes, as `handle.face(role)` takes them:
+   * - `face:<n>` — Face n of the converted body, in the result's own order (1-based).
+   */
+  meshToSolid(
+    inputs: PlainInputs<MeshToSolidInputs>,
+    options?: FeatureOptions,
+  ): FeatureHandle<'meshToSolid'>;
+  /**
    * Script (create): one feature of the timeline.
    *
    * @param inputs.code The script's source: TypeScript or JavaScript that adds features through `design`, reading `params`. Required.
@@ -1441,6 +1460,8 @@ export function featureMethods(design: FeatureMethodTarget): FeatureMethods {
       design.add('import', inputs, options) as FeatureHandle<'import'>,
     canvas: (inputs, options?: FeatureOptions) =>
       design.add('canvas', inputs, options) as FeatureHandle<'canvas'>,
+    meshToSolid: (inputs, options?: FeatureOptions) =>
+      design.add('meshToSolid', inputs, options) as FeatureHandle<'meshToSolid'>,
     script: (inputs, options?: FeatureOptions) =>
       design.add('script', inputs, options) as FeatureHandle<'script'>,
     plugin: (inputs, options?: FeatureOptions) =>
@@ -1612,6 +1633,9 @@ export function featureExamples(d: Design): void {
 
   // Canvas.
   d.canvas({ image: plan, plane: d.origin.xy, width: '60 mm' });
+
+  // Mesh to Solid.
+  d.meshToSolid({ body, method: 'faceted' });
 
   // Script.
   d.script({
