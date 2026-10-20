@@ -108,12 +108,15 @@ function bodyShape(id: string): ShapeHandle {
   return shape;
 }
 
-const faceIds = (result: Done, id: string): string[] =>
-  [...(result.bodies.find((b) => b.id === id)?.mesh?.faceIds ?? [])];
+const faceIds = (result: Done, id: string): string[] => [
+  ...(result.bodies.find((b) => b.id === id)?.mesh?.faceIds ?? []),
+];
 
 describe('the Mesh to Solid feature (P4-13, ADR-0095)', { timeout: 300_000 }, () => {
   it('converts an imported mesh into a six-plane solid under the same body ID', async () => {
-    const result = ok(await recompute([importMesh('Import1'), meshToSolid('MeshToSolid1', CUBE_BODY)]));
+    const result = ok(
+      await recompute([importMesh('Import1'), meshToSolid('MeshToSolid1', CUBE_BODY)]),
+    );
     expect(status(result, 'MeshToSolid1')?.status).toBe('ok');
     // The same body, now a solid with six named faces.
     expect(result.bodies.map((b) => b.id)).toEqual([CUBE_BODY]);
@@ -154,7 +157,9 @@ describe('the Mesh to Solid feature (P4-13, ADR-0095)', { timeout: 300_000 }, ()
   it('refuses a body that is already a solid', async () => {
     const box: Feature = {
       ...testFeature('Box1', 'box'),
-      inputs: primitiveInputs('box', { numbers: { length: '10 mm', width: '10 mm', height: '10 mm' } }),
+      inputs: primitiveInputs('box', {
+        numbers: { length: '10 mm', width: '10 mm', height: '10 mm' },
+      }),
     };
     const result = await recompute([box, meshToSolid('MeshToSolid1', 'Box1:0')]);
     expect(status(result, 'MeshToSolid1')?.status).toBe('error');
@@ -169,7 +174,9 @@ describe('the Mesh to Solid feature (P4-13, ADR-0095)', { timeout: 300_000 }, ()
       meshToSolid('MeshToSolid1', CUBE_BODY, '0 mm'),
     ]);
     expect(status(result, 'MeshToSolid1')?.status).toBe('error');
-    expect(status(result, 'MeshToSolid1')?.message).toBe('The tolerance must be greater than 0 mm.');
+    expect(status(result, 'MeshToSolid1')?.message).toBe(
+      'The tolerance must be greater than 0 mm.',
+    );
   });
 
   it("says prismatic isn't built yet", async () => {

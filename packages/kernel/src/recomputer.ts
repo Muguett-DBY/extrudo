@@ -51,8 +51,8 @@ import {
   type KernelStatus,
   type SpawnKernel,
 } from './client';
-import type { SmoothFaces } from './features/offset-face';
 import { isMeshToSolidReport } from './features/mesh-to-solid';
+import type { SmoothFaces } from './features/offset-face';
 import type { SmoothKind, SubShapeKind } from './history';
 import type { Inspection, InspectTarget } from './inspect';
 import type { Interference } from './interference';

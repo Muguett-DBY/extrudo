@@ -18,10 +18,10 @@
  */
 import {
   type BodyId,
+  MESH_TO_SOLID_DEFAULT_TOLERANCE,
   type MeshToSolidInputs,
   meshToSolidFeature,
   meshToSolidSettings,
-  MESH_TO_SOLID_DEFAULT_TOLERANCE,
 } from '@extrudo/core';
 import { KernelError, type MeshToSolidReport, type ShapeHandle } from '../kernel';
 import { deriveNames, type TopoNames } from '../naming/names';
@@ -56,9 +56,7 @@ function evaluateMeshToSolid(ctx: EvalContext<MeshToSolidInputs>): FeatureOutput
     // message exact (ADR-0095 §1).
     throw new KernelError('Mesh to Solid needs a mesh body: this body is already a solid.');
   }
-  const tolerance = ctx.inputs.tolerance
-    ? ctx.value('tolerance')
-    : MESH_TO_SOLID_DEFAULT_TOLERANCE;
+  const tolerance = ctx.inputs.tolerance ? ctx.value('tolerance') : MESH_TO_SOLID_DEFAULT_TOLERANCE;
   if (!Number.isFinite(tolerance) || tolerance <= 0) {
     throw new KernelError('The tolerance must be greater than 0 mm.');
   }
