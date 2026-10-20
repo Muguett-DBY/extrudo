@@ -3,9 +3,6 @@
  * method and (prismatic only) the fitting tolerance. Fields are named like
  * the feature's inputs (`MeshToSolidInputs`), so the framework's default
  * mapping turns them into inputs and back.
- *
- * The method defaults to `faceted` for now: `prismatic` is slice 3
- * (ADR-0095 §3), so the default flips to `prismatic` then.
  */
 import { MESH_TO_SOLID_METHODS, type MeshToSolidMethod, meshToSolidFeature } from '@extrudo/core';
 import { type DialogValues, defineFeatureDialog } from './spec';
@@ -16,7 +13,7 @@ const METHOD_LABELS: Record<MeshToSolidMethod, string> = {
 };
 
 // The tolerance only matters to prismatic (ADR-0095 §1).
-const isPrismatic = (v: DialogValues) => (v.choices.method ?? 'faceted') === 'prismatic';
+const isPrismatic = (v: DialogValues) => (v.choices.method ?? 'prismatic') === 'prismatic';
 
 export const meshToSolidDialog = defineFeatureDialog({
   ...meshToSolidFeature,
@@ -36,8 +33,7 @@ export const meshToSolidDialog = defineFeatureDialog({
       name: 'method',
       label: 'Method',
       options: MESH_TO_SOLID_METHODS.map((value) => ({ value, label: METHOD_LABELS[value] })),
-      // ADR-0095 §3, slice 3 flips this to prismatic.
-      default: 'faceted',
+      default: 'prismatic',
       hint: 'Prismatic finds planes and cylinders and rebuilds exact faces. Faceted keeps every flat facet as a face.',
     },
     {

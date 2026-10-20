@@ -19,7 +19,7 @@ describe('the mesh to solid dialog', () => {
     expect(meshToSolidDialog.category).toBe('modify');
     expect(
       shownFields(meshToSolidDialog, defaultValues(meshToSolidDialog)).map((f) => f.name),
-    ).toEqual(['body', 'method']);
+    ).toEqual(['body', 'method', 'tolerance']);
   });
 
   it('picks one mesh body', () => {
@@ -37,15 +37,15 @@ describe('the mesh to solid dialog', () => {
     t.session.getState().select([{ kind: 'body', id: BOX }]);
     t.controller.start('meshToSolid');
     expect(t.open()?.values.refs.body).toEqual([{ kind: 'body', id: BOX }]);
-    // The method defaults to faceted for now (ADR-0095 §3, slice 3 flips it).
-    expect(t.open()?.values.choices.method).toBe('faceted');
+    // The method defaults to prismatic (ADR-0095 §1).
+    expect(t.open()?.values.choices.method).toBe('prismatic');
     expect(MeshToSolidInputsSchema.safeParse(t.open()?.draft.inputs).success).toBe(true);
     expect(t.controller.ok()).toBe(true);
     const feature = t.store.getState().doc.features.at(-1);
     expect(feature).toMatchObject({ type: 'meshToSolid', name: 'Mesh to Solid1' });
     expect(meshToSolidSettings(feature?.inputs as never)).toMatchObject({
       body: { kind: 'body', id: BOX },
-      method: 'faceted',
+      method: 'prismatic',
     });
   });
 });
