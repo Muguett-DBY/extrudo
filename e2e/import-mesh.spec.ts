@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import { readStl } from '../packages/io/src/index';
 import {
+  clickEdge,
   exportModel,
   objectsOf3mf,
   ok,
@@ -480,4 +481,57 @@ test('a mesh body moves, and splits along a plane', async ({ page }) => {
   );
   expect(volumes[0]).toBeCloseTo(4000, -1);
   expect((volumes[0] ?? 0) + (volumes[1] ?? 0)).toBeCloseTo(8000, -1);
+});
+
+// P4-13: Mesh to Solid (ADR-0095). The converted body replaces the mesh under
+// its own name and is a plain solid: every feature works on it again.
+
+test('Convert to Solid… turns the mesh into a six-face solid that fillets', async ({ page }) => {
+  await openProject(page);
+  await kernelReady(page);
+  await cubeBody(page);
+
+  // The browser row's menu opens Mesh to Solid with this body picked.
+  await bodyRow(page).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Convert to Solid…' }).click();
+  const toSolid = page.getByRole('region', { name: 'Mesh to Solid dialog' });
+  await expect(toSolid).toBeVisible();
+  await expect(toSolid.getByRole('button', { name: 'Body', exact: true })).toHaveText('Body1');
+  await expect(toSolid.getByRole('combobox', { name: 'Method' })).toHaveValue('faceted');
+  await expect(toSolid).toHaveAttribute('data-preview-status', 'ok', { timeout: 90_000 });
+  await ok(page, toSolid);
+  await expect(chip(page, 'Mesh to Solid1')).toBeVisible();
+
+  // Six real faces, and no longer tagged "Mesh".
+  await expect
+    .poll(async () => bodies(page), { timeout: 60_000 })
+    .toEqual([{ name: 'Body1', faces: 6, size: [20, 20, 20] }]);
+  await expect(bodyRow(page)).not.toHaveAttribute('data-body-mesh');
+  await expect(bodyRow(page)).not.toContainText('Mesh');
+
+  // A fillet works on the converted body: the cube's top-front edge, whose
+  // midpoint is [10, 0, 20] (the cube spans 0…20 on each axis).
+  const at = await turnView(page, 'Shift+1');
+  await solidTab(page);
+  await pickTool(page, 'Fillet');
+  const fillet = page.getByRole('region', { name: 'Fillet dialog' });
+  await expect(fillet).toBeVisible();
+  await clickEdge(page, at, [10, 0, 20]);
+  await expect(fillet.getByRole('button', { name: 'Edges', exact: true })).toHaveText('1 edge');
+  await fillet.getByRole('textbox', { name: 'Radius', exact: true }).fill('2 mm');
+  await expect(fillet).toHaveAttribute('data-preview-status', 'ok', { timeout: 15_000 });
+  await fillet.getByRole('button', { name: 'OK' }).click();
+  await expect(fillet).toBeHidden();
+  await kernelReady(page);
+  await expect
+    .poll(async () => bodies(page), { timeout: 60_000 })
+    .toEqual([{ name: 'Body1', faces: 7, size: [20, 20, 20] }]);
+
+  // Undo takes the fillet and the conversion back: the mesh face again.
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+z');
+  await expect
+    .poll(async () => bodies(page), { timeout: 60_000 })
+    .toEqual([{ name: 'Body1', faces: 1, size: [20, 20, 20] }]);
+  await expect(bodyRow(page)).toHaveAttribute('data-body-mesh', 'true');
 });

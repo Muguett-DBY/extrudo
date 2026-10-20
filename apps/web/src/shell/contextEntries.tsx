@@ -25,6 +25,7 @@ import {
 } from '@extrudo/core';
 import {
   ArrowDownToLine,
+  Box,
   Boxes,
   CirclePlay,
   Eraser,
@@ -310,6 +311,15 @@ function modelGroups(input: ContextInput): MarkingEntry[][] {
         label: 'Export…',
         icon: icon(<FileDown {...small} />),
         onSelect: () => bodyActions.exportBodies?.(ids),
+      });
+    }
+    // One mesh body opens Mesh to Solid with it picked (P4-13, ADR-0095 §5).
+    if (single?.mesh && bodyActions.convertToSolid) {
+      body.push({
+        id: 'convertToSolid',
+        label: 'Convert to Solid…',
+        icon: icon(<Box {...small} />),
+        onSelect: () => bodyActions.convertToSolid?.(single.id),
       });
     }
     body.push(

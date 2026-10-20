@@ -43,6 +43,7 @@ function bodyActions(): BodyActions {
     moveToComponent: vi.fn(),
     newComponent: vi.fn(),
     exportBodies: vi.fn(),
+    convertToSolid: vi.fn(),
   };
 }
 
@@ -204,6 +205,32 @@ describe('the overflow list in the model', () => {
     expect(i.appearance).toHaveBeenCalledWith('B:0');
     find(i, 'delete')?.onSelect();
     expect(i.commands.find((c) => c.id === 'delete')?.run).toHaveBeenCalled();
+  });
+
+  it('offers Convert to Solid… for one selected mesh body, after Export… (P4-13)', () => {
+    const actions = bodyActions();
+    const i = input({
+      selection: [item('body', 'B:0')],
+      bodies: [{ ...body('B:0'), mesh: true }],
+      bodyActions: actions,
+    });
+    const list = ids(i);
+    expect(list).toContain('convertToSolid');
+    expect(list.indexOf('convertToSolid')).toBe(list.indexOf('exportBodies') + 1);
+    find(i, 'convertToSolid')?.onSelect();
+    expect(actions.convertToSolid).toHaveBeenCalledWith('B:0');
+  });
+
+  it('offers no Convert to Solid… for a solid body or two mesh bodies (P4-13)', () => {
+    expect(ids(input({ selection: [item('body', 'B:0')] }))).not.toContain('convertToSolid');
+    const two = input({
+      selection: [item('body', 'B:0'), item('body', 'B:1')],
+      bodies: [
+        { ...body('B:0'), mesh: true },
+        { ...body('B:1'), mesh: true },
+      ],
+    });
+    expect(ids(two)).not.toContain('convertToSolid');
   });
 
   it('offers Show as Ghost and Hide for a shown body, and ghosts it', () => {

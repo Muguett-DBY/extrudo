@@ -1029,6 +1029,23 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
   body **in creation order**, so a mesh target and a solid tool warn about
   nothing.
 
+- **Convert to Solid e2e** (the file's last test, P4-13, ADR-0095):
+  right-click the row (`bodyRow(page).click({ button: 'right' })`) and click
+  the `menuitem` named "Convert to Solid…" (the browser row's own Radix menu,
+  the same pattern as `e2e/bodies.spec.ts`), which opens the region "Mesh to
+  Solid dialog" with the body already picked — the `Body` button reads
+  "Body1", not the "Pick a mesh body" prompt — and the `Method` combobox is
+  `toHaveValue('faceted')`; wait up to 90 s for `data-preview-status="ok"` and
+  commit through `ok()`. The chip is "Mesh to Solid1"; the converted body
+  keeps the name "Body1" and polls to `faces: 6, size: [20, 20, 20]`, its row
+  losing `data-body-mesh` and the "Mesh" text. The fillet after it:
+  `pickTool(page, 'Fillet')` first, then `clickEdge(page, at, [10, 0, 20])` —
+  the cube fixture spans 0…20, so the top-front edge's midpoint is
+  `[10, 0, 20]` in the home view (`Shift+1`; it picked first try, the fallback
+  `[20, 10, 20]` was never needed), the Radius textbox takes "2 mm", and one
+  filleted edge adds one face: `faces: 7`. Two `Control+z` are back to one
+  face with `data-body-mesh="true"`.
+
 ### `e2e/import-scad.spec.ts`
 
 - **Import OpenSCAD e2e** (`e2e/import-scad.spec.ts`, P5-04 slice 2): the

@@ -956,6 +956,11 @@ function BodyLeaf({
           Export…
         </MenuItem>
       )}
+      {body.mesh && actions.convertToSolid && (
+        <MenuItem icon={<Box size={14} />} onSelect={() => actions.convertToSolid?.(id)}>
+          Convert to Solid…
+        </MenuItem>
+      )}
       <MenuSeparator />
       <MenuItem icon={<Trash2 size={14} />} shortcut="Del" onSelect={remove}>
         Delete

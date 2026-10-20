@@ -1016,7 +1016,16 @@ export const TABS: Tab[] = [
     groups: [
       {
         label: 'Modify',
-        tools: ['pressPull', 'fillet', 'chamfer', 'shell', 'offsetFace', 'draft', 'thread', 'meshToSolid'],
+        tools: [
+          'pressPull',
+          'fillet',
+          'chamfer',
+          'shell',
+          'offsetFace',
+          'draft',
+          'thread',
+          'meshToSolid',
+        ],
       },
       {
         label: 'Transform',
