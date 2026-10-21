@@ -30,6 +30,7 @@ import {
   type FeatureStatus,
   type GeomRef,
   insertFeature,
+  type MeshToSolidReport,
   type ModelStore,
   newId,
   nextFeatureName,
@@ -49,6 +50,7 @@ import {
 } from '@extrudo/core';
 import type {
   BodyMesh,
+  MeshRegions,
   Preview,
   ScadParametersResult,
   SmoothFaces,
@@ -69,6 +71,7 @@ import type { FeatureDialogs } from './registry';
 import {
   type DialogContext,
   type DialogField,
+  type DialogRegions,
   type DialogValues,
   type FeatureDialogSpec,
   keptRoundsKey,
@@ -134,6 +137,12 @@ export interface DialogKernel {
    * the Import dialog's rows. Absent: the dialog shows only stored overrides.
    */
   scadParameters?(file: AttachmentId): Promise<ScadParametersResult>;
+  /**
+   * Mesh to Solid's region preview of a mesh body (ADR-0095 §5), with `base`
+   * of the last preview's base bodies: for specs with `regions`. Absent: no
+   * region preview. Undefined on any error.
+   */
+  meshRegions?(body: BodyId, tolerance: number, base?: boolean): Promise<MeshRegions | undefined>;
 }
 
 export interface DialogPreview {
@@ -155,6 +164,14 @@ export interface DialogPreview {
   thread?: ThreadReport;
   /** The draft's sweep report from the latest preview (P4-12): where the profile sits. */
   sweep?: SweepReport;
+  /** The draft's Mesh to Solid report from the latest preview (ADR-0095 §4). */
+  meshToSolid?: MeshToSolidReport;
+  /**
+   * The region preview's latest answer (`FeatureDialogSpec.regions`, ADR-0095
+   * §5): the view colours the body's triangles by kind in place of the
+   * drawing. Kept while a newer request for the same body is out.
+   */
+  regions?: DialogRegions;
   /** How the drawing follows its draft's handles (issue #76): their ghost rules and values. */
   hints?: readonly GhostHint[];
   /**
@@ -297,7 +314,9 @@ export interface DialogController {
  * (a handle drag, issue #76).
  */
 export function previewInputs(open: OpenDialog | undefined) {
-  const drawing = open?.preview.drawing;
+  const regions = open?.preview.regions;
+  // The region preview shows before (and instead of) any drawing (ADR-0095 §5).
+  const drawing = regions ? NO_DRAWING : open?.preview.drawing;
   if (!open || !drawing) return undefined;
   const invalid = open.checked.first !== undefined || Object.keys(open.typing).length > 0;
   return {
@@ -310,8 +329,11 @@ export function previewInputs(open: OpenDialog | undefined) {
     draft: drawing.canvas ? open.draft : undefined,
     expressions: drawing.canvas ? open.expressions : undefined,
     ghost: open.preview.ghost,
+    regions,
   };
 }
+
+const NO_DRAWING: PreviewDrawing = { shapes: [], tools: false };
 
 /** The preview the viewport draws for an open dialog, if any. */
 export function viewPreview(open: OpenDialog | undefined): ViewPreview | undefined {
@@ -321,11 +343,14 @@ export function viewPreview(open: OpenDialog | undefined): ViewPreview | undefin
 
 /** The preview the viewport draws, from `previewInputs`. */
 export function previewOf(inputs: NonNullable<ReturnType<typeof previewInputs>>): ViewPreview {
-  const { drawing, dimmed, id, name, draft, expressions, ghost } = inputs;
+  const { drawing, dimmed, id, name, draft, expressions, ghost, regions } = inputs;
   return {
     shapes: drawing.shapes,
     dimmed,
     ...(ghost && { ghost }),
+    ...(regions && {
+      regions: { body: regions.body, surfaceOf: regions.surfaceOf, kinds: regions.kinds },
+    }),
     ...(drawing.construction && {
       construction: { id, name, report: drawing.construction, preview: true, dimmed },
     }),
@@ -375,6 +400,10 @@ export function createDialogController(options: DialogControllerOptions): Dialog
   let previewTimer: ReturnType<typeof setTimeout> | undefined;
   /** The draft and document of the last preview asked for. */
   let previewed: { draft: string; doc: unknown } | undefined;
+  /** The last region request (ADR-0095 §5) and the mesh it was about; its answers are numbered. */
+  let regionsAsked: { key: string; mesh: BodyMesh | undefined } | undefined;
+  let regionsSequence = 0;
+  let regionsTimer: ReturnType<typeof setTimeout> | undefined;
 
   const context = (
     open: Pick<OpenDialog, 'mode' | 'id' | 'base'> & {
@@ -390,6 +419,8 @@ export function createDialogController(options: DialogControllerOptions): Dialog
     const draftEmboss = open.preview?.emboss;
     const draftThread = open.preview?.thread;
     const draftSweep = open.preview?.sweep;
+    const draftMeshToSolid = open.preview?.meshToSolid;
+    const draftRegions = open.preview?.regions;
     return {
       doc,
       featureId: open.id,
@@ -401,6 +432,8 @@ export function createDialogController(options: DialogControllerOptions): Dialog
       ...(draftEmboss && { draftEmboss }),
       ...(draftThread && { draftThread }),
       ...(draftSweep && { draftSweep }),
+      ...(draftMeshToSolid && { draftMeshToSolid }),
+      ...(draftRegions && { draftRegions }),
       ...(feature && { feature }),
     };
   };
@@ -477,6 +510,9 @@ export function createDialogController(options: DialogControllerOptions): Dialog
     const key = JSON.stringify({ draft, index });
     const wanted = valid && kernel && (previewed?.draft !== key || previewed.doc !== doc);
     const value = (field: string) => okValue(expressions, field);
+    // Regions first: they come back in milliseconds, the preview may take seconds.
+    // A half-typed value leaves them as they are.
+    if (valid) next.preview = syncRegions(next, value);
     if (wanted) {
       previewed = { draft: key, doc };
       next.preview = { ...next.preview, pending: true };
@@ -486,6 +522,58 @@ export function createDialogController(options: DialogControllerOptions): Dialog
     // An invalid value leaves the last drawing where it is, dimmed.
     next.preview = withGhost(next.preview, valid ? value : () => undefined);
     state.setState({ open: next });
+  };
+
+  /**
+   * Asks the kernel for the spec's region preview when its request changed
+   * (ADR-0095 §5), and gives the dialog's preview without regions when the
+   * spec wants none or they are about another body. Editing waits for the
+   * first preview's base: the body before the feature is only there.
+   */
+  const syncRegions = (
+    open: OpenDialog,
+    value: (field: string) => number | undefined,
+  ): DialogPreview => {
+    const request = open.spec.regions?.(open.values, { ...context(open), value });
+    const { regions: shown, ...rest } = open.preview;
+    if (!request || !kernel?.meshRegions) {
+      if (regionsAsked) regionsSequence++;
+      regionsAsked = undefined;
+      clearTimeout(regionsTimer);
+      return rest;
+    }
+    const base = open.mode === 'edit';
+    const preview = shown && shown.body !== request.body ? rest : open.preview;
+    if (base && !open.base) return preview;
+    const mesh = dialogBodies(open, model.getState().bodies)[request.body];
+    const key = JSON.stringify({ ...request, base });
+    if (regionsAsked?.key === key && regionsAsked.mesh === mesh) return preview;
+    regionsAsked = { key, mesh };
+    const sequence = ++regionsSequence;
+    const mine = generation;
+    clearTimeout(regionsTimer);
+    const ask = () => {
+      kernel
+        .meshRegions?.(request.body, request.tolerance, base)
+        .then((regions) => {
+          const current = get();
+          if (!current || mine !== generation || sequence !== regionsSequence) return;
+          const { regions: _, ...others } = current.preview;
+          state.setState({
+            open: {
+              ...current,
+              preview: regions
+                ? { ...others, regions: { ...regions, body: request.body } }
+                : others,
+            },
+          });
+        })
+        .catch(() => {});
+    };
+    const delay = open.spec.previewDelay ?? 0;
+    if (delay) regionsTimer = setTimeout(ask, delay);
+    else ask();
+    return preview;
   };
 
   const requestPreview = (
@@ -539,6 +627,8 @@ export function createDialogController(options: DialogControllerOptions): Dialog
                   ...(result.emboss && { emboss: result.emboss }),
                   ...(result.thread && { thread: result.thread }),
                   ...(result.sweep && { sweep: result.sweep }),
+                  ...(result.meshToSolid && { meshToSolid: result.meshToSolid }),
+                  ...(open.preview.regions && { regions: open.preview.regions }),
                 },
                 (field) =>
                   open.checked.first === undefined && Object.keys(open.typing).length === 0
@@ -552,6 +642,14 @@ export function createDialogController(options: DialogControllerOptions): Dialog
               }),
             },
           });
+          // Editing: the first preview brought the base the region preview waits for.
+          const after = get();
+          const valid =
+            after?.checked.first === undefined && Object.keys(after?.typing ?? {}).length === 0;
+          if (after?.base && after.spec.regions && valid) {
+            const regions = syncRegions(after, (field) => okValue(after.expressions, field));
+            if (regions !== after.preview) state.setState({ open: { ...after, preview: regions } });
+          }
         })
         .catch(() => {});
     };
@@ -823,6 +921,7 @@ export function createDialogController(options: DialogControllerOptions): Dialog
     if (get()) close();
     generation++;
     previewed = undefined;
+    regionsAsked = undefined;
     refresh({
       ...next,
       draft: undefined as unknown as Feature,
@@ -834,9 +933,11 @@ export function createDialogController(options: DialogControllerOptions): Dialog
 
   const close = () => {
     clearTimeout(previewTimer);
+    clearTimeout(regionsTimer);
     generation++;
     previewSequence++;
     previewed = undefined;
+    regionsAsked = undefined;
     if (get()) kernel?.endPreview();
     state.setState({ open: undefined });
     clearPickedHover(session);

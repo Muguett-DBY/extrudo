@@ -385,3 +385,121 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
     expect(ms).toBeLessThan(10_000);
   });
 });
+
+describe('Kernel.meshRegions', { timeout: 300_000 }, () => {
+  /** The regions of `mesh` (released). */
+  function regionsOf(mesh: ShapeHandle, tolerance = 0.01) {
+    try {
+      return kernel.meshRegions(mesh, tolerance);
+    } finally {
+      kernel.release(mesh);
+    }
+  }
+
+  it('gives cube.stl six planes, one per pair of triangles', () => {
+    const regions = regionsOf(cube());
+    expect(regions.surfaceOf).toHaveLength(12);
+    expect(Array.from(regions.kinds)).toEqual(Array(6).fill(0));
+    expect(new Set(regions.surfaceOf).size).toBe(6);
+    expect(regions).toMatchObject({
+      planes: 6,
+      cylinders: 0,
+      unfit: { regions: 0, triangles: 0, fraction: 0 },
+    });
+    expect(regions.suggestedTolerance).toBeUndefined();
+  });
+
+  it("puts a 32-gon's side on its cylinder, in the view mesh's triangle order", () => {
+    const mesh = meshOf(manifold.Manifold.cylinder(20, 5, 5, 32));
+    // The view's triangles (`BodyMesh.indices` / 3) are the ones regions map onto.
+    const view = kernel.mesh(mesh, { linearDeflection: 1, angularDeflection: 1 });
+    const regions = regionsOf(mesh);
+    expect([...regions.kinds].sort()).toEqual([0, 0, 1]);
+    const cylinder = regions.kinds.indexOf(1);
+    const triangles = view.indices.length / 3;
+    expect(regions.surfaceOf).toHaveLength(triangles);
+    let side = 0;
+    for (let t = 0; t < triangles; t++) {
+      const z = [0, 1, 2].map((k) => view.positions[3 * (view.indices[3 * t + k] as number) + 2]);
+      const flat = z[0] === z[1] && z[1] === z[2];
+      if (!flat) side++;
+      expect(regions.surfaceOf[t] === cylinder).toBe(!flat);
+    }
+    expect(side).toBe(64);
+  });
+
+  it('marks a sphere as one unfit surface', () => {
+    const regions = regionsOf(meshOf(manifold.Manifold.sphere(10, 48)));
+    expect(Array.from(regions.kinds)).toEqual([-1]);
+    expect(regions.surfaceOf.every((s) => s === 0)).toBe(true);
+    expect(regions.unfit.regions).toBe(1);
+    expect(regions.unfit.fraction).toBe(1);
+  });
+
+  it('suggests a tolerance for the noisy 32-gon at 0.001 mm', () => {
+    const regions = regionsOf(noisyCylinder(), 0.001);
+    expect(regions.suggestedTolerance).toBeGreaterThanOrEqual(0.005);
+    expect(regions.suggestedTolerance).toBeLessThanOrEqual(0.02);
+  });
+
+  it('refuses a solid and a tolerance of 0', () => {
+    const box = kernel.box([1, 1, 1]);
+    try {
+      expect(() => kernel.meshRegions(box, 0.01)).toThrow(
+        new KernelError('Mesh to Solid needs a mesh body: this body is already a solid.'),
+      );
+    } finally {
+      kernel.release(box);
+    }
+    expect(() => regionsOf(cube(), 0)).toThrow(
+      new KernelError('Mesh to Solid needs a tolerance above 0 mm.'),
+    );
+  });
+
+  it('segments a 500k-triangle sphere in under 3 s, and agrees with the conversion on a plate', () => {
+    const sphere = meshOf(manifold.Manifold.sphere(10, 1000));
+    let start = performance.now();
+    const regions = regionsOf(sphere);
+    const sphereMs = performance.now() - start;
+    expect(regions.surfaceOf.length).toBeGreaterThan(400_000);
+    expect(Array.from(regions.kinds)).toEqual([-1]);
+    const platePieces = meshOfSolid(plate(), 0.0002, 0.0025);
+    start = performance.now();
+    const plateRegions = kernel.meshRegions(platePieces, 0.01);
+    const plateMs = performance.now() - start;
+    start = performance.now();
+    const { shape, report } = prismatic(platePieces);
+    const convertMs = performance.now() - start;
+    kernel.release(shape);
+    console.log(
+      `meshRegions: sphere ${regions.surfaceOf.length} triangles in ${sphereMs.toFixed(0)} ms; plate ${plateRegions.surfaceOf.length} triangles in ${plateMs.toFixed(0)} ms (converted in ${convertMs.toFixed(0)} ms)`,
+    );
+    expect(plateRegions).toMatchObject({ planes: report.planes, cylinders: report.cylinders });
+    expect(sphereMs).toBeLessThan(3000);
+  });
+
+  it('times a 302-surface staircase: regions, then the conversion', () => {
+    const steps = 149;
+    const outline: [number, number][] = [
+      [0, 0],
+      [steps, 0],
+    ];
+    for (let i = 0; i < steps; i++) outline.push([steps - i, i + 1], [steps - i - 1, i + 1]);
+    const section = new manifold.CrossSection([outline]);
+    const solid = section.extrude(5);
+    section.delete();
+    const mesh = meshOf(solid);
+    let start = performance.now();
+    const regions = kernel.meshRegions(mesh, 0.01);
+    const regionsMs = performance.now() - start;
+    start = performance.now();
+    const { shape, report } = prismatic(mesh);
+    const convertMs = performance.now() - start;
+    kernel.release(shape);
+    console.log(
+      `meshRegions: staircase ${regions.kinds.length} surfaces in ${regionsMs.toFixed(0)} ms; converted in ${convertMs.toFixed(0)} ms (${report.faces} faces)`,
+    );
+    expect(regions.planes).toBe(302);
+    expect(report.faces).toBe(302);
+  });
+});

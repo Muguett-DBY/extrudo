@@ -1034,6 +1034,14 @@ function Scene({
         {...(sectionClip && {
           section: { clips: sectionClip, color: colors.section, hatch: colors.sectionHatch },
         })}
+        {...(preview?.regions && {
+          regions: {
+            view: preview.regions,
+            plane: colors.regionPlane,
+            curved: colors.regionCurved,
+            unfit: colors.regionUnfit,
+          },
+        })}
       />
       {/* Ghost bodies (ADR-0030's amendment): a vague grey shape, no picking or analysis. */}
       <GhostBodies

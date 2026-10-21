@@ -143,6 +143,7 @@ function bind(service: KernelService) {
     reference: service.reference.bind(service),
     tangentChain: service.tangentChain.bind(service),
     smoothFaces: service.smoothFaces.bind(service),
+    meshRegions: service.meshRegions.bind(service),
     exportMeshes: service.exportMeshes.bind(service),
     exportStep: service.exportStep.bind(service),
     exportScad: service.exportScad.bind(service),

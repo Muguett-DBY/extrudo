@@ -28,6 +28,7 @@ import type {
   FeatureInputs,
   GeomRef,
   GeomRefKind,
+  MeshToSolidReport,
   PatternReport,
   SketchReport,
   SweepReport,
@@ -35,7 +36,7 @@ import type {
   UnitKind,
   Vec3,
 } from '@extrudo/core';
-import type { BodyMesh, PreviewToolStyle } from '@extrudo/kernel';
+import type { BodyMesh, MeshRegions, PreviewToolStyle } from '@extrudo/kernel';
 import type { ComponentType } from 'react';
 import type { IconName, ToolCategory } from '../design-system';
 import type { ToolId } from '../shell/tools';
@@ -155,6 +156,31 @@ export interface ToggleField extends FieldBase {
 export interface InfoField extends FieldBase {
   kind: 'info';
   text(values: DialogValues, ctx: DialogContext): string;
+  /**
+   * Colour swatches under the line (Mesh to Solid's region kinds, ADR-0095
+   * §5), each a theme token's colour and what it means. Empty or absent: none.
+   */
+  legend?(values: DialogValues, ctx: DialogContext): readonly LegendEntry[];
+}
+
+/** One swatch of an info field's legend: a category colour token and its label. */
+export interface LegendEntry {
+  tone: 'create' | 'sketch' | 'error';
+  label: string;
+}
+
+/**
+ * What a dialog's region preview segments (Mesh to Solid, ADR-0095 §5): a
+ * mesh body, within a tolerance in mm.
+ */
+export interface RegionsRequest {
+  body: BodyId;
+  tolerance: number;
+}
+
+/** A region preview's answer: the kernel's `MeshRegions` for the body it was asked about. */
+export interface DialogRegions extends MeshRegions {
+  body: BodyId;
 }
 
 /**
@@ -237,6 +263,14 @@ export interface DialogContext {
    * while the draft fails.
    */
   draftSweep?: SweepReport;
+  /** The draft's Mesh to Solid report (ADR-0095 §4). Absent for anything else and while the draft fails. */
+  draftMeshToSolid?: MeshToSolidReport;
+  /**
+   * The region preview's latest answer (`FeatureDialogSpec.regions`, ADR-0095
+   * §5). Absent while there is none, for any other dialog, and when the spec
+   * asks for none.
+   */
+  draftRegions?: DialogRegions;
 }
 
 export interface ManipulatorContext extends DialogContext {
@@ -512,6 +546,15 @@ export interface FeatureDialogSpec<I extends FeatureInputs = FeatureInputs>
    * gives no `previewTools` (a fillet): default `new`.
    */
   previewStyle?(values: DialogValues): PreviewToolStyle;
+  /**
+   * The region preview (Mesh to Solid, ADR-0095 §5): which mesh body the
+   * kernel segments, within which tolerance, or undefined for none. The
+   * controller asks again when the answer changes (dropping late answers),
+   * keeps the result in `preview.regions` and `ctx.draftRegions`, where the
+   * view colours the body's triangles by kind in place of the drawing, and
+   * clears it when this gives undefined or the dialog closes.
+   */
+  regions?(values: DialogValues, ctx: ManipulatorContext): RegionsRequest | undefined;
   /**
    * Commands the feature needs beside itself, dispatched in the same undo step
    * (P4-06, ADR-0066 §0): an `import` adds the file's attachment record.
