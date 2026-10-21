@@ -1069,7 +1069,7 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
   The report on the status shows in the chip's tooltip: hover
   `Mesh to Solid1`, `getByRole('tooltip')` contains "6 planes · 0 unfit".
   Two screenshots go to the test's output folder (`sphere-regions.png`,
-  `cube-regions.png`) for a look, not compared. E2E_RESULT
+  `cube-regions.png`) for a look, not compared. **3 tests, 24.9 s** (10–14 s each) on the Ubuntu machine with `--workers=2`.
 
 ### `e2e/import-scad.spec.ts`
 
