@@ -1046,6 +1046,18 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
   filleted edge adds one face: `faces: 7`. Two `Control+z` are back to one
   face with `data-body-mesh="true"`.
 
+- **As solid e2e** (the file's last test, P4-13 slice 4c, ADR-0095 §6): the
+  Import dialog's toggle is a plain `<input type="checkbox">`, so the
+  selector is `panel.getByRole('checkbox', { name: 'As solid' })` — visible
+  for a mesh file only (the plain-STL test asserts it too), absent for a STEP
+  file (`e2e/import-step.spec.ts`'s first test) and absent when editing (an
+  edit can't add a feature). Ticking it, waiting for
+  `data-preview-status="ok"` (90 s) and OK give two chips, "Import1" and
+  "Mesh to Solid1", one body polling to `faces: 6` with the row losing
+  `data-body-mesh`; one `Control+z` takes both chips and the body away in the
+  one undo step, `Control+Shift+z` brings both back. The spec is now **12
+  tests, 41.6 s**.
+
 ### `e2e/import-scad.spec.ts`
 
 - **Import OpenSCAD e2e** (`e2e/import-scad.spec.ts`, P5-04 slice 2): the

@@ -73,6 +73,8 @@ test('a STEP file becomes one body per solid, and undo takes it away', async ({ 
   // The file is named, with its size; a STEP file has no Units of its own here.
   await expect(panel.locator('[data-info="file"]')).toContainText('b3.step');
   await expect(panel.getByRole('combobox', { name: 'Units' })).toHaveCount(0);
+  // And no As solid: a STEP file comes in as a solid already (ADR-0095 §6).
+  await expect(panel.getByRole('checkbox', { name: 'As solid' })).toHaveCount(0);
   // The live preview drew the two solids before OK.
   await expect(panel).toHaveAttribute('data-preview-status', 'ok', { timeout: 60_000 });
 
