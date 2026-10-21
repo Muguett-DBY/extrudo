@@ -209,7 +209,7 @@ function filleted(
 ): ShapeHandle {
   const edges = Array.from({ length: kernel.count(solid, 'edge') }, (_, i) => i).filter((i) => {
     const g = kernel.edgeGeometry(solid, i);
-    return pick(g.points, g.type);
+    return g.type !== 'degenerate' && pick(g.points, g.type);
   });
   const rounded = kernel.fillet(solid, edges, radius).shape;
   kernel.release(solid);
