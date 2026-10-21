@@ -2777,8 +2777,9 @@ tolerance, normal within 1°) and take the area-weighted plane; smooth
 clusters (normals under 30°) fit whole as one plane or cylinder, else their
 regions of 4 × the median area or more become planes and the rest is
 refitted (the fine-tessellation rule; fewer than 4 leftover regions stay
-planes); a smooth cluster fits in the order **plane → cylinder → sphere →
-cone** (`fitMeshSphere`/`fitMeshCone`, kinds 0/1/2/3) and the peel groups the
+planes); a smooth cluster fits in the order **plane → cylinder → cone →
+sphere** (`fitMeshCone`/`fitMeshSphere`, kinds 0/1/2/3; the cone first, since
+a two-ring frustum's nodes also lie on a sphere) and the peel groups the
 large regions into smooth components too (a dome's coarser cylinder next to a
 finer sphere isn't taken as 64 planes); cylinders are **snapped** to tangent
 and square planes, a sphere to the cylinders it shares a radius with (the
@@ -2789,7 +2790,8 @@ MakerVolume with `SetAvoidInternalShapes`; cells kept by inside/outside
 sample points; shared faces dropped, then `UnifySameDomain`; verified by
 validity, sampled nodes within the tolerance (planes, cylinders, cones and
 spheres alike) and the volume within
-max(1 %, Σ area × chord error + tolerance × area). The dialog legend says
+max(1 %, 2 × Σ area × chord error + tolerance × area) (the sagitta sum is
+doubled: an inscribed mesh's deficit is up to ~1.5 × it). The dialog legend says
 **Curved** for every non-planar kind (kinds 1–3 draw in one colour). Measure a
 change with `bash spikes/stl-to-solid/run.sh prismatic` (the facade natively,
 float32 nodes) before a CI build. The one-step import path is done (2026-10-21): the

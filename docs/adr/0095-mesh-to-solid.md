@@ -231,13 +231,18 @@ several primitives are the next slice), measured natively
   the deviation `max |ρ_i cos α − h_i sin α|` (the distance from the
   generating line in the meridian plane). `origin` is the apex, `direction`
   points from it to the nodes, `semiAngle` is α. The order is **plane →
-  cylinder → sphere → cone**; an unfit region takes the min deviation of the
-  fits that were ok, so the sphere and cone fits can lower a suggested
-  tolerance (the noisy 32-gon's falls from 0.006 to 0.003: a sphere also
-  nearly fits its two rings). The chord error is the brief's: sphere `r (1 −
-  cos(θ/2))`, cone `(ρmax / cos α)(1 − cos(θ/2))`, θ the largest
-  facet-to-facet angle (`largestAngle`, shared with the cylinder).
-- **Two changes the brief's rules needed, and why.** (1) *A pointed cone.*
+  cylinder → cone → sphere**: a frustum meshed with only its two end rings
+  (manifold's `cylinder`) has all its nodes on a sphere too — measured, a
+  r 10 → 4, h 20 cone's rings lie on a r 12.74 sphere — so the facet normals
+  are the only thing that tells them apart, and the cone must come first
+  (a full sphere's cone fit is refused: its normals' mean along the axis is
+  zero, α < 1°). An unfit region takes the min deviation of the fits that
+  were ok, so the cone and sphere fits can lower a suggested tolerance (the
+  noisy 32-gon's falls from 0.006 to 0.003: a sphere also nearly fits its two
+  rings). The chord error is the brief's: sphere `r (1 − cos(θ/2))`, cone
+  `(ρmax / cos α)(1 − cos(θ/2))`, θ the largest facet-to-facet angle
+  (`largestAngle`, shared with the cylinder).
+- **Three changes the brief's rules needed, and why.** (1) *A pointed cone.*
   The facet tangent planes' least-squares apex sits a chord error **behind**
   the mesh tip (19.9897 for an apex at 20), so `min h < −1e-6 × max h`
   refused the whole cone. The fit refuses only a genuine double cone (`min h
@@ -251,7 +256,12 @@ several primitives are the next slice), measured natively
   slice-3 peel rule took each large region as a plane and gave 64 planes + a
   sphere. The peel now groups the peeled regions into smooth components too
   (`components(large)`) and fits each, which gives the cylinder back; a plain
-  sphere has no such split and is one sphere face.
+  sphere has no such split and is one sphere face. (3) *The volume
+  allowance.* `max(1 %, Σ area × sag + tolerance × area)` was 0.5 % short for
+  manifold's 48-meridian sphere: its inscribed polyhedron is 41.9 mm³ under
+  the true 4188.8 (1.0 %), while the sagitta sum is 28.9 and the 1 % floor
+  41.5. The sagitta sum is doubled (`2 × Σ area × sag`), still tight (a
+  fine mesh's sag → 0) but covering the measured deficit.
 - **Snaps.** After the cylinders' snap loop, a **sphere** next to cylinders
   it shares its radius with (a dome) takes their mean radius and the point
   nearest their axes (normal equations `Σ (I − a_k a_kᵀ) c = Σ (I − a_k a_kᵀ)
@@ -267,7 +277,8 @@ several primitives are the next slice), measured natively
   full `gp_Sphere(gp_Ax3(centre, mean outward normal), r)`. The frame's **Z
   along the mean outward normal worked** for the dome — the brief's
   perpendicular fallback wasn't needed (a full sphere is rotation-invariant;
-  the frame only moves its poles and seam). Verification reads
+  the frame only moves its poles and seam); for a full sphere the mean normal
+  cancels to ~0, so the frame falls back to world Z. Verification reads
   `GeomAbs_Cone`/`GeomAbs_Sphere` and projects nodes with
   `ElSLib::Parameters`/`Value` as for planes and cylinders; cones and spheres
   count into the report's slots 3 and 4, and the surface cap covers all four
