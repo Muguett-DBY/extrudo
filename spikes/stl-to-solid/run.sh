@@ -9,7 +9,7 @@ if [ "${1:-}" = prismatic ]; then
   mkdir -p "$S/build"
   # The facade with its private members public, so the harness can look inside.
   sed 's/^ *private:/ public:/' "$R/packages/kernel/occt/facade/extrudo_facade.cpp" > "$S/build/facade_public.cpp"
-  docker run --rm --user 0 -e FACES="${FACES:-}" -v "$S:/w" -v "$R/fixtures:/repo/fixtures:ro" -w /w --entrypoint sh "$IMAGE" -c '
+  docker run --rm --user 0 -e FACES="${FACES:-}" -e PIECES="${PIECES:-}" -v "$S:/w" -v "$R/fixtures:/repo/fixtures:ro" -w /w --entrypoint sh "$IMAGE" -c '
     set -e
     LINK=$(ls /opencascade.js/build/occt-libraries/*.a | tr "\n" " ")
     em++ -std=c++17 -O2 -fwasm-exceptions -I/opencascade.js/build/occt-includes prismatic.cpp \

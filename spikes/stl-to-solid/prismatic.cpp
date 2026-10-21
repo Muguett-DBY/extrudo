@@ -1,4 +1,4 @@
-// Mesh to Solid, prismatic (ADR-0095 §3, slice 3): the facade's own
+// Mesh to Solid, prismatic (ADR-0095 §3, slices 3, 4a1 and 4a2): the facade's own
 // meshToSolid(1, tolerance) on the test matrix of the slice, natively in the
 // pinned OCCT image; case r runs meshRegions (the region preview, slice 4).
 // run.sh copies the facade with its private members made
@@ -14,6 +14,7 @@
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
+#include <BRepPrimAPI_MakeTorus.hxx>
 #include <BRepBuilderAPI_MakePolygon.hxx>
 #include <RWStl.hxx>
 #include <StlAPI_Writer.hxx>
@@ -124,6 +125,7 @@ static std::string kinds(const TopoDS_Shape& s) {
             : t == GeomAbs_Cylinder ? " cyl"
             : t == GeomAbs_Cone     ? " cone"
             : t == GeomAbs_Sphere   ? " sphere"
+            : t == GeomAbs_Torus    ? " torus"
                                     : " other");
   return out;
 }
@@ -144,7 +146,8 @@ static int run(ExtrudoFacade& f, const char* name, const Mesh& m, double toleran
   std::cout << "== " << name << " (" << m.triangles.size() / 3 << " triangles, tol " << tolerance << "): " << ms << " ms\n";
   const auto& r = f.meshReport_;
   if (r.size() == 10) {
-    std::cout << "   report: faces " << r[0] << ", planes " << r[1] << ", cylinders " << r[2] << ", unfit " << r[6] << " regions / "
+    std::cout << "   report: faces " << r[0] << ", planes " << r[1] << ", cylinders " << r[2] << ", cones " << r[3] << ", spheres " << r[4]
+              << ", tori " << r[5] << ", unfit " << r[6] << " regions / "
               << r[7] << " triangles / " << r[8] << ", suggested " << r[9] << "\n";
   }
   if (!h) {
@@ -165,6 +168,12 @@ static int run(ExtrudoFacade& f, const char* name, const Mesh& m, double toleran
     if (a.GetType() == GeomAbs_Cone)
       std::cout << "   cone semi-angle " << std::setprecision(12) << a.Cone().SemiAngle() * 180 / M_PI << " deg, apex " << a.Cone().Apex().X()
                 << "," << a.Cone().Apex().Y() << "," << a.Cone().Apex().Z() << std::setprecision(6) << "\n";
+    if (a.GetType() == GeomAbs_Torus) {
+      const gp_Torus t = a.Torus();
+      std::cout << "   torus R " << std::setprecision(12) << t.MajorRadius() << " r " << t.MinorRadius() << " at " << t.Location().X() << ","
+                << t.Location().Y() << "," << t.Location().Z() << " axis " << t.Axis().Direction().X() << "," << t.Axis().Direction().Y()
+                << "," << t.Axis().Direction().Z() << std::setprecision(6) << "\n";
+    }
     if (getenv("FACES") && *getenv("FACES")) {
       GProp_GProps g;
       BRepGProp::SurfaceProperties(e.Current(), g);
@@ -185,6 +194,17 @@ static void regions(ExtrudoFacade& f, const char* name, const Mesh& m, double to
   for (size_t i = 0; i < m.nodes.size(); ++i) nodes[i] = static_cast<float>(m.nodes[i]);
   f.meshTriangles(int(m.triangles.size() / 3));
   std::memcpy(reinterpret_cast<void*>(f.meshTrianglesPtr()), m.triangles.data(), m.triangles.size() * sizeof(uint32_t));
+  if (getenv("PIECES") && *getenv("PIECES")) {
+    // Every surface of the segmentation: kind, regions, area and its numbers.
+    ExtrudoFacade::MeshSegmentation seg;
+    if (f.segmentMesh(tolerance, seg)) {
+      for (const auto& s : seg.surfaces) {
+        std::cout << "     surface kind " << s.kind << " regions " << s.regions.size() << " area " << s.area << " r " << s.radius
+                  << " R " << s.majorRadius << " at " << s.origin.X() << "," << s.origin.Y() << "," << s.origin.Z() << " dir "
+                  << s.direction.X() << "," << s.direction.Y() << "," << s.direction.Z() << " dev " << s.deviation << "\n";
+      }
+    }
+  }
   const int ok = f.meshRegions(tolerance);
   const double ms = now() - t0;
   std::cout << "== regions " << name << " (" << m.triangles.size() / 3 << " triangles, tol " << tolerance << "): " << ms << " ms\n";
@@ -200,10 +220,13 @@ static void regions(ExtrudoFacade& f, const char* name, const Mesh& m, double to
   int unassigned = 0;
   for (int t = 0; t < f.meshRegionTriangles(); ++t) unassigned += of[t] < 0 || of[t] >= f.meshRegionCount();
   std::cout << "   " << f.meshRegionCount() << " surfaces:";
-  for (auto& [k, n] : byKind) std::cout << " " << n << (k == 0 ? " plane" : k == 1 ? " cylinder" : k < 0 ? " unfit" : " other");
+  for (auto& [k, n] : byKind)
+    std::cout << " " << n
+              << (k == 0 ? " plane" : k == 1 ? " cylinder" : k == 2 ? " cone" : k == 3 ? " sphere" : k == 4 ? " torus" : k < 0 ? " unfit" : " other");
   std::cout << "; " << f.meshRegionTriangles() << " triangles mapped, " << unassigned << " unassigned\n";
   const auto& r = f.meshReport_;
-  std::cout << "   report: planes " << r[1] << ", cylinders " << r[2] << ", unfit " << r[6] << " regions / " << r[7]
+  std::cout << "   report: planes " << r[1] << ", cylinders " << r[2] << ", cones " << r[3] << ", spheres " << r[4] << ", tori " << r[5]
+            << ", unfit " << r[6] << " regions / " << r[7]
             << " triangles / " << r[8] << ", suggested " << r[9] << "\n";
   if (unassigned) ++failures;
   f.clearMeshRegions();
@@ -361,7 +384,7 @@ int main(int argc, char** argv) {
         if (c.Value(c.FirstParameter()).Z() > 9.9 && c.Value(c.LastParameter()).Z() > 9.9) fillet.Add(2.0, TopoDS::Edge(edges(i)));
       }
       TopoDS_Shape rounded = fillet.Shape();
-      h = run(f, "x3 box, 4 top edges filleted r2 (corners are not cylinders)", meshOf(rounded, 0.01, 0.2), 0.01, exact(rounded));
+      h = run(f, "x3 box, 4 top edges filleted r2 (corners are spheres)", meshOf(rounded, 0.01, 0.2), 0.01, exact(rounded));
       if (h) f.release(h);
     }
     {
@@ -454,6 +477,79 @@ int main(int argc, char** argv) {
       for (size_t i = 2; i < e.nodes.size(); i += 3) e.nodes[i] *= 0.6;
       regions(f, "c6 ellipsoid", e, 0.01);
       int h = run(f, "c6 ellipsoid", e, 0.01);
+      if (h) f.release(h);
+    }
+  }
+  if (want("t")) {
+    // Slice 4a2: tori, and smooth clusters split into several primitives.
+    auto exact = [](const TopoDS_Shape& s) { return ExtrudoFacade::volumeOf(s); };
+    // The edges of `shape` whose both ends satisfy `pick`, filleted by `radius`.
+    auto filleted = [](const TopoDS_Shape& shape, double radius, bool (*pick)(const gp_Pnt&, const gp_Pnt&)) {
+      BRepFilletAPI_MakeFillet fillet(shape);
+      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edges;
+      TopExp::MapShapes(shape, TopAbs_EDGE, edges);
+      for (int i = 1; i <= edges.Extent(); ++i) {
+        BRepAdaptor_Curve c(TopoDS::Edge(edges(i)));
+        if (pick(c.Value(c.FirstParameter()), c.Value(c.LastParameter()))) fillet.Add(radius, TopoDS::Edge(edges(i)));
+      }
+      return fillet.Shape();
+    };
+    {
+      TopoDS_Shape donut = BRepPrimAPI_MakeTorus(10, 3).Shape();
+      const double volume = 2 * M_PI * M_PI * 10 * 9;
+      const Mesh fine = meshOf(donut, 0.01, 0.2);
+      const Mesh coarse = meshOf(BRepBuilderAPI_Copy(donut).Shape(), 0.5, 0.5);
+      regions(f, "t1 donut R10 r3, fine", fine, 0.01);
+      int h = run(f, "t1a donut R10 r3, fine", fine, 0.01, volume);
+      if (h) f.release(h);
+      h = run(f, "t1b donut R10 r3, coarse", coarse, 0.01, volume);
+      if (h) f.release(h);
+    }
+    {
+      TopoDS_Shape box = BRepPrimAPI_MakeBox(40, 30, 10).Shape();
+      TopoDS_Shape rounded = filleted(box, 2, [](const gp_Pnt& a, const gp_Pnt& b) { return a.Z() > 9.9 && b.Z() > 9.9; });
+      std::cout << "   t2 shape:" << kinds(rounded) << "\n";
+      const Mesh m = meshOf(rounded, 0.01, 0.2);
+      regions(f, "t2 box, 4 top edges filleted r2", m, 0.01);
+      int h = run(f, "t2 box, 4 top edges filleted r2", m, 0.01, exact(rounded));
+      if (h) f.release(h);
+    }
+    {
+      TopoDS_Shape cyl = BRepPrimAPI_MakeCylinder(5, 20).Shape();
+      TopoDS_Shape rounded = filleted(cyl, 2, [](const gp_Pnt& a, const gp_Pnt& b) { return a.Z() > 19.9 && b.Z() > 19.9; });
+      std::cout << "   t3 shape:" << kinds(rounded) << "\n";
+      const Mesh m = meshOf(rounded, 0.01, 0.2);
+      regions(f, "t3 cylinder r5 h20, top edge filleted r2", m, 0.01);
+      int h = run(f, "t3 cylinder r5 h20, top edge filleted r2", m, 0.01, exact(rounded));
+      if (h) f.release(h);
+    }
+    {
+      TopoDS_Shape box = BRepPrimAPI_MakeBox(40, 30, 5).Shape();
+      TopoDS_Shape drill = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(20, 15, -1), gp_Dir(0, 0, 1)), 3, 7).Shape();
+      TopoDS_Shape plate = BRepAlgoAPI_Cut(box, drill).Shape();
+      TopoDS_Shape rounded = filleted(plate, 1, [](const gp_Pnt& a, const gp_Pnt& b) {
+        return a.Z() > 4.9 && b.Z() > 4.9 && std::hypot(a.X() - 20, a.Y() - 15) < 3.1;
+      });
+      std::cout << "   t4 shape:" << kinds(rounded) << "\n";
+      const Mesh m = meshOf(rounded, 0.01, 0.2);
+      regions(f, "t4 plate, hole's top edge filleted r1", m, 0.01);
+      int h = run(f, "t4 plate, hole's top edge filleted r1", m, 0.01, exact(rounded));
+      if (h) f.release(h);
+    }
+    {
+      TopoDS_Shape box = BRepPrimAPI_MakeBox(20, 20, 20).Shape();
+      TopoDS_Shape rounded = filleted(box, 2, [](const gp_Pnt&, const gp_Pnt&) { return true; });
+      std::cout << "   t5 shape:" << kinds(rounded) << "\n";
+      const Mesh m = meshOf(rounded, 0.01, 0.2);
+      regions(f, "t5 box 20, all 12 edges filleted r2", m, 0.01);
+      int h = run(f, "t5 box 20, all 12 edges filleted r2", m, 0.01, exact(rounded));
+      if (h) f.release(h);
+    }
+    {
+      Mesh e = sphere(10, 24, 48);
+      for (size_t i = 2; i < e.nodes.size(); i += 3) e.nodes[i] *= 0.6;
+      regions(f, "t6 ellipsoid", e, 0.01);
+      int h = run(f, "t6 ellipsoid", e, 0.01);
       if (h) f.release(h);
     }
   }

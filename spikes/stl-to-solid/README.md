@@ -20,8 +20,9 @@ plan.
 
 ```sh
 bash spikes/stl-to-solid/run.sh prismatic      # all cases, about 5 minutes: em++ link + node
-bash spikes/stl-to-solid/run.sh prismatic 6    # one case: 1-9, 11, c (curved), r (regions) or x (extra shapes)
+bash spikes/stl-to-solid/run.sh prismatic 6    # one case: 1-9, 11, c (curved), t (tori, split clusters), r (regions) or x (extra shapes)
 FACES=1 bash spikes/stl-to-solid/run.sh prismatic 6   # with every face's plane or axis
+PIECES=1 bash spikes/stl-to-solid/run.sh prismatic t  # with every surface the segmentation found (regions() cases)
 ```
 
 `prismatic.cpp` includes the facade itself (`run.sh` copies it with its
@@ -36,7 +37,10 @@ sphere (2,208 and 499,000 triangles); the 32-gon with its nodes moved
 radially by up to ±0.005 mm. `c` adds the curved cases (slice 4a1, ADR-0095
 §3): a sphere r 10, a dome (a cylinder fused with a hemisphere) fine and
 coarse, a truncated cone, a countersunk plate, a pointed cone and an
-ellipsoid. `x` adds an L-bracket, boxes with four filleted vertical or top
+ellipsoid. `t` adds the tori and the split clusters (slice 4a2): a donut
+R 10 r 3 fine and coarse, the box with four filleted top edges, a cylinder
+with a filleted end, a plate whose hole's top edge is filleted, a box with
+all twelve edges filleted, and the ellipsoid again. `x` adds an L-bracket, boxes with four filleted vertical or top
 edges, a plate with a 12-gon hole, a slot and a boss, and a tube. It prints
 the time, the report, the faces by kind, the validity and the volume against
 the exact one. The numbers are in ADR-0095's amendments of 2026-10-21;
