@@ -238,6 +238,12 @@ export interface FacadeBinding {
   meshToSolid(method: number, tolerance: number): number;
   meshReportPtr(): number;
   meshReportSize(): number;
+  meshRegions(tolerance: number): number;
+  meshRegionsPtr(): number;
+  meshRegionTriangles(): number;
+  meshRegionKindsPtr(): number;
+  meshRegionCount(): number;
+  clearMeshRegions(): void;
   readStepColors(text: string): number;
   readStepNames(text: string): number;
   clearExport(): void;
