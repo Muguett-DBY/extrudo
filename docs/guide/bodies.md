@@ -25,6 +25,14 @@ Features that change a body keep it as it is: [Fillet](./tools/fillet.md),
 [Chamfer](./tools/chamfer.md), [Shell](./tools/shell.md), [Hole](./tools/hole.md) and
 [Thread](./tools/thread.md) edit the bodies they touch.
 
+An imported mesh (STL, 3MF or OBJ) is a **mesh body**: triangles, with no faces or edges to
+pick, so a fillet, shell or sketch on a face can't use it. **Mesh to Solid** (Solid › Modify,
+or **Convert to Solid…** in the body's right-click menu) turns it into a solid with real faces
+under the same name. *Faceted* keeps every flat facet as a face and is exact for parts made of
+flat faces; *Prismatic* finds planes and cylinders within a tolerance and rebuilds them as
+exact surfaces. A mesh of more faces than Extrudo can convert is refused with the count:
+simplify it in your slicer and try again.
+
 Two things can turn one body into several. A cut that severs a part gives you one body per
 piece. [Split Body](./tools/splitBody.md) does it on purpose. In both cases the largest piece
 keeps the original body's name, colour and place in the browser, and the others get the next free

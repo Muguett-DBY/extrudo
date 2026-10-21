@@ -1,0 +1,1 @@
+- 2026-10-21 · **Mesh to Solid**: an imported STL, 3MF or OBJ mesh becomes a solid with real faces (Solid › Modify, or Convert to Solid… on the body), so it fillets, shells and takes sketches like any body (#95).
