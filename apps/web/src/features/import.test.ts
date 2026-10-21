@@ -22,7 +22,6 @@ import {
   pendingImport,
   pendingImportStore,
   pickImportFile,
-  setImportSession,
 } from './import';
 import { featureDialogs, specForCommand } from './registry';
 import {
@@ -57,7 +56,6 @@ const pick = (
 
 afterEach(() => {
   clearPendingImport();
-  setImportSession(undefined);
 });
 
 describe('the Import dialog', () => {
@@ -158,14 +156,17 @@ describe('the Import dialog', () => {
 
   it('with As solid on, commitWith adds the Mesh to Solid feature after the import', () => {
     const pending = pick('bracket.stl', 'model/stl');
-    // The active component is stamped onto the new feature (ADR-0081 §6).
-    setImportSession({
-      getState: () => ({ activeComponent: 'c1' as ComponentId }) as never,
-    });
     const featureId = 'f1' as FeatureId;
     // A create-mode context: the file is pending, its record not in the
-    // document yet (as the framework's context is at OK).
-    const ctx: DialogContext = { doc: emptyDocument(), bodies: {}, featureId };
+    // document yet (as the framework's context is at OK). The session rides
+    // in the context, so the new feature is stamped with the active
+    // component (ADR-0081 §6).
+    const ctx: DialogContext = {
+      doc: emptyDocument(),
+      bodies: {},
+      featureId,
+      session: { getState: () => ({ activeComponent: 'c1' as ComponentId }) as never },
+    };
     const commands = importDialog.commitWith?.({ ...emptyValues(), toggles: { solid: true } }, ctx);
     expect(commands).toHaveLength(2);
     expect(commands?.[0]).toMatchObject({
@@ -188,6 +189,14 @@ describe('the Import dialog', () => {
         },
       },
     });
+  });
+
+  it('with As solid on and no session in the context, the feature is unstamped', () => {
+    pick('bracket.stl', 'model/stl');
+    const ctx: DialogContext = { doc: emptyDocument(), bodies: {}, featureId: 'f1' as FeatureId };
+    const commands = importDialog.commitWith?.({ ...emptyValues(), toggles: { solid: true } }, ctx);
+    const insert = commands?.[1] as { payload: { feature: Feature } } | undefined;
+    expect(insert?.payload.feature.component).toBeUndefined();
   });
 
   it('with As solid off, commitWith adds the attachment record alone', () => {

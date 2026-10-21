@@ -38,6 +38,7 @@ import type {
 } from '@extrudo/core';
 import type { BodyMesh, MeshRegions, PreviewToolStyle } from '@extrudo/kernel';
 import type { ComponentType } from 'react';
+import type { ActiveSource } from '../components/active';
 import type { IconName, ToolCategory } from '../design-system';
 import type { ToolId } from '../shell/tools';
 import type { DialogController, OpenDialog } from './dialog';
@@ -233,6 +234,12 @@ export interface DialogContext {
   bodies: Readonly<Record<BodyId, BodyMesh>>;
   /** The feature being edited; absent for a new one. */
   feature?: Feature;
+  /**
+   * The session's active component, for `commitWith` hooks that insert a
+   * feature (ADR-0081 §6: every app insert stamps). Optional so a spec's
+   * pure unit tests need not name it.
+   */
+  session?: ActiveSource;
   /** What the kernel reports about each sketch: frames of sketches on faces (P2-09). */
   sketches?: Readonly<Record<FeatureId, SketchReport>>;
   /** What the kernel reports about each construction plane, axis and point (P3-05). */

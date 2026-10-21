@@ -424,6 +424,7 @@ export function createDialogController(options: DialogControllerOptions): Dialog
     return {
       doc,
       featureId: open.id,
+      session,
       bodies,
       sketches,
       construction,

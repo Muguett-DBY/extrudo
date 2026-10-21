@@ -12,7 +12,7 @@ import type {
 } from '@extrudo/core';
 
 /** What a stamp reads: only the session's active component. */
-type ActiveSource = Pick<SessionStore, 'getState'>;
+export type ActiveSource = Pick<SessionStore, 'getState'>;
 
 /** The active component an insert should stamp, if the design still has it. */
 export function activeComponentOf(session: ActiveSource): ComponentId | undefined {

@@ -43,7 +43,6 @@ import {
   modelKind,
   newId,
   nextFeatureName,
-  type SessionStore,
 } from '@extrudo/core';
 import { type ProjectStore, sha256Hex } from '@extrudo/storage';
 import { createStore } from 'zustand/vanilla';
@@ -57,21 +56,7 @@ import { type DialogContext, type DialogValues, defineFeatureDialog } from './sp
 import { defaultFromInputs, shownFields } from './values';
 
 /**
- * The session behind the Import dialog being opened, so `commitWith` can
- * stamp the As solid feature with the active component (ADR-0081 §6: every
- * app insert site stamps; the dialog framework's session isn't in the spec's
- * context). Set when a file is picked, consumed by OK, cleared on cancel.
- */
-type ActiveSource = Pick<SessionStore, 'getState'>;
-let importSession: ActiveSource | undefined;
-
-/** Hands the Import dialog the project's session (AppShell, when picking). */
-export function setImportSession(session: ActiveSource | undefined): void {
-  importSession = session;
-}
-
-/**
- * What the platform's file picker is asked for: the model files of §0, and an
+ * The app's file picker: the model files of §0, and an
  * `.f3d` file, which opens as a new design instead (ADR-0083 §4).
  */
 export const IMPORT_ACCEPT = '.step,.stp,.stl,.3mf,.obj,.scad,.f3d';
@@ -107,8 +92,6 @@ export async function pickImportFile(deps: {
   store: DocumentStore;
   notify(tone: 'info' | 'error', message: string): void;
   openF3d?(file: File): void;
-  /** The project's session: the As solid feature's active-component stamp. */
-  session?: ActiveSource;
 }): Promise<PendingImport | undefined> {
   const file = await deps.files.pick(IMPORT_ACCEPT);
   if (!file) return undefined;
@@ -153,7 +136,6 @@ export async function pickImportFile(deps: {
   // asks the kernel through `addFile`) finds the bytes (ADR-0066 §0).
   putAttachmentBytes(id, bytes);
   pendingImportStore.setState({ pending });
-  setImportSession(deps.session);
   return pending;
 }
 
@@ -312,9 +294,6 @@ export const importDialog = defineFeatureDialog({
   // (ADR-0095 §6), so one undo step holds the file, the import and the conversion.
   commitWith(values: DialogValues, ctx: DialogContext): readonly Command<unknown>[] {
     const file = importedFile(ctx);
-    // Consumed on every OK path: the dialog that used it is gone either way.
-    const session = importSession;
-    importSession = undefined;
     if (!file || ctx.feature) return [];
     // Read before the pending file is forgotten below (`importedFile` falls
     // back to it): As solid adds the conversion when a mesh is being imported.
@@ -337,17 +316,17 @@ export const importDialog = defineFeatureDialog({
         suppressed: false,
         inputs: meshToSolidInputs(`${ctx.featureId}:0` as BodyId, 'prismatic'),
       };
+      // Stamped with the active component, as every app insert site is
+      // (ADR-0081 §6): the context carries the session.
       commands.push(
         insertFeature({
-          feature: session ? withActiveComponent(feature, session) : feature,
+          feature: ctx.session ? withActiveComponent(feature, ctx.session) : feature,
           index: ctx.doc.timelineMarker + 1,
         }),
       );
     }
     return commands;
   },
-  // A cancelled dialog's session goes with it.
-  onCancel: () => setImportSession(undefined),
 });
 
 /** A file size as the dialog shows it: bytes, then kB and MB. */
