@@ -2777,22 +2777,29 @@ tolerance, normal within 1°) and take the area-weighted plane; smooth
 clusters (normals under 30°) fit whole as one plane or cylinder, else their
 regions of 4 × the median area or more become planes and the rest is
 refitted (the fine-tessellation rule; fewer than 4 leftover regions stay
-planes); cylinders are **snapped** to tangent and square planes before the
-faces are made (MakerVolume fails on nearly tangent faces without it; no
+planes); a smooth cluster fits in the order **plane → cylinder → sphere →
+cone** (`fitMeshSphere`/`fitMeshCone`, kinds 0/1/2/3) and the peel groups the
+large regions into smooth components too (a dome's coarser cylinder next to a
+finer sphere isn't taken as 64 planes); cylinders are **snapped** to tangent
+and square planes, a sphere to the cylinders it shares a radius with (the
+point on their axes) and a cone to its cylinder's or end plane's axis, before
+the faces are made (MakerVolume fails on nearly tangent faces without it; no
 sewing path); faces grow by 10 × tolerance + twice the largest chord error;
 MakerVolume with `SetAvoidInternalShapes`; cells kept by inside/outside
 sample points; shared faces dropped, then `UnifySameDomain`; verified by
-validity, sampled nodes within the tolerance and the volume within
-max(1 %, Σ area × chord error + tolerance × area). Measure a change with
-`bash spikes/stl-to-solid/run.sh prismatic` (the facade natively, float32
-nodes) before a CI build. The one-step import path is done (2026-10-21): the
+validity, sampled nodes within the tolerance (planes, cylinders, cones and
+spheres alike) and the volume within
+max(1 %, Σ area × chord error + tolerance × area). The dialog legend says
+**Curved** for every non-planar kind (kinds 1–3 draw in one colour). Measure a
+change with `bash spikes/stl-to-solid/run.sh prismatic` (the facade natively,
+float32 nodes) before a CI build. The one-step import path is done (2026-10-21): the
 Import dialog's `solid` toggle ("As solid", mesh files only, create mode
 only) appends the `meshToSolid` feature (Prismatic, default tolerance, at
 the import's index + 1) to the dialog's `commitWith` commands, so one undo
 step holds the attachment record, the `import` and the conversion; the
 toggle is a dialog value, never an input of `import` (its `toInputs` builds
 the inputs by hand and must keep no `solid` key).
-**Preview and report** (2026-10-22 amendment):
+**Preview and report** (2026-10-21 amendment):
 the segmentation is one private `segmentMesh` shared by `prismaticFromMesh`
 and `meshRegions` (change it in one place; the preview and the conversion
 must agree), whose per-triangle surface index and per-surface kind (0 plane,

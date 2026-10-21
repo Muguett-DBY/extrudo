@@ -202,14 +202,90 @@ WASM, this machine) the 20,124-triangle plate converts in 248 ms, the
 | cylinder r 5 h 20, 32 / 360 / 16 segments | 124 / 1,436 / 60 | 2 planes + cylinder r 5 (±1e-8), volume ±2e-7 % | 49 / 90 / 13 |
 | plate 40 × 30 × 5, hole r 3, fine / ~5k | 1,024 / 5,044 | 6 planes + 1 cylinder, ±2e-8 %; r 1 fillet on the hole's circle valid | 146 / 341 |
 | box 20³, edge filleted r 2, fine / 8 segments | 264 / 76 | 6 planes + cylinder r 2, −3e-4 % / −5e-9 % | 53 / 36 |
-| sphere r 10 / 499k triangles | 2,208 / 499,000 | refused, 1 region (100 %) | 2 / 292 |
+| sphere r 10 / 499k triangles | 2,208 / 499,000 | 1 sphere face (slice 4a1: was refused) | 103 / 731 |
 | staircase, 602 faces | 2,396 | refused, 602 surfaces | 1 |
-| 32-gon, nodes ±0.005 mm, tolerance 0.001 / 0.02 | 124 | refused, "Raise the tolerance to 0.006 mm" / 2 planes + cylinder | 0.1 / 8 |
+| 32-gon, nodes ±0.005 mm, tolerance 0.001 / 0.02 | 124 | refused, "Raise the tolerance to 0.003 mm" (slice 4a1: was 0.006) / 2 planes + cylinder | 0.1 / 8 |
 | L-bracket | 20 | 8 planes, exact | 16 |
 | box, 4 vertical edges r 3, fine / 8 segments | 1,020 / 268 | 6 planes + 4 cylinders, ±3e-5 % | 279 / 102 |
-| box, 4 top edges r 2 (spherical corners) | 196 | refused, 1 region (11 %): the corners are slice 4's | 0.2 |
+| box, 4 top edges r 2 (spherical corners) | 196 | refused, 1 region (11 %): the corners are the next slice's (one smooth cluster of four cylinders and four spheres) | 0.2 |
 | plate, 12-gon hole / slot / boss | 116 / 528 / 516 | 7 / 10 / 8 faces, ±3e-7 % | 21 / 280 / 33 |
 | tube r 10 / r 6 | 1,008 | 2 planes + 2 cylinders | 48 |
+
+#### Amendment, 2026-10-21: spheres and cones (slice 4a1)
+
+The two remaining primitives (tori and splitting a smooth cluster into
+several primitives are the next slice), measured natively
+(`bash spikes/stl-to-solid/run.sh prismatic c`) and in Vitest.
+
+- **Fits** (`fitMeshSphere` / `fitMeshCone`, after plane and cylinder). A
+  **sphere**: the centre an algebraic fit (the linear system `2 Σ q qᵀ c' =
+  Σ q |q|²` over the centroid `m`, `c = m + c'`) refined by Gauss–Newton on
+  the residual `|p − c| − r` (three unknowns, `solve3`), the radius the mean
+  distance; refused when the nodes are nearly coplanar (the covariance's
+  smallest eigenvalue under 1e-6 × its largest). A **cone**: the axis the
+  facet normals' area-weighted covariance's smallest eigenvector (refused
+  when `values[1] ≤ 1e-6 × trace`, as for the cylinder), the half-angle
+  `asin|mean(n·a)|` (refused outside 1°–89°), the apex the facet tangent
+  planes' least-squares meeting point (`Σ a_t n_t n_tᵀ x = Σ a_t n_t (n_t ·
+  centroid_t)`), the half-angle then the nodes' mean `atan2(ρ_i, h_i)`, and
+  the deviation `max |ρ_i cos α − h_i sin α|` (the distance from the
+  generating line in the meridian plane). `origin` is the apex, `direction`
+  points from it to the nodes, `semiAngle` is α. The order is **plane →
+  cylinder → sphere → cone**; an unfit region takes the min deviation of the
+  fits that were ok, so the sphere and cone fits can lower a suggested
+  tolerance (the noisy 32-gon's falls from 0.006 to 0.003: a sphere also
+  nearly fits its two rings). The chord error is the brief's: sphere `r (1 −
+  cos(θ/2))`, cone `(ρmax / cos α)(1 − cos(θ/2))`, θ the largest
+  facet-to-facet angle (`largestAngle`, shared with the cylinder).
+- **Two changes the brief's rules needed, and why.** (1) *A pointed cone.*
+  The facet tangent planes' least-squares apex sits a chord error **behind**
+  the mesh tip (19.9897 for an apex at 20), so `min h < −1e-6 × max h`
+  refused the whole cone. The fit refuses only a genuine double cone (`min h
+  < −0.5 × max h`, nodes on both sides in comparable amount) and takes the
+  half-angle over the nodes **in front of** the apex (the tip's `atan2(0, 0)`
+  otherwise drags it); the cone then fits and the refusal moves to the
+  rebuild — `MakerVolume` can't use the cone face's singular apex (`v1 = 0`)
+  — so the user gets the usual *rebuild* message, no crash, no invalid
+  solid. (2) *A dome.* A cylinder fused with a hemisphere is one smooth
+  cluster whose cylinder facets are coarser (larger) than the sphere's; the
+  slice-3 peel rule took each large region as a plane and gave 64 planes + a
+  sphere. The peel now groups the peeled regions into smooth components too
+  (`components(large)`) and fits each, which gives the cylinder back; a plain
+  sphere has no such split and is one sphere face.
+- **Snaps.** After the cylinders' snap loop, a **sphere** next to cylinders
+  it shares its radius with (a dome) takes their mean radius and the point
+  nearest their axes (normal equations `Σ (I − a_k a_kᵀ) c = Σ (I − a_k a_kᵀ)
+  o_k`, `solve3`; with one cylinder, the centre projected onto its axis); a
+  **cone** next to a cylinder within 1° (`|a · a_cyl| > cos 1°`) takes that
+  cylinder's axis line (apex projected onto it), else next to a plane it is
+  square to (`|a · n| > cos 1°`), that plane's normal. The dome's sphere
+  radius equals the cylinder's to 1e-11 and sits on its axis (x, y ≈ 1e-16);
+  the countersink's cone axis is the through hole's.
+- **Faces and verification.** A cone is `gp_Cone(gp_Ax3(apex, a), α, 0)`
+  between `v1 = max(0, min h_i / cos α − margin)` and `v2 = max h_i / cos α +
+  margin` (v the distance along a generatrix from the apex); a sphere the
+  full `gp_Sphere(gp_Ax3(centre, mean outward normal), r)`. The frame's **Z
+  along the mean outward normal worked** for the dome — the brief's
+  perpendicular fallback wasn't needed (a full sphere is rotation-invariant;
+  the frame only moves its poles and seam). Verification reads
+  `GeomAbs_Cone`/`GeomAbs_Sphere` and projects nodes with
+  `ElSLib::Parameters`/`Value` as for planes and cylinders; cones and spheres
+  count into the report's slots 3 and 4, and the surface cap covers all four
+  kinds.
+
+Measured, native (ms under node; the same matrix passes in Vitest):
+
+| Mesh | Triangles | Result | ms |
+|---|---|---|---|
+| sphere r 10 (UV) | 2,208 | 1 sphere face, r 10 (±2e-8), ±7e-7 % | 103 |
+| dome (cylinder + hemisphere), fine / coarse | 5,472 / 254 | 1 plane + 1 cylinder + 1 sphere, sphere r = cylinder r (±1e-11), ±3e-6 % | 435 / 25 |
+| truncated cone r 10 → 4, h 20 | 1,600 | 2 planes + 1 cone, half-angle 16.716° (atan(6/20) is 16.699°), +0.025 % | 81 |
+| countersunk plate (box, hole r 3, sink r 6 → 3) | 754 | 6 planes + 1 cylinder + 1 cone, −7e-4 % | 120 |
+| pointed cone r 10, h 20 | 1,476 | refused at the rebuild (MakerVolume can't do the apex) | 61 |
+| ellipsoid (sphere × 0.6 in z) | 2,208 | refused, 1 region (100 %) | 1 |
+
+The plain sphere and the 499k-triangle sphere, refused in slice 3's table,
+now convert to one sphere face (the table above notes the change).
 
 ### 4. The report
 
@@ -229,7 +305,7 @@ kind per region, in `ModelState.regions` for that body), which is linear and
 fast on a million triangles; OK runs the build. The colours come from the
 brand tokens (`docs/05-brand.md`), with a legend line in the dialog.
 
-#### Amendment, 2026-10-22: preview and report as built (slice 4b)
+#### Amendment, 2026-10-21: preview and report as built (slice 4b)
 
 - **One segmentation, two callers.** The facade's `segmentMesh(tolerance,
   MeshSegmentation&)` (private) holds what `prismaticFromMesh` did up to its
