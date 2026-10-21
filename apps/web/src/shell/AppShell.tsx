@@ -1766,6 +1766,7 @@ export function AppShell({
       store,
       notify,
       openF3d: file.importF3d,
+      session,
     }).then((pending) => {
       if (pending) dialog?.start(IMPORT_TYPE);
     });

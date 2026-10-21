@@ -3,8 +3,10 @@
 // the attachment record and the feature as one undo step.
 import {
   type AttachmentId,
+  type ComponentId,
   type ExtrudoDocument,
   type Feature,
+  type FeatureId,
   ImportInputsSchema,
   importInputs,
   newId,
@@ -20,6 +22,7 @@ import {
   pendingImport,
   pendingImportStore,
   pickImportFile,
+  setImportSession,
 } from './import';
 import { featureDialogs, specForCommand } from './registry';
 import {
@@ -52,7 +55,10 @@ const pick = (
   return pending;
 };
 
-afterEach(() => clearPendingImport());
+afterEach(() => {
+  clearPendingImport();
+  setImportSession(undefined);
+});
 
 describe('the Import dialog', () => {
   it("is the app's dialog for the importBody command", () => {
@@ -86,6 +92,7 @@ describe('the Import dialog', () => {
       'file',
       'units',
       'up',
+      'solid',
     ]);
     t.controller.setChoice('units', 'in');
     t.controller.setChoice('up', 'y');
@@ -114,6 +121,81 @@ describe('the Import dialog', () => {
     t.store.getState().redo();
     expect(t.store.getState().doc.features.some((f) => f.type === 'import')).toBe(true);
     expect(t.store.getState().doc.attachments?.[pending.id]).toEqual(pending.attachment);
+  });
+
+  it('shows As solid for a mesh file only, and not when editing', () => {
+    const solid = importDialog.fields.find((f) => f.name === 'solid');
+    if (solid?.kind !== 'toggle') throw new Error('no solid toggle');
+    const values = emptyValues();
+    // A mesh file, importing: shown.
+    expect(
+      solid.shown?.(values, contextOf(emptyDocument(), pick('bracket.stl', 'model/stl'))),
+    ).toBe(true);
+    // A STEP file: not.
+    expect(solid.shown?.(values, contextOf(emptyDocument(), pick('b3.step')))).toBe(false);
+    // Editing an import can't add a feature: not.
+    const pending = pick('bracket2.stl', 'model/stl');
+    const feature: Feature = {
+      id: 'i1' as FeatureId,
+      type: 'import',
+      name: 'Import1',
+      suppressed: false,
+      inputs: importInputs({ file: pending.id }),
+    };
+    expect(solid.shown?.(values, contextOf(emptyDocument(), pending, feature))).toBe(false);
+  });
+
+  it('keeps the solid toggle out of the import inputs', () => {
+    const pending = pick('bracket.stl', 'model/stl');
+    const t = setupDialogs([importDialog]);
+    t.controller.start('import');
+    t.controller.setToggle('solid', true);
+    const ctx = contextOf(emptyDocument(), pending);
+    const inputs = importDialog.toInputs?.(t.open()?.values as DialogValues, ctx) ?? {};
+    expect('solid' in inputs).toBe(false);
+    expect(ImportInputsSchema.safeParse(inputs).success).toBe(true);
+  });
+
+  it('with As solid on, commitWith adds the Mesh to Solid feature after the import', () => {
+    const pending = pick('bracket.stl', 'model/stl');
+    // The active component is stamped onto the new feature (ADR-0081 §6).
+    setImportSession({
+      getState: () => ({ activeComponent: 'c1' as ComponentId }) as never,
+    });
+    const featureId = 'f1' as FeatureId;
+    // A create-mode context: the file is pending, its record not in the
+    // document yet (as the framework's context is at OK).
+    const ctx: DialogContext = { doc: emptyDocument(), bodies: {}, featureId };
+    const commands = importDialog.commitWith?.({ ...emptyValues(), toggles: { solid: true } }, ctx);
+    expect(commands).toHaveLength(2);
+    expect(commands?.[0]).toMatchObject({
+      type: 'attachment.add',
+      payload: { id: pending.id, attachment: pending.attachment },
+    });
+    expect(commands?.[1]).toMatchObject({
+      type: 'feature.insert',
+      payload: {
+        index: 1,
+        feature: {
+          name: 'Mesh to Solid1',
+          type: 'meshToSolid',
+          suppressed: false,
+          component: 'c1',
+          inputs: {
+            body: { kind: 'ref', refs: [{ kind: 'body', id: `${featureId}:0` }] },
+            method: { kind: 'enum', value: 'prismatic' },
+          },
+        },
+      },
+    });
+  });
+
+  it('with As solid off, commitWith adds the attachment record alone', () => {
+    pick('bracket.stl', 'model/stl');
+    const ctx: DialogContext = { doc: emptyDocument(), bodies: {}, featureId: 'f1' as FeatureId };
+    const commands = importDialog.commitWith?.(emptyValues(), ctx);
+    expect(commands).toHaveLength(1);
+    expect(commands?.[0]).toMatchObject({ type: 'attachment.add' });
   });
 
   it('edits a stored import without adding the file again', () => {
@@ -311,6 +393,11 @@ function contextOf(
     bodies: {},
     ...(feature && { feature }),
   };
+}
+
+/** Field values with everything empty (a fresh dialog's, minus its choices). */
+function emptyValues(): DialogValues {
+  return { refs: {}, exprs: {}, choices: {}, toggles: {}, labels: {} };
 }
 
 /** A document with nothing in it but `id`, as a new design's. */

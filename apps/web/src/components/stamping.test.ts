@@ -11,6 +11,7 @@ const sources = import.meta.glob<string>('../**/*.{ts,tsx}', {
 const INSERTERS = [
   '../agent/tools.ts',
   '../features/dialog.ts',
+  '../features/import.ts',
   '../sketch/mode.ts',
   '../plugins/runCommand.ts',
   '../macro/macro.ts',

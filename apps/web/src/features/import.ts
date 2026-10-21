@@ -21,23 +21,33 @@ import {
   type Attachment,
   type AttachmentId,
   addAttachment,
+  type BodyId,
   type Command,
   type DocumentStore,
   type ExtrudoDocument,
+  type Feature,
+  type FeatureId,
   type FeatureInputs,
   IMPORT_UNITS,
   IMPORT_UP,
   type ImportInputs,
   importFeature,
   importInputs,
+  insertFeature,
   isMeshMediaType,
   isScadMediaType,
+  MESH_TO_SOLID_TYPE,
   mediaTypeOf,
+  meshToSolidFeature,
+  meshToSolidInputs,
   modelKind,
   newId,
+  nextFeatureName,
+  type SessionStore,
 } from '@extrudo/core';
 import { type ProjectStore, sha256Hex } from '@extrudo/storage';
 import { createStore } from 'zustand/vanilla';
+import { withActiveComponent } from '../components/active';
 import type { FileAccess } from '../platform';
 import { pendingPluginById } from '../plugins/pending';
 import { putAttachmentBytes } from '../sketch/fonts';
@@ -45,6 +55,20 @@ import { ScadOverrides } from './ScadOverrides';
 import { overrideInputs, overrideIssue, overrideValues } from './scadRows';
 import { type DialogContext, type DialogValues, defineFeatureDialog } from './spec';
 import { defaultFromInputs, shownFields } from './values';
+
+/**
+ * The session behind the Import dialog being opened, so `commitWith` can
+ * stamp the As solid feature with the active component (ADR-0081 §6: every
+ * app insert site stamps; the dialog framework's session isn't in the spec's
+ * context). Set when a file is picked, consumed by OK, cleared on cancel.
+ */
+type ActiveSource = Pick<SessionStore, 'getState'>;
+let importSession: ActiveSource | undefined;
+
+/** Hands the Import dialog the project's session (AppShell, when picking). */
+export function setImportSession(session: ActiveSource | undefined): void {
+  importSession = session;
+}
 
 /**
  * What the platform's file picker is asked for: the model files of §0, and an
@@ -83,6 +107,8 @@ export async function pickImportFile(deps: {
   store: DocumentStore;
   notify(tone: 'info' | 'error', message: string): void;
   openF3d?(file: File): void;
+  /** The project's session: the As solid feature's active-component stamp. */
+  session?: ActiveSource;
 }): Promise<PendingImport | undefined> {
   const file = await deps.files.pick(IMPORT_ACCEPT);
   if (!file) return undefined;
@@ -127,6 +153,7 @@ export async function pickImportFile(deps: {
   // asks the kernel through `addFile`) finds the bytes (ADR-0066 §0).
   putAttachmentBytes(id, bytes);
   pendingImportStore.setState({ pending });
+  setImportSession(deps.session);
   return pending;
 }
 
@@ -238,6 +265,15 @@ export const importDialog = defineFeatureDialog({
       default: 'z',
       hint: 'Which way the file points up. Y-up files are turned a quarter turn about X.',
     },
+    {
+      kind: 'toggle',
+      name: 'solid',
+      label: 'As solid',
+      default: false,
+      // A mesh only, and only when importing (an edit can't add a feature).
+      shown: (_values, ctx) => (ctx ? isMesh(ctx) && !ctx.feature : false),
+      hint: 'Also run Mesh to Solid on the mesh (Prismatic, 0.01 mm), in the same step. Faces and edges become real, so you can fillet, shell and sketch on the part.',
+    },
   ],
   toInputs(values: DialogValues, ctx: DialogContext): ImportInputs {
     // With no file the inputs are invalid, and `validate` says so in the
@@ -271,16 +307,47 @@ export const importDialog = defineFeatureDialog({
   },
   // An OpenSCAD file's variables, one row each (P5-04 slice 2).
   extra: ScadOverrides,
-  // The attachment record, in the same undo step as the feature (ADR-0066 §0).
-  commitWith(_values: DialogValues, ctx: DialogContext): readonly Command<unknown>[] {
+  // The attachment record, in the same undo step as the feature (ADR-0066 §0);
+  // with As solid ticked, the Mesh to Solid feature right after the import
+  // (ADR-0095 §6), so one undo step holds the file, the import and the conversion.
+  commitWith(values: DialogValues, ctx: DialogContext): readonly Command<unknown>[] {
     const file = importedFile(ctx);
+    // Consumed on every OK path: the dialog that used it is gone either way.
+    const session = importSession;
+    importSession = undefined;
     if (!file || ctx.feature) return [];
+    // Read before the pending file is forgotten below (`importedFile` falls
+    // back to it): As solid adds the conversion when a mesh is being imported.
+    const asSolid = values.toggles.solid === true && ctx.featureId !== undefined && isMesh(ctx);
+    const commands: Command<unknown>[] = [];
     // The same file added again is the attachment that is already there.
-    if (ctx.doc.attachments?.[file.id]) return [];
-    // Committed: the picked file is the design's now.
-    clearPendingImport();
-    return [addAttachment({ id: file.id, attachment: file.attachment })];
+    if (!ctx.doc.attachments?.[file.id]) {
+      // Committed: the picked file is the design's now.
+      clearPendingImport();
+      commands.push(addAttachment({ id: file.id, attachment: file.attachment }));
+    }
+    if (asSolid) {
+      // The import itself lands at the timeline marker (dialog.ts's
+      // `fresh.index`, which is the marker in create mode), so the conversion
+      // goes right after it.
+      const feature: Feature = {
+        id: newId<FeatureId>(),
+        type: MESH_TO_SOLID_TYPE,
+        name: nextFeatureName(ctx.doc, meshToSolidFeature.label),
+        suppressed: false,
+        inputs: meshToSolidInputs(`${ctx.featureId}:0` as BodyId, 'prismatic'),
+      };
+      commands.push(
+        insertFeature({
+          feature: session ? withActiveComponent(feature, session) : feature,
+          index: ctx.doc.timelineMarker + 1,
+        }),
+      );
+    }
+    return commands;
   },
+  // A cancelled dialog's session goes with it.
+  onCancel: () => setImportSession(undefined),
 });
 
 /** A file size as the dialog shows it: bytes, then kB and MB. */
