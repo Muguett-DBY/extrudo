@@ -2785,5 +2785,11 @@ sample points; shared faces dropped, then `UnifySameDomain`; verified by
 validity, sampled nodes within the tolerance and the volume within
 max(1 %, Σ area × chord error + tolerance × area). Measure a change with
 `bash spikes/stl-to-solid/run.sh prismatic` (the facade natively, float32
-nodes) before a CI build. The feature lives
+nodes) before a CI build. The one-step import path is done (2026-10-21): the
+Import dialog's `solid` toggle ("As solid", mesh files only, create mode
+only) appends the `meshToSolid` feature (Prismatic, default tolerance, at
+the import's index + 1) to the dialog's `commitWith` commands, so one undo
+step holds the attachment record, the `import` and the conversion; the
+toggle is a dialog value, never an input of `import` (its `toInputs` builds
+the inputs by hand and must keep no `solid` key). The feature lives
 on branch `claude/stl-import-native-solid-e60e8c` until one pull request.

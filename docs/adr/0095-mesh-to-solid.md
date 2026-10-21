@@ -234,9 +234,9 @@ brand tokens (`docs/05-brand.md`), with a legend line in the dialog.
 A tile "Mesh to Solid" at the end of Solid › Modify (with a tooltip clip,
 `pnpm demos`, ADR-0052), a "Convert to solid…" entry in the context menu of
 a body the browser tags "Mesh" (`data-body-mesh`), and the command in the
-palette. Later, not now: an "as solid" chip in the Import dialog that adds
-`import` and `meshToSolid` in one undo step through the dialog framework's
-`commitWith`.
+palette. Done (2026-10-21): the Import dialog's `solid` toggle ("As solid")
+adds `meshToSolid` (Prismatic, default tolerance) right after the import
+through `commitWith` — one undo step, mesh files only, create mode only.
 
 ### 7. After it
 
