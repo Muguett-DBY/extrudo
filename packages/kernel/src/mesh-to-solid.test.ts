@@ -6,7 +6,7 @@
 import { readStl, type TriangleMesh } from '@extrudo/io';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import cubeStl from '../../../fixtures/imports/cube.stl?url&inline';
-import { Kernel, KernelError, type ShapeHandle } from './kernel';
+import { Kernel, KernelError, type ShapeHandle, type SurfaceGeometry } from './kernel';
 import { loadManifold, type Manifold } from './manifold';
 import { loadOcct } from './occt/load';
 
@@ -194,6 +194,47 @@ function radii(shape: ShapeHandle): number[] {
 
 const sorted = (list: string[]) => [...list].sort();
 
+/** Every face's surface. */
+function surfaces(shape: ShapeHandle): SurfaceGeometry[] {
+  return Array.from({ length: kernel.count(shape, 'face') }, (_, i) =>
+    kernel.surfaceGeometry(shape, i),
+  );
+}
+
+/** `solid` with the edges whose sampled points all pass `pick` filleted by `radius` (the solid is released). */
+function filleted(
+  solid: ShapeHandle,
+  radius: number,
+  pick: (points: readonly (readonly number[])[], type: string) => boolean,
+): ShapeHandle {
+  const edges = Array.from({ length: kernel.count(solid, 'edge') }, (_, i) => i).filter((i) => {
+    const g = kernel.edgeGeometry(solid, i);
+    return pick(g.points, g.type);
+  });
+  const rounded = kernel.fillet(solid, edges, radius).shape;
+  kernel.release(solid);
+  return rounded;
+}
+
+/** A donut about Z: major radius 10, tube radius 3 (a revolved circle). */
+function donut(): ShapeHandle {
+  const { faces } = kernel.planarFaces(
+    [{ kind: 'arc', center: [10, 0], radius: 3, from: 0, sweep: 2 * Math.PI }],
+    { origin: [0, 0, 0], x: [1, 0, 0], normal: [0, -1, 0] },
+    1e-4,
+  );
+  const [disc, ...rest] = faces;
+  if (!disc) throw new Error('no face');
+  kernel.release(...rest.map((f) => f.shape));
+  const solid = kernel.revolve(
+    disc.shape,
+    { origin: [0, 0, 0], direction: [0, 0, 1] },
+    2 * Math.PI,
+  ).shape;
+  kernel.release(disc.shape);
+  return solid;
+}
+
 /** A 40 x 30 x 5 plate with a through hole of radius 3 at its centre. */
 function plate(): ShapeHandle {
   const box = kernel.box([40, 30, 5]);
@@ -312,13 +353,13 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
     });
   }
 
-  it('7: refuses an ellipsoid: one region fits no plane, cylinder, sphere or cone', () => {
+  it('7: refuses an ellipsoid: one region fits no plane, cylinder, sphere, cone or torus', () => {
     const sphere = manifold.Manifold.sphere(10, 48);
     const ellipsoid = sphere.scale([1, 1, 0.6]);
     sphere.delete();
     const { message } = refusal(meshOf(ellipsoid));
     expect(message).toBe(
-      "Mesh to Solid couldn't close the body: 1 region (100 % of the surface) fits no plane, cylinder, sphere or cone. Use Faceted, or simplify the mesh in your slicer.",
+      "Mesh to Solid couldn't close the body: 1 region (100 % of the surface) fits no plane, cylinder, sphere, cone or torus. Use Faceted, or simplify the mesh in your slicer.",
     );
   });
 
@@ -346,7 +387,7 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
     console.log(`prismatic: the noisy cylinder at 0.001 mm: ${message}`);
     const match = /Raise the tolerance to ([0-9.]+) mm, or use Faceted\.$/.exec(message);
     expect(message).toMatch(
-      /^Mesh to Solid couldn't close the body: 1 region \(\d+ % of the surface\) fits no plane, cylinder, sphere or cone\./,
+      /^Mesh to Solid couldn't close the body: 1 region \(\d+ % of the surface\) fits no plane, cylinder, sphere, cone or torus\./,
     );
     expect(match).not.toBeNull();
     // The sphere through two rings a diameter apart also nearly fits the side,
@@ -497,6 +538,110 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
       kernel.release(shape);
     }
   });
+
+  it('17: converts a donut into one torus face', () => {
+    const { shape, report } = prismatic(meshOfSolid(donut(), 0.01, 0.2));
+    try {
+      expect(kinds(shape)).toEqual(['torus']);
+      const torus = kernel.surfaceGeometry(shape, 0);
+      expect(Math.abs((torus.radius as number) - 10)).toBeLessThan(1e-6);
+      expect(Math.abs((torus.minorRadius as number) - 3)).toBeLessThan(1e-6);
+      const volume = kernel.properties(shape).volume;
+      expect(Math.abs(volume / (2 * Math.PI * Math.PI * 10 * 9) - 1)).toBeLessThan(0.005);
+      expect(report).toMatchObject({ faces: 1, tori: 1, unfit: { regions: 0 } });
+    } finally {
+      kernel.release(shape);
+    }
+  });
+
+  it('18: splits a box with four filleted top edges into planes and cylinders', () => {
+    // OCCT mitres the corners where two top fillets meet (no corner face),
+    // so the smooth ring is four cylinders.
+    const rounded = filleted(kernel.box([40, 30, 10]), 2, (points) =>
+      points.every((p) => Math.abs((p[2] as number) - 10) < 1e-6),
+    );
+    const exact = kernel.properties(rounded).volume;
+    const { shape, report } = prismatic(meshOfSolid(rounded, 0.01, 0.2));
+    try {
+      expect(sorted(kinds(shape))).toEqual(
+        sorted([...Array(6).fill('plane'), ...Array(4).fill('cylinder')]),
+      );
+      expect(Math.abs(kernel.properties(shape).volume / exact - 1)).toBeLessThan(1e-6);
+      expect(report).toMatchObject({ planes: 6, cylinders: 4, unfit: { regions: 0 } });
+    } finally {
+      kernel.release(shape);
+    }
+  });
+
+  it('19: rebuilds a cylinder with a filleted end: plane, cylinder, torus', () => {
+    const rounded = filleted(
+      kernel.cylinder(5, 20),
+      2,
+      (points, type) =>
+        type === 'circle' && points.every((p) => Math.abs((p[2] as number) - 20) < 1e-6),
+    );
+    const exact = kernel.properties(rounded).volume;
+    const { shape } = prismatic(meshOfSolid(rounded, 0.01, 0.2));
+    try {
+      const geoms = surfaces(shape);
+      expect(sorted(geoms.map((g) => g.type))).toEqual(['cylinder', 'plane', 'plane', 'torus']);
+      const cylinder = geoms.find((g) => g.type === 'cylinder') as SurfaceGeometry;
+      const torus = geoms.find((g) => g.type === 'torus') as SurfaceGeometry;
+      expect(Math.abs((torus.origin?.[0] ?? 1) - (cylinder.origin?.[0] ?? 0))).toBeLessThan(1e-9);
+      expect(Math.abs((torus.origin?.[1] ?? 1) - (cylinder.origin?.[1] ?? 0))).toBeLessThan(1e-9);
+      expect(Math.abs((torus.radius as number) - 3)).toBeLessThan(1e-3);
+      expect(Math.abs((torus.minorRadius as number) - 2)).toBeLessThan(1e-3);
+      expect(Math.abs(kernel.properties(shape).volume / exact - 1)).toBeLessThan(0.001);
+    } finally {
+      kernel.release(shape);
+    }
+  });
+
+  it("20: rebuilds a plate whose hole is filleted: the torus takes the hole's axis", () => {
+    const rounded = filleted(
+      plate(),
+      1,
+      (points, type) =>
+        type === 'circle' && points.every((p) => Math.abs((p[2] as number) - 5) < 1e-6),
+    );
+    const exact = kernel.properties(rounded).volume;
+    const { shape } = prismatic(meshOfSolid(rounded, 0.01, 0.2));
+    try {
+      const geoms = surfaces(shape);
+      expect(sorted(geoms.map((g) => g.type))).toEqual(
+        sorted([...Array(6).fill('plane'), 'cylinder', 'torus']),
+      );
+      const torus = geoms.find((g) => g.type === 'torus') as SurfaceGeometry;
+      expect(Math.abs((torus.origin?.[0] ?? 0) - 20)).toBeLessThan(1e-6);
+      expect(Math.abs((torus.origin?.[1] ?? 0) - 15)).toBeLessThan(1e-6);
+      expect(Math.abs((torus.radius as number) - 4)).toBeLessThan(1e-3);
+      expect(Math.abs((torus.minorRadius as number) - 1)).toBeLessThan(1e-3);
+      expect(Math.abs(kernel.properties(shape).volume / exact - 1)).toBeLessThan(0.001);
+    } finally {
+      kernel.release(shape);
+    }
+  });
+
+  it('21: splits a box with all twelve edges filleted', () => {
+    const box = kernel.box([20, 20, 20]);
+    const rounded = filleted(box, 2, () => true);
+    const exact = kernel.properties(rounded).volume;
+    const { shape, report } = prismatic(meshOfSolid(rounded, 0.01, 0.2));
+    try {
+      expect(kernel.count(shape, 'face')).toBe(26);
+      expect(sorted(kinds(shape))).toEqual(
+        sorted([
+          ...Array(6).fill('plane'),
+          ...Array(12).fill('cylinder'),
+          ...Array(8).fill('sphere'),
+        ]),
+      );
+      expect(Math.abs(kernel.properties(shape).volume / exact - 1)).toBeLessThan(1e-6);
+      expect(report).toMatchObject({ planes: 6, cylinders: 12, spheres: 8, unfit: { regions: 0 } });
+    } finally {
+      kernel.release(shape);
+    }
+  });
 });
 
 describe('Kernel.meshRegions', { timeout: 300_000 }, () => {
@@ -558,6 +703,23 @@ describe('Kernel.meshRegions', { timeout: 300_000 }, () => {
     expect(regions.spheres).toBe(1);
     expect(regions.cones).toBe(0);
     expect(regions.unfit.regions).toBe(0);
+  });
+
+  it('puts a donut on one torus surface', () => {
+    const regions = regionsOf(meshOfSolid(donut(), 0.01, 0.2));
+    expect(Array.from(regions.kinds)).toEqual([4]);
+    expect(regions.tori).toBe(1);
+    expect(regions.unfit.regions).toBe(0);
+  });
+
+  it("splits the filleted box's ring into cylinders and spheres", () => {
+    const rounded = filleted(kernel.box([20, 20, 20]), 2, () => true);
+    const regions = regionsOf(meshOfSolid(rounded, 0.01, 0.2));
+    const kinds = Array.from(regions.kinds);
+    expect(kinds).toContain(1);
+    expect(kinds).toContain(3);
+    expect(kinds).not.toContain(-1);
+    expect(regions).toMatchObject({ planes: 6, cylinders: 12, spheres: 8 });
   });
 
   it('suggests a tolerance for the noisy 32-gon at 0.001 mm', () => {
