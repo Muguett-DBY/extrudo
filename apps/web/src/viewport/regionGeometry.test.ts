@@ -1,5 +1,5 @@
-import { describe, expect, it } from 'vitest';
 import type { BodyMesh } from '@extrudo/kernel';
+import { describe, expect, it } from 'vitest';
 import { type RegionPalette, regionGeometry } from './regionGeometry';
 
 const palette: RegionPalette = { plane: [0, 1, 0], curved: [0, 0, 1], unfit: [1, 0, 0] };

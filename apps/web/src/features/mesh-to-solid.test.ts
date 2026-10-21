@@ -2,8 +2,8 @@ import {
   type FeatureId,
   MeshToSolidInputsSchema,
   type MeshToSolidReport,
-  meshSurfaceSummary as surfaceSummary,
   meshToSolidSettings,
+  meshSurfaceSummary as surfaceSummary,
 } from '@extrudo/core';
 import type { MeshRegions, Preview } from '@extrudo/kernel';
 import { describe, expect, it } from 'vitest';
