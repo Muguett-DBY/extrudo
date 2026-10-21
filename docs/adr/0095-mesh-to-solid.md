@@ -207,7 +207,7 @@ WASM, this machine) the 20,124-triangle plate converts in 248 ms, the
 | 32-gon, nodes ±0.005 mm, tolerance 0.001 / 0.02 | 124 | refused, "Raise the tolerance to 0.003 mm" (slice 4a1: was 0.006) / 2 planes + cylinder | 0.1 / 8 |
 | L-bracket | 20 | 8 planes, exact | 16 |
 | box, 4 vertical edges r 3, fine / 8 segments | 1,020 / 268 | 6 planes + 4 cylinders, ±3e-5 % | 279 / 102 |
-| box, 4 top edges r 2 (spherical corners) | 196 | refused, 1 region (11 %): the corners are the next slice's (one smooth cluster of four cylinders and four spheres) | 0.2 |
+| box, 4 top edges r 2 | 196 | refused, 1 region (11 %): one smooth cluster of four cylinders (slice 4a2: converts, 6 planes + 4 cylinders, +7e-7 %; OCCT mitres the corners, no sphere) | 0.2 |
 | plate, 12-gon hole / slot / boss | 116 / 528 / 516 | 7 / 10 / 8 faces, ±3e-7 % | 21 / 280 / 33 |
 | tube r 10 / r 6 | 1,008 | 2 planes + 2 cylinders | 48 |
 
@@ -292,11 +292,126 @@ Measured, native (ms under node; the same matrix passes in Vitest):
 | dome (cylinder + hemisphere), fine / coarse | 5,472 / 254 | 1 plane + 1 cylinder + 1 sphere, sphere r = cylinder r (±1e-11), ±3e-6 % | 435 / 25 |
 | truncated cone r 10 → 4, h 20 | 1,600 | 2 planes + 1 cone, half-angle 16.716° (atan(6/20) is 16.699°), +0.025 % | 81 |
 | countersunk plate (box, hole r 3, sink r 6 → 3) | 754 | 6 planes + 1 cylinder + 1 cone, −7e-4 % | 120 |
-| pointed cone r 10, h 20 | 1,476 | refused at the rebuild (MakerVolume can't do the OCCT cone's singular apex; manifold's mesh of the same cone converts to a plane + a cone) | 61 |
+| pointed cone r 10, h 20 | 1,476 | refused at the rebuild (MakerVolume can't do the OCCT cone's singular apex; manifold's mesh of the same cone converts to a plane + a cone; slice 4a2: converts, 1 plane + 1 cone, +2e-6 %) | 61 |
 | ellipsoid (sphere × 0.6 in z) | 2,208 | refused, 1 region (100 %) | 1 |
 
 The plain sphere and the 499k-triangle sphere, refused in slice 3's table,
 now convert to one sphere face (the table above notes the change).
+
+#### Amendment, 2026-10-21: tori and split clusters (slice 4a2)
+
+The last primitive and the split of a smooth cluster that fits nothing
+whole, measured natively (`bash spikes/stl-to-solid/run.sh prismatic t`, then
+the full matrix) and in Vitest.
+
+- **The torus fit** (`fitMeshTorus`, kind 4, after the sphere: the order is
+  plane → cylinder → cone → sphere → torus). Every normal line of a torus
+  meets its spine circle, so for the signed tube radius ρ the points
+  `centroid_t − ρ n_t` lie on one circle and are coplanar (ρ > 0 when the
+  normals point away from the spine: a donut, a fillet on an outside edge
+  or on a hole's edge; ρ < 0 on the concave side). ρ minimises `f(ρ)`, the
+  smallest eigenvalue over the trace of those points' area-weighted
+  covariance (`Sgg − ρ (Sgn + Sng) + ρ² Snn` from moments taken once, so
+  each `f` is a 3 × 3 eigenproblem), over `±[tolerance, D]` (D the bounding
+  box diagonal): 32 geometric samples a side, golden section between the
+  best one's neighbours (40 iterations), refused above 1e-3. The axis is that
+  covariance's smallest eigenvector; the spine an area-weighted algebraic
+  (Kåsa) circle fit in its plane (`solve3`); the tube radius the nodes' mean
+  distance from the spine; then Gauss–Newton on all seven parameters (centre,
+  two tilts of the axis, R, r) over `sqrt((ρ_i − R)² + h_i²) − r`, a
+  central-difference Jacobian, `solveN` (Gaussian elimination, partial
+  pivoting, n ≤ 8), up to 12 iterations, the step halved while the residual
+  sum grows. The axis is oriented with its largest component positive. The
+  chord error is `(R + r)(1 − cos(θ/2))`. The donut R 10 r 3 fits to 1e-8
+  fine and coarse.
+- **The split** (`splitComponent`). `settle` sends an unfit result of 4 or
+  more regions to it; each piece it returns is settled by the old rule (unfit
+  under 4 regions → planes). Seeds go by area, largest first. **A large seed
+  (4 × the component's median region area) is a plane** at once (the flat
+  face between fillets); else its **patch** adds the unassigned smooth
+  neighbour sharing the **longest border** with it (region border lengths are
+  kept beside `regionNeighbours`), one at a time, until it has 16 nodes, and
+  `bestFit` (the five fits in order, factored out of `fitComponent`) tries
+  it, dropping the last region added while 16 nodes are left; a seed whose
+  patch fits nothing is skipped and may join a later piece. A piece grows in
+  rounds: every frontier region whose every node is within the tolerance of
+  the surface (`distanceToSurface`) joins, the same kind is refitted over the
+  piece (`fitOfKind`), and a refit outside the tolerance undoes the round.
+  Then a region on a border goes to the neighbouring piece whose surface is
+  nearer its nodes, and the pieces that changed are refitted. What no piece
+  took becomes unfit pieces, one per smooth component — and **when one of
+  them has 4 regions or more, the split is dropped and the component stays
+  one unfit region**: a freeform surface fits small primitives here and there.
+  The first version (no such rule, no 16-node floor) split the ellipsoid into
+  299 pieces (256 cylinders, 37 spheres, 6 planes) and the rebuild took 273 s
+  to refuse; now the ellipsoid is refused in 42 ms as 1 region (100 %), as
+  before.
+- **What changed from the brief, and why.** (1) *Patches by border, not by
+  breadth-first layers, and no prefix under 16 nodes.* A fillet strip's
+  first layer holds the corner sphere's facets at its two ends, so every layer
+  mixed two kinds and fell back to the seed alone; and a patch of two strips
+  fits a cylinder exactly (six nodes), so with prefixes under 16 nodes a big
+  plane plus one strip "fitted" a cylinder (the twelve-fillet box came out
+  with no plane at all). (2) *A large seed is a plane* at once, instead of
+  `planeOf` after a failed patch (the same 4 × median rule as the peel): a
+  16-node patch of the box's top face and its first strips still fitted a
+  sphere of r 72. (3) *A plane's fit is the
+  largest region's own plane* when it holds every node, else the facets'
+  area-weighted plane, else least squares: a disc whose edge took a fillet's
+  near-tangent facets tilted by 6e-5 rad under least squares, and the torus
+  next to it no longer touched it (MakerVolume kept no cell). (4) *Own-node
+  refits*: after the clusters, each curved surface is refitted (up to 4
+  passes) without the nodes that are off it by more than twice its median node
+  and much nearer a neighbouring surface: a fillet strip's planar region can
+  carry the end of a corner sphere's facets (within 1° and the tolerance),
+  and those few nodes put the box's cylinders at r 2.00055, off their axes by
+  1e-3; after the passes r is 2 to 1e-6. (5) *One rolling radius*: in the
+  rebuild, adjacent cylinders, spheres and tori whose radii (a torus's tube)
+  agree within the tolerance take their area-weighted mean, before the snaps,
+  so fillets meeting at a corner are exactly tangent. (6) *Trimmed curved
+  faces*: a cylinder's u, a sphere's latitude and longitude (its frame's Z is
+  the mean outward normal) and a torus's tube angle v cover the nodes' range
+  past their largest gap, grown by the margin; the full turn when that gap is
+  under twice the margin **plus twice the facet angle** (the brief's
+  `2 margin / r` alone left the donut's tube an open band, fine and coarse:
+  MakerVolume failed). With full spheres and full cylinders the twelve-fillet
+  box gave 53 cells and a unified result of 58 faces, or an invalid one once
+  its radii were exact; trimmed, 1 cell and 26 faces. (7) The verification
+  moves a curved face's u (and a torus's v) by whole turns into the face's
+  own range before classifying a node in it (`ElSLib` gives [0, 2π); a node
+  the face misses falls back to `BRepExtrema`, slow), and the cell
+  classification tries the last cell hit first.
+- **Snaps** (after the sphere and cone snaps). A torus next to a cylinder
+  within 1° takes the cylinder's axis line (centre projected onto it) and, when
+  `|R + r − r_cyl|` or `|R − r − r_cyl|` is within 10 × the tolerance,
+  `R = r_cyl − r` (a cylinder's end) or `R = r_cyl + r` (a hole's edge); else
+  next to a plane it is square to, `±n`. Either way a plane square to it whose
+  distance from the spine plane is within 10 × the tolerance of r moves the
+  centre along the axis to make it exactly r (the brief gated nothing; an
+  ungated move would drag a torus onto a plane it only crosses).
+- **The face and the report.** `gp_Torus(gp_Ax3(centre, axis), R, r)`, u the
+  full turn, v as above; the verification reads `GeomAbs_Torus` (kind 4,
+  `ElSLib` on `gp_Torus`); tori count into the report's slot 5 and the
+  surface cap; the unfit message says "fits no plane, cylinder, sphere, cone
+  or torus".
+
+Measured, native (ms under node, this machine):
+
+| Mesh | Triangles | Result | ms |
+|---|---|---|---|
+| donut R 10 r 3, fine / coarse | 14,364 / 1,352 | 1 torus face, R and r ±1e-8, −6e-7 % / +4e-7 % | 381 / 66 |
+| box 40 × 30 × 10, 4 top edges r 2 | 196 | 6 planes + 4 cylinders (OCCT mitres the corners: no sphere), +7e-7 % | 113 |
+| cylinder r 5 h 20, top edge r 2 | 3,436 | 2 planes + 1 cylinder + 1 torus R 3 r 2 on the axis, +3e-7 % | 246 |
+| plate, hole r 3, top edge r 1 | 2,284 | 6 planes + 1 cylinder + 1 torus R 4 r 1 on the hole's axis, −8e-8 % | 236 |
+| box 20³, all 12 edges r 2 | 2,796 | 6 planes + 12 cylinders + 8 spheres (26 faces), −9e-7 % | 1,490 |
+| ellipsoid (sphere × 0.6 in z) | 2,208 | refused, 1 region (100 %) | 45 |
+
+The full matrix keeps every result but three rows, all for the better: the
+box with four top fillets (slice 3's table) converts; the OCCT pointed cone
+(slice 4a1's table) converts to 1 plane + 1 cone, +2e-6 %; the truncated cone
+fits 16.69995° (atan(6/20) is 16.6992°; was 16.716°), +0.0014 % (was
++0.025 %). Refusals cost the split's attempts: the noisy 32-gon at 0.001 mm
+21 ms (was 0.1), the ellipsoid 42 ms (was 1.3).
 
 ### 4. The report
 

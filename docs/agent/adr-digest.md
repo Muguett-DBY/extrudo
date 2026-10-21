@@ -2759,7 +2759,7 @@ the facade through its `meshNodes`/`meshTriangles` buffers written in place
 `{ shape, report }`; the facade's `meshToSolid(method, tolerance)` does
 `BRepBuilderAPI_MakeShapeOnMesh` → shell → `MakeSolid` + `ShapeFix_Solid` →
 `UnifySameDomain` (1e-3) → `ShapeFix_Shape` only when invalid, for `faceted`,
-and segmentation + plane/cylinder/cone/sphere fits + `BOPAlgo_MakerVolume` +
+and segmentation + plane/cylinder/cone/sphere/torus fits + `BOPAlgo_MakerVolume` +
 verification for `prismatic`. **Rules:** never fall back from one method to
 the other (the user's choice runs or is refused); refuse faceted above
 `FACETED_FACE_CAP` (2,000 faces after unify, counted before the heavy fix)
@@ -2778,21 +2778,41 @@ clusters (normals under 30°) fit whole as one plane or cylinder, else their
 regions of 4 × the median area or more become planes and the rest is
 refitted (the fine-tessellation rule; fewer than 4 leftover regions stay
 planes); a smooth cluster fits in the order **plane → cylinder → cone →
-sphere** (`fitMeshCone`/`fitMeshSphere`, kinds 0/1/2/3; the cone first, since
-a two-ring frustum's nodes also lie on a sphere) and the peel groups the
+sphere → torus** (`bestFit`; kinds 0/1/2/3/4; the cone before the sphere,
+since a two-ring frustum's nodes also lie on a sphere; `fitMeshTorus` finds
+the spine from the normals) and the peel groups the
 large regions into smooth components too (a dome's coarser cylinder next to a
-finer sphere isn't taken as 64 planes); cylinders are **snapped** to tangent
-and square planes, a sphere to the cylinders it shares a radius with (the
-point on their axes) and a cone to its cylinder's or end plane's axis, before
+finer sphere isn't taken as 64 planes). **The split** (slice 4a2,
+`splitComponent`): an unfit component of ≥ 4 regions is grown into pieces
+from its largest region (a large one, 4 × the median area, is a plane; else
+a patch by longest shared border to 16 nodes, never fitted below 16 nodes
+unless that is all there is; growth by rounds of neighbours whose every node
+is within the tolerance, refitting the same kind), border regions then go to
+the nearer piece; a leftover unfit piece under 4 regions is planes, and one
+of 4 or more drops the split (the component stays one unfit region: the
+ellipsoid must stay refused). A plane's fit is the largest region's own plane
+first (near-tangent fillet facets tilt any other); after the clusters each
+curved surface is refitted without the stray nodes a neighbour explains
+(fillet networks must come out exactly tangent). Cylinders are **snapped** to tangent
+and square planes, adjacent cylinders/spheres/tori with radii (a torus's
+tube) within the tolerance first share one radius, a sphere goes to the
+cylinders it shares a radius with (the point on their axes), a cone to its
+cylinder's or end plane's axis, and a torus to its cylinder's axis
+(`R = r_cyl ∓ r` when within 10 × tolerance) or a square plane's normal, its
+spine plane exactly r from a plane it touches, before
 the faces are made (MakerVolume fails on nearly tangent faces without it; no
-sewing path); faces grow by 10 × tolerance + twice the largest chord error;
+sewing path); faces grow by 10 × tolerance + twice the largest chord error,
+and a curved face covers only its nodes' angular range past their largest
+gap (cylinder u, sphere latitude/longitude, torus v; the full turn when the
+gap is under twice the margin plus twice the facet angle: full spheres and
+tubes meet their neighbours along whole tangent circles);
 MakerVolume with `SetAvoidInternalShapes`; cells kept by inside/outside
 sample points; shared faces dropped, then `UnifySameDomain`; verified by
-validity, sampled nodes within the tolerance (planes, cylinders, cones and
-spheres alike) and the volume within
+validity, sampled nodes within the tolerance (all five kinds alike, a face's
+angles moved into its own range) and the volume within
 max(1 %, 2 × Σ area × chord error + tolerance × area) (the sagitta sum is
 doubled: an inscribed mesh's deficit is up to ~1.5 × it). The dialog legend says
-**Curved** for every non-planar kind (kinds 1–3 draw in one colour). Measure a
+**Curved** for every non-planar kind (kinds 1–4 draw in one colour). Measure a
 change with `bash spikes/stl-to-solid/run.sh prismatic` (the facade natively,
 float32 nodes) before a CI build. The one-step import path is done (2026-10-21): the
 Import dialog's `solid` toggle ("As solid", mesh files only, create mode
