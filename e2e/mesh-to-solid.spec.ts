@@ -49,7 +49,7 @@ function sphereStl(scaleZ = 1): Buffer {
     }
   }
   positions.push(0, 0, r);
-  for (let i = 2; i < positions.length; i += 3) positions[i] *= scaleZ;
+  for (let i = 2; i < positions.length; i += 3) positions[i] = (positions[i] ?? 0) * scaleZ;
   const top = positions.length / 3 - 1;
   const at = (j: number, i: number) => 1 + (j - 1) * segments + (i % segments);
   const indices: number[] = [];
