@@ -1,3 +1,4 @@
+import type { MeshToSolidReport } from '@extrudo/core';
 import { checkManifold, splitNonManifoldEdges, type TriangleMesh } from '@extrudo/io';
 import { decodeHistory, type HistoryRecord, type SubShapeKind } from './history';
 import type { Manifold, ManifoldToplevel, Mat4 } from './manifold';
@@ -126,17 +127,24 @@ export interface MeshToSolidOptions {
   tolerance: number;
 }
 
-/** What Mesh to Solid made (ADR-0095 §4). */
-export interface MeshToSolidReport {
-  method: 'faceted' | 'prismatic';
-  faces: number;
+/** What Mesh to Solid made (ADR-0095 §4); the type lives in core, which has no WASM. */
+export type { MeshToSolidReport };
+
+/**
+ * Mesh to Solid's region preview (ADR-0095 §5): prismatic's segmentation of a
+ * mesh body, no solid. `surfaceOf[t]` is the surface of triangle `t` in the
+ * body's `Manifold.getMesh()` order (so of `BodyMesh.indices` / 3), `kinds[s]`
+ * that surface's kind (core's `MESH_REGION_KIND`). The counts are the report's.
+ */
+export interface MeshRegions {
+  surfaceOf: Int32Array;
+  kinds: Int32Array;
   planes: number;
   cylinders: number;
   cones: number;
   spheres: number;
   tori: number;
   unfit: { regions: number; triangles: number; fraction: number };
-  /** The tolerance that would have fitted the largest unfit region, when there is one. */
   suggestedTolerance?: number;
 }
 
@@ -1865,6 +1873,37 @@ export class Kernel {
    * untouched; the caller owns the returned shape.
    */
   meshToSolid(shape: ShapeHandle, options: MeshToSolidOptions): MeshToSolidResult {
+    this.#stageMesh(shape);
+    const f = this.#facade;
+    const handle = this.#check(
+      f.meshToSolid(options.method === 'faceted' ? 0 : 1, options.tolerance),
+    );
+    return { shape: handle, report: { method: options.method, ...this.#meshReport() } };
+  }
+
+  /**
+   * Mesh to Solid's region preview (ADR-0095 §5): prismatic's segmentation
+   * and fits of a mesh body within `tolerance` (mm), no solid built. The same
+   * code as `meshToSolid`'s prismatic method, so the two always agree.
+   */
+  meshRegions(shape: ShapeHandle, tolerance: number): MeshRegions {
+    this.#stageMesh(shape);
+    const f = this.#facade;
+    if (!f.meshRegions(tolerance)) throw new KernelError(f.lastError());
+    try {
+      const { faces: _faces, ...counts } = this.#meshReport();
+      return {
+        surfaceOf: this.#copy(Int32Array, f.meshRegionsPtr(), f.meshRegionTriangles()),
+        kinds: this.#copy(Int32Array, f.meshRegionKindsPtr(), f.meshRegionCount()),
+        ...counts,
+      };
+    } finally {
+      f.clearMeshRegions();
+    }
+  }
+
+  /** Writes a mesh body's welded triangles into the facade's mesh buffers (ADR-0095 §3). */
+  #stageMesh(shape: ShapeHandle): void {
     if (!this.isMesh(shape)) {
       throw new KernelError('Mesh to Solid needs a mesh body: this body is already a solid.');
     }
@@ -1892,24 +1931,23 @@ export class Kernel {
       f.meshTrianglesPtr(),
       3 * triangles,
     ).set(gl.triVerts);
-    const handle = this.#check(
-      f.meshToSolid(options.method === 'faceted' ? 0 : 1, options.tolerance),
-    );
+  }
+
+  /** The facade's Mesh to Solid report (10 doubles), without the method. */
+  #meshReport(): Omit<MeshToSolidReport, 'method'> {
+    const f = this.#facade;
     const r = this.#copy(Float64Array, f.meshReportPtr(), f.meshReportSize());
     const at = (i: number) => r[i] as number;
     return {
-      shape: handle,
-      report: {
-        method: options.method,
-        faces: at(0),
-        planes: at(1),
-        cylinders: at(2),
-        cones: at(3),
-        spheres: at(4),
-        tori: at(5),
-        unfit: { regions: at(6), triangles: at(7), fraction: at(8) },
-        ...(at(9) >= 0 ? { suggestedTolerance: at(9) } : {}),
-      },
+      faces: at(0),
+      planes: at(1),
+      cylinders: at(2),
+      cones: at(3),
+      spheres: at(4),
+      tori: at(5),
+      // An area share: the sums' rounding can put a whole mesh a hair over 1.
+      unfit: { regions: at(6), triangles: at(7), fraction: Math.min(1, at(8)) },
+      ...(at(9) >= 0 ? { suggestedTolerance: at(9) } : {}),
     };
   }
 

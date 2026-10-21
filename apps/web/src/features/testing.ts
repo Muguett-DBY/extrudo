@@ -16,7 +16,7 @@ import {
   FeatureRegistry,
   type GeomRef,
 } from '@extrudo/core';
-import type { BodyMesh, Preview, PreviewToolStyle } from '@extrudo/kernel';
+import type { BodyMesh, MeshRegions, Preview, PreviewToolStyle } from '@extrudo/kernel';
 import { edgeName } from '@extrudo/kernel';
 import type { ToastOptions } from '../design-system';
 import { boxMesh } from '../selection/testing';
@@ -186,6 +186,13 @@ export interface FakeKernel extends DialogKernel {
   }[];
   /** Whether each `reference` call asked for the preview's base. */
   references: boolean[];
+  /** Each region preview asked for (ADR-0095 §5), to answer. */
+  regions: {
+    body: BodyId;
+    tolerance: number;
+    base: boolean;
+    resolve(regions: MeshRegions | undefined): void;
+  }[];
   ended: number;
 }
 
@@ -193,6 +200,7 @@ export function fakeKernel(): FakeKernel {
   const kernel: FakeKernel = {
     previews: [],
     references: [],
+    regions: [],
     ended: 0,
     preview: (draft, index, options) =>
       new Promise((resolve) =>
@@ -207,6 +215,10 @@ export function fakeKernel(): FakeKernel {
       const id = ids[index];
       return id ? { kind, id, fingerprint: { type: 'plane', at: [index, 0, 0] } } : undefined;
     },
+    meshRegions: (body, tolerance, base) =>
+      new Promise((resolve) =>
+        kernel.regions.push({ body, tolerance, base: base === true, resolve }),
+      ),
   };
   return kernel;
 }

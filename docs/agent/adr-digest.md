@@ -2791,5 +2791,21 @@ only) appends the `meshToSolid` feature (Prismatic, default tolerance, at
 the import's index + 1) to the dialog's `commitWith` commands, so one undo
 step holds the attachment record, the `import` and the conversion; the
 toggle is a dialog value, never an input of `import` (its `toInputs` builds
-the inputs by hand and must keep no `solid` key). The feature lives
+the inputs by hand and must keep no `solid` key).
+**Preview and report** (2026-10-22 amendment):
+the segmentation is one private `segmentMesh` shared by `prismaticFromMesh`
+and `meshRegions` (change it in one place; the preview and the conversion
+must agree), whose per-triangle surface index and per-surface kind (0 plane,
+1 cylinder, 2–4 cone/sphere/torus, −1 unfit; core's `MESH_REGION_KIND`) map
+onto the view's `BodyMesh.indices` / 3 (both come from `Manifold.getMesh()`;
+stage through `Kernel.#stageMesh`, never another order). The report sits on
+`FeatureStatus.meshToSolid` (without `kind`; `sameStatuses` compares it) and
+in `Preview.meshToSolid` / `DialogContext.draftMeshToSolid`; the chip's
+tooltip and `get_feature` show it. The dialog's region preview is the
+generic `FeatureDialogSpec.regions` hook (no feature code in `dialog.ts`):
+asked before the preview, late answers dropped, cleared for faceted and on
+close, edit mode waits for the base. While regions exist the view draws the
+body's de-indexed coloured copy (`regionGeometry`) **in place of** its faces
+and of the drawing, coloured from the tokens (`--x-cat-create` planes,
+`--x-cat-sketch` curved, `--x-error` unfit), never literals. The feature lives
 on branch `claude/stl-import-native-solid-e60e8c` until one pull request.

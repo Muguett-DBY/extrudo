@@ -78,6 +78,7 @@ export {
   MeshBodyError,
   MeshError,
   type MeshProblem,
+  type MeshRegions,
   type MeshToSolidOptions,
   type MeshToSolidReport,
   type MeshToSolidResult,

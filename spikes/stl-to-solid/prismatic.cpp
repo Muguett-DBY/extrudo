@@ -1,6 +1,7 @@
 // Mesh to Solid, prismatic (ADR-0095 §3, slice 3): the facade's own
 // meshToSolid(1, tolerance) on the test matrix of the slice, natively in the
-// pinned OCCT image. run.sh copies the facade with its private members made
+// pinned OCCT image; case r runs meshRegions (the region preview, slice 4).
+// run.sh copies the facade with its private members made
 // public into build/facade_public.cpp, which this file includes.
 #include "build/facade_public.cpp"
 
@@ -163,6 +164,38 @@ static int run(ExtrudoFacade& f, const char* name, const Mesh& m, double toleran
   return h;
 }
 
+/** Runs meshRegions on `m` (the region preview, no solid); prints its surfaces by kind, the report and the time. */
+static void regions(ExtrudoFacade& f, const char* name, const Mesh& m, double tolerance) {
+  const double t0 = now();
+  f.meshNodes(int(m.nodes.size() / 3));
+  double* nodes = reinterpret_cast<double*>(f.meshNodesPtr());
+  for (size_t i = 0; i < m.nodes.size(); ++i) nodes[i] = static_cast<float>(m.nodes[i]);
+  f.meshTriangles(int(m.triangles.size() / 3));
+  std::memcpy(reinterpret_cast<void*>(f.meshTrianglesPtr()), m.triangles.data(), m.triangles.size() * sizeof(uint32_t));
+  const int ok = f.meshRegions(tolerance);
+  const double ms = now() - t0;
+  std::cout << "== regions " << name << " (" << m.triangles.size() / 3 << " triangles, tol " << tolerance << "): " << ms << " ms\n";
+  if (!ok) {
+    std::cout << "   failed: " << f.lastError() << "\n";
+    ++failures;
+    return;
+  }
+  std::map<int, int> byKind;
+  const int32_t* kinds = reinterpret_cast<const int32_t*>(f.meshRegionKindsPtr());
+  for (int s = 0; s < f.meshRegionCount(); ++s) byKind[kinds[s]]++;
+  const int32_t* of = reinterpret_cast<const int32_t*>(f.meshRegionsPtr());
+  int unassigned = 0;
+  for (int t = 0; t < f.meshRegionTriangles(); ++t) unassigned += of[t] < 0 || of[t] >= f.meshRegionCount();
+  std::cout << "   " << f.meshRegionCount() << " surfaces:";
+  for (auto& [k, n] : byKind) std::cout << " " << n << (k == 0 ? " plane" : k == 1 ? " cylinder" : k < 0 ? " unfit" : " other");
+  std::cout << "; " << f.meshRegionTriangles() << " triangles mapped, " << unassigned << " unassigned\n";
+  const auto& r = f.meshReport_;
+  std::cout << "   report: planes " << r[1] << ", cylinders " << r[2] << ", unfit " << r[6] << " regions / " << r[7]
+            << " triangles / " << r[8] << ", suggested " << r[9] << "\n";
+  if (unassigned) ++failures;
+  f.clearMeshRegions();
+}
+
 static double noise32(int ring, int i) { return 0.005 * (ring == 0 ? std::sin(1.7 * i + 0.3) : std::cos(2.3 * i + 0.1)); }
 
 int main(int argc, char** argv) {
@@ -250,6 +283,37 @@ int main(int argc, char** argv) {
   }
   if (want("11")) {
     int h = run(f, "11b sphere, 500k triangles", sphere(10, 500, 500), 0.01);
+    if (h) f.release(h);
+  }
+  if (want("r")) {
+    // The region preview (meshRegions, slice 4): the plate, the spheres, the noisy 32-gon.
+    TopoDS_Shape box = BRepPrimAPI_MakeBox(40, 30, 5).Shape();
+    TopoDS_Shape drill = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(20, 15, -1), gp_Dir(0, 0, 1)), 3, 7).Shape();
+    TopoDS_Shape plate = BRepAlgoAPI_Cut(box, drill).Shape();
+    regions(f, "cube.stl", stlFile("/repo/fixtures/imports/cube.stl"), 0.01);
+    regions(f, "plate with hole, ~20k triangles", meshOf(plate, 0.0002, 0.01), 0.01);
+    regions(f, "noisy 32-gon, tol 0.001", cylinder(5, 20, 32, noise32), 0.001);
+    regions(f, "sphere r10", sphere(10, 24, 48), 0.01);
+    regions(f, "sphere, 500k triangles", sphere(10, 500, 500), 0.01);
+    int h = run(f, "r sphere, 500k triangles (the conversion, for comparison)", sphere(10, 500, 500), 0.01);
+    if (h) f.release(h);
+    h = run(f, "r plate, ~20k triangles (the conversion, for comparison)", meshOf(plate, 0.0002, 0.01), 0.01);
+    if (h) f.release(h);
+    // A 302-surface staircase (149 steps): the regions, then the full rebuild.
+    BRepBuilderAPI_MakePolygon polygon;
+    const int steps = 149;
+    polygon.Add(gp_Pnt(0, 0, 0));
+    polygon.Add(gp_Pnt(steps, 0, 0));
+    for (int i = 0; i < steps; ++i) {
+      polygon.Add(gp_Pnt(steps - i, i + 1, 0));
+      polygon.Add(gp_Pnt(steps - i - 1, i + 1, 0));
+    }
+    polygon.Close();
+    TopoDS_Face face = BRepBuilderAPI_MakeFace(polygon.Wire()).Face();
+    TopoDS_Shape stairs = BRepPrimAPI_MakePrism(face, gp_Vec(0, 0, 5)).Shape();
+    const Mesh stairMesh = meshOf(stairs, 0.1, 0.5);
+    regions(f, "staircase, 302 surfaces", stairMesh, 0.01);
+    h = run(f, "r staircase, 302 surfaces (the conversion)", stairMesh, 0.01);
     if (h) f.release(h);
   }
   if (want("x")) {

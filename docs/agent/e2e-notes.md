@@ -1058,6 +1058,31 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
   one undo step, `Control+Shift+z` brings both back. The spec is now **12
   tests, 41.6 s**.
 
+### `e2e/mesh-to-solid.spec.ts`
+
+- **Mesh to Solid region preview e2e** (`e2e/mesh-to-solid.spec.ts`, P4-13
+  slice 4b, ADR-0095's 2026-10-22 amendment): its own helpers (it doesn't
+  touch `import-mesh.spec.ts`): Home › Import Model through the file chooser
+  (a path, or `{ name, mimeType, buffer }` for the sphere), OK once the
+  Import dialog's `data-preview-status="ok"`, then the body row's right-click
+  menu → "Convert to Solid…" opens the region "Mesh to Solid dialog". The
+  dialog region carries **`data-regions="6 planes, 0 cylinders, 0 unfit"`**
+  while a region preview is shown (absent for Faceted); the Result line is
+  `[data-info="summary"]` ("6 planes · 0 unfit", "1 unfit", "6 faces" for
+  Faceted once its preview is back) with its swatches in
+  `[data-legend="summary"]` (Prismatic only); the viewport carries
+  **`data-preview-regions="<body id>"`** while the view colours the body.
+  Method is a native select: `selectOption('faceted')`. The sphere is a UV
+  sphere written in the test with `writeStl` (12 rings × 22 segments, 484
+  triangles, r 10): `data-regions="0 planes, 0 cylinders, 1 unfit"`, the
+  preview `error` with "Mesh to Solid couldn't close the body: 1 region
+  (100 % of the surface)" in the region "Feature status" and OK
+  `aria-disabled="true"`; the regions stay drawn while the draft is refused.
+  The report on the status shows in the chip's tooltip: hover
+  `Mesh to Solid1`, `getByRole('tooltip')` contains "6 planes · 0 unfit".
+  Two screenshots go to the test's output folder (`sphere-regions.png`,
+  `cube-regions.png`) for a look, not compared. **3 tests, 24.9 s** (10–14 s each) on the Ubuntu machine with `--workers=2`.
+
 ### `e2e/import-scad.spec.ts`
 
 - **Import OpenSCAD e2e** (`e2e/import-scad.spec.ts`, P5-04 slice 2): the

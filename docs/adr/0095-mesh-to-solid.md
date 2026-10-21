@@ -229,6 +229,107 @@ kind per region, in `ModelState.regions` for that body), which is linear and
 fast on a million triangles; OK runs the build. The colours come from the
 brand tokens (`docs/05-brand.md`), with a legend line in the dialog.
 
+#### Amendment, 2026-10-22: preview and report as built (slice 4b)
+
+- **One segmentation, two callers.** The facade's `segmentMesh(tolerance,
+  MeshSegmentation&)` (private) holds what `prismaticFromMesh` did up to its
+  refusals: the checks (tolerance, empty mesh, a node index out of range),
+  normals, adjacency, planar regions, smooth clusters, `fitComponent`, the
+  fine-tessellation rule, the report counts and the suggested tolerance.
+  `prismaticFromMesh` runs it and then refuses or rebuilds as before (the
+  same messages and counts: the slice-3 matrix prints the same natively);
+  the new public `meshRegions(tolerance)` runs it and stops. It fills
+  `meshReport_` as a refusal would (faces 0), a surface index per triangle
+  (`meshRegionsPtr()`, int32, `meshRegionTriangles()` long, in the staged
+  triangle order) and a kind per surface (`meshRegionKindsPtr()`, int32,
+  `meshRegionCount()` long: 0 plane, 1 cylinder, 2–4 reserved for cone,
+  sphere and torus, −1 unfit; core's `MESH_REGION_KIND`), and frees the input
+  buffers. The region buffers live until `clearMeshRegions()` (the kernel
+  calls it after copying), the next `meshNodes` or the next `meshRegions`.
+- **Per-triangle mapping.** `Kernel.meshRegions(shape, tolerance)` stages the
+  body's `Manifold.getMesh()` exactly as `meshToSolid` does (one
+  `#stageMesh`), and the view's `BodyMesh` of a mesh body is built from the
+  same `getMesh()` triangle order (`displayMesh` keeps it), so
+  `surfaceOf[t]` is triangle `t` of `BodyMesh.indices` / 3. `MeshRegions` =
+  `{ surfaceOf: Int32Array, kinds: Int32Array }` plus the report's counts
+  (`planes`, `cylinders`, `cones`, `spheres`, `tori`, `unfit`,
+  `suggestedTolerance?`). Through the worker: `KernelApi.meshRegions(body,
+  tolerance, base?)` (the body as the last recompute has it, or with `base`
+  the last preview's base: editing the feature that replaced the mesh),
+  transferring the two arrays, and `Recomputer.meshRegions`, `undefined` on
+  any error (a solid, a bad tolerance, a body that is gone).
+- **The preview decision: the draft still evaluates, the view shows the
+  regions.** Measured (native harness, case `r`; and Vitest on CI's WASM):
+
+  | Mesh | Triangles | `meshRegions` | full conversion |
+  |---|---|---|---|
+  | `cube.stl` | 12 | 0.03 ms | 93 ms |
+  | plate with a hole | 5,044 | 1.8–4.3 ms | 346–422 ms |
+  | sphere (refused) | 499,000 | 278–330 ms | 274–289 ms (refused after the same segmentation) |
+  | staircase, 302 planes | 1,196 | 0.46 ms | 3,080 ms |
+
+  In Vitest (CI's WASM, the Ubuntu machine; `describe('Kernel.meshRegions')`
+  prints them): the 500,000-triangle manifold sphere segments in 274 ms
+  (refused by the conversion in 293 ms), the 20,124-triangle plate in 7 ms
+  (converted in 236 ms), the 302-surface staircase in 1 ms (converted in
+  2,774 ms). The unfit fraction is clamped to 1 in the kernel (the area sums
+  round a whole sphere to 1.0000000000000027).
+
+  A refused mesh costs the segmentation either way, but a part that
+  converts costs seconds per draft as its surfaces grow (MakerVolume's
+  pairwise intersections: 3.1 s at 302 surfaces). Skipping the draft's
+  evaluation for prismatic would leave the dialog without its status (OK
+  enabled on a mesh that fails to rebuild, the refusal only after OK), and
+  editing without its base (the mesh is only in the preview's base once the
+  feature replaced it). So the draft is still previewed as for every
+  feature, which gives the status, the OK button, the base and the report;
+  but while the method is prismatic the view draws **the regions in place
+  of the drawing and of the body's own faces**, from the first answer
+  (milliseconds) to the end, and never the solid: the colours say more than
+  a solid drawn like the mesh. The region request goes out before the
+  preview, so the worker answers it first. Faceted draws its solid as before.
+- **The dialog hook.** `FeatureDialogSpec.regions?(values, ctx) →
+  { body, tolerance } | undefined`; the controller (`syncRegions` in
+  `dialog.ts`) asks `DialogKernel.meshRegions` (optional, like
+  `tangentChain`) when the request or the body's mesh changed, debounced
+  with the spec's `previewDelay`, drops late answers by generation and a
+  sequence, keeps the answer in `DialogPreview.regions` /
+  `DialogContext.draftRegions` (kept while a request for the same body is
+  out; a half-typed value leaves them), clears them when the hook gives
+  undefined (faceted, no body) or the dialog closes, and in edit mode waits
+  for the first preview's base. Nothing in `dialog.ts` names Mesh to Solid.
+- **The dialog.** An info field `summary` ("Result"): the regions'
+  counts while prismatic, else the draft's report (`Preview.meshToSolid`,
+  `DialogPreview.meshToSolid`, `DialogContext.draftMeshToSolid`, the `thread`
+  pattern): "6 planes, 1 cylinder · 0 unfit" (kinds with a count, unfit
+  always; core's `meshSurfaceSummary` / `meshToSolidSummary`), "6 faces" for
+  faceted. Its legend is real swatches: `InfoField.legend?(values, ctx)` →
+  `{ tone: 'create' | 'sketch' | 'error', label }[]`, rendered under the line
+  by `FeatureDialog.tsx` from the same tokens the view reads ("Planes",
+  "Cylinders", "Fits nothing"); the hint (the label's tooltip) says what to do
+  about a red region. The dialog region carries `data-regions="6 planes,
+  0 cylinders, 0 unfit"` and the viewport `data-preview-regions="<body>"`.
+- **The view.** `ViewPreview.regions` (`{ body, surfaceOf, kinds }`, filled
+  by `previewOf`; `previewInputs` makes an empty drawing so the regions show
+  while the draft is refused) goes from `Viewport.tsx` to `Bodies` and the
+  `Body` it names. `regionGeometry` (`viewport/regionGeometry.ts`, unit
+  tested) builds a de-indexed copy of the body's positions and normals with a
+  colour per corner (nodes are shared between triangles of different
+  surfaces), memoised on (mesh, regions, colours) and built only while
+  regions exist; `Body` draws it with its pose and clipping planes **in place
+  of** its faces mesh (picking reads the `BodyMesh`, not the scene, so it is
+  unchanged). Colours: planes `--x-cat-create`, cylinders and every curved
+  kind `--x-cat-sketch`, unfit `--x-error` (`SceneColors.regionPlane`,
+  `regionCurved`, `regionUnfit`), so both themes follow. Regions for another
+  triangle count draw nothing.
+- **Status and MCP.** The recompute attaches each Mesh to Solid report,
+  without its `kind`, to its feature's status (`FeatureStatus.meshToSolid`,
+  core's `MeshToSolidReport`, which the kernel's type re-exports);
+  `sameStatuses` compares it. The timeline chip's tooltip adds the summary
+  ("Mesh to Solid · 6 planes · 0 unfit"), and `get_feature` returns
+  `meshToSolid` as the status has it. A refused conversion has no report on
+  its status (the error says it); the dialog's regions carry the counts.
+
 ### 6. Where it is
 
 A tile "Mesh to Solid" at the end of Solid › Modify (with a tooltip clip,

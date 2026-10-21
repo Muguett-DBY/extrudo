@@ -34,6 +34,7 @@ import {
   isThreadReport,
   type Joint,
   type JointReport,
+  type MeshToSolidReport,
   MODEL_MEDIA_TYPES,
   type ModelStore,
   makesFeatures,
@@ -51,12 +52,13 @@ import {
   type KernelStatus,
   type SpawnKernel,
 } from './client';
-import { isMeshToSolidReport } from './features/mesh-to-solid';
+import { isMeshToSolidReport, type MeshToSolidFeatureReport } from './features/mesh-to-solid';
 import type { SmoothFaces } from './features/offset-face';
 import type { SmoothKind, SubShapeKind } from './history';
 import type { Inspection, InspectTarget } from './inspect';
 import type { Interference } from './interference';
 import type { JointCheck, JointCheckRequest } from './joints/check';
+import type { MeshRegions } from './kernel';
 import type { BodyMesh, MeshOptions } from './mesh';
 import type { StepBody } from './model-export';
 import { type PluginCommandResult, pluginCommandFileId } from './plugin-command';
@@ -186,6 +188,8 @@ export interface Preview {
    * placement line.
    */
   sweep?: SweepReport;
+  /** The draft's report when it is a Mesh to Solid that computed (ADR-0095 §4): the dialog's Result line. */
+  meshToSolid?: MeshToSolidReport;
 }
 
 export class Recomputer {
@@ -367,6 +371,7 @@ export class Recomputer {
       ...(isEmbossReport(own) && { emboss: own }),
       ...(isThreadReport(own) && { thread: own }),
       ...(isSweepReport(own) && { sweep: own }),
+      ...(isMeshToSolidReport(own) && { meshToSolid: withoutKind(own) }),
     };
   }
 
@@ -407,6 +412,25 @@ export class Recomputer {
       return undefined;
     }
   }
+  /**
+   * Mesh to Solid's region preview (ADR-0095 §5) of a mesh body the model
+   * store shows, or with `base` of the last preview's base (editing the
+   * feature that replaced it): a surface per triangle (in `BodyMesh.indices`
+   * / 3 order) and a kind per surface. Undefined on any error: a solid body,
+   * a bad tolerance, a body that is gone, a kernel that can't be reached.
+   */
+  async meshRegions(
+    body: BodyId,
+    tolerance: number,
+    base = false,
+  ): Promise<MeshRegions | undefined> {
+    try {
+      return await this.client.call((api) => api.meshRegions(body, tolerance, base));
+    } catch {
+      return undefined;
+    }
+  }
+
   /**
    * The faces the Offset Face dialog picks for clicks on `faces` of a body the
    * model store shows, and the rounds next to them that keep their radius
@@ -721,6 +745,7 @@ export class Recomputer {
     // Construction features report their plane, axis or point; canvases their
     // frame; STEP imports their bodies' colours; sketches theirs (P3-05,
     // P4-06, P4-12).
+    const features: Record<FeatureId, FeatureStatus> = { ...result.features };
     const sketches: Record<string, unknown> = {};
     const construction: Record<string, unknown> = {};
     const canvases: Record<string, unknown> = {};
@@ -731,14 +756,14 @@ export class Recomputer {
       else if (isImportReport(report)) imports[id] = report;
       else if (isThreadReport(report)) continue;
       // Mesh to Solid's report goes with the feature status, not the model store.
-      else if (isMeshToSolidReport(report)) continue;
-      else sketches[id] = report;
+      else if (isMeshToSolidReport(report)) {
+        const status = features[id as FeatureId];
+        if (status) features[id as FeatureId] = { ...status, meshToSolid: withoutKind(report) };
+      } else sketches[id] = report;
     }
     const bodies = Object.fromEntries([...meshes].map(([id, { mesh }]) => [id, mesh]));
     this.#model.getState().computed({
-      features: sameStatuses(previous.features, result.features)
-        ? previous.features
-        : result.features,
+      features: sameStatuses(previous.features, features) ? previous.features : features,
       bodies: sameRecord(previous.bodies, bodies) ? previous.bodies : bodies,
       sketches: sameReports(previous.sketches, sketches)
         ? previous.sketches
@@ -887,8 +912,14 @@ function sameStatuses(
         other[i] === key &&
         x?.status === y?.status &&
         x?.message === y?.message &&
-        JSON.stringify(x?.refs) === JSON.stringify(y?.refs)
+        JSON.stringify(x?.refs) === JSON.stringify(y?.refs) &&
+        JSON.stringify(x?.meshToSolid) === JSON.stringify(y?.meshToSolid)
       );
     })
   );
+}
+
+/** Mesh to Solid's feature report as the status and the preview carry it: without its `kind`. */
+function withoutKind({ kind: _, ...report }: MeshToSolidFeatureReport): MeshToSolidReport {
+  return report;
 }

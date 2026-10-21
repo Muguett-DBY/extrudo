@@ -2582,6 +2582,7 @@ public:
    */
   int meshNodes(int count) {
     if (count <= 0 || count > 3000000) return fail("Mesh to Solid failed: the mesh has too many or no nodes.");
+    clearMeshRegions();
     meshNodes_.assign(3 * static_cast<size_t>(count), 0.0);
     return 1;
   }
@@ -2612,6 +2613,56 @@ public:
     meshTriangles_.clear();
     meshTriangles_.shrink_to_fit();
     return handle;
+  }
+
+  /**
+   * Mesh to Solid's region preview (ADR-0095 §5 and its 2026-10-22
+   * amendment): prismatic's segmentation and fits over the staged mesh, no
+   * solid. Fills meshReport_ as a refusal would (faces 0), one surface index
+   * per triangle (meshRegionsPtr, int32, in the staged triangle order) and
+   * one kind per surface (meshRegionKindsPtr, int32: 0 plane, 1 cylinder,
+   * 2 cone, 3 sphere, 4 torus, -1 unfit). Frees the input buffers. Returns 1,
+   * or 0 with lastError for a bad tolerance or an empty or inconsistent
+   * mesh. The region buffers live until clearMeshRegions, the next
+   * meshNodes or the next meshRegions.
+   */
+  int meshRegions(double tolerance) {
+    beginOp();
+    meshReport_.clear();
+    clearMeshRegions();
+    int ok = 0;
+    try {
+      MeshSegmentation seg;
+      if (segmentMesh(tolerance, seg)) {
+        meshRegionOf_.assign(seg.regionOf.size(), -1);
+        meshRegionKinds_.resize(seg.surfaces.size());
+        for (size_t s = 0; s < seg.surfaces.size(); ++s) {
+          meshRegionKinds_[s] = seg.surfaces[s].kind;
+          for (int r : seg.surfaces[s].regions)
+            for (int t : seg.regions[r].triangles) meshRegionOf_[t] = static_cast<int32_t>(s);
+        }
+        ok = 1;
+      }
+    } catch (...) {
+      ok = failFromException("Mesh to Solid failed");
+    }
+    meshNodes_.clear();
+    meshNodes_.shrink_to_fit();
+    meshTriangles_.clear();
+    meshTriangles_.shrink_to_fit();
+    return ok;
+  }
+
+  uintptr_t meshRegionsPtr() const { return reinterpret_cast<uintptr_t>(meshRegionOf_.data()); }
+  int meshRegionTriangles() const { return static_cast<int>(meshRegionOf_.size()); }
+  uintptr_t meshRegionKindsPtr() const { return reinterpret_cast<uintptr_t>(meshRegionKinds_.data()); }
+  int meshRegionCount() const { return static_cast<int>(meshRegionKinds_.size()); }
+
+  void clearMeshRegions() {
+    meshRegionOf_.clear();
+    meshRegionOf_.shrink_to_fit();
+    meshRegionKinds_.clear();
+    meshRegionKinds_.shrink_to_fit();
   }
 
   /** Mesh to Solid's report, 10 doubles: faces, planes, cylinders, cones, spheres, tori, unfit regions, unfit triangles, unfit fraction, suggested tolerance (-1 = none). */
@@ -5453,6 +5504,9 @@ private:
   std::vector<double> meshNodes_;
   std::vector<uint32_t> meshTriangles_;
   std::vector<double> meshReport_;
+  /** meshRegions' output: a surface index per triangle, a kind per surface. */
+  std::vector<int32_t> meshRegionOf_;
+  std::vector<int32_t> meshRegionKinds_;
   /** Faceted refuses a result with more faces than this (ADR-0095 §3). */
   static constexpr int FACETED_FACE_CAP = 2000;
 
@@ -5793,15 +5847,29 @@ private:
     return votes >= 2;
   }
 
+  /** Prismatic's segmentation and fits over the staged mesh (segmentMesh), what meshRegions and prismaticFromMesh share. */
+  struct MeshSegmentation {
+    std::vector<gp_XYZ> normals;
+    std::vector<double> areas;
+    double meshArea = 0, meshVolume = 0;
+    std::vector<int> regionOf;
+    std::vector<MeshRegion> regions;
+    std::vector<std::vector<int>> regionNeighbours;
+    std::vector<MeshSurface> surfaces;
+    int planes = 0, cylinders = 0, unfitRegions = 0;
+    double unfitFraction = 0, suggested = -1;
+  };
+
   /**
-   * meshToSolid's prismatic method (ADR-0095 §3 and its 2026-10-21
+   * Prismatic's segmentation and fits (ADR-0095 §3 and its 2026-10-21
    * amendment), over the staged buffers: planar regions, then smooth clusters
-   * fitted as planes or cylinders, then one oversized face per surface,
-   * BOPAlgo_MakerVolume, the cells inside the mesh kept, and the result
-   * checked against the mesh. Fills meshReport_ before a refusal too.
+   * fitted as planes or cylinders. Fills `out` and meshReport_ (the counts, no
+   * faces yet). Returns 1, or 0 with lastError for a bad tolerance or mesh.
+   * The region preview (meshRegions) and the conversion (prismaticFromMesh)
+   * both run this, so they always agree. May throw.
    */
-  int prismaticFromMesh(double tolerance) {
-    try {
+  int segmentMesh(double tolerance, MeshSegmentation& out) {
+    {
       if (!(tolerance > 0) || !std::isfinite(tolerance)) return fail("Mesh to Solid needs a tolerance above 0 mm.");
       const int nodeCount = static_cast<int>(meshNodes_.size() / 3);
       const int triangleCount = static_cast<int>(meshTriangles_.size() / 3);
@@ -5811,13 +5879,14 @@ private:
           return fail("Mesh to Solid failed: the mesh refers to a node it doesn't have.");
         }
       }
-      const std::string rebuildFailed = "Mesh to Solid couldn't rebuild this mesh as an exact solid within " +
-                                        millimetres(tolerance) + " mm. Raise the tolerance, or use Faceted.";
       auto corner = [&](int t, int k) { return static_cast<int>(meshTriangles_[3 * t + k]); };
 
       // Facet normals and areas.
-      std::vector<gp_XYZ> normals(triangleCount);
-      std::vector<double> areas(triangleCount), altitudes(triangleCount);
+      std::vector<gp_XYZ>& normals = out.normals;
+      std::vector<double>& areas = out.areas;
+      normals.assign(triangleCount, gp_XYZ(0, 0, 0));
+      areas.assign(triangleCount, 0);
+      std::vector<double> altitudes(triangleCount);
       double meshArea = 0, meshVolume = 0;
       for (int t = 0; t < triangleCount; ++t) {
         const gp_XYZ a = meshNode(corner(t, 0)), b = meshNode(corner(t, 1)), c = meshNode(corner(t, 2));
@@ -5860,8 +5929,9 @@ private:
       // hundredth of the tolerance has no reliable normal, so its corners
       // decide alone).
       const double cosOne = std::cos(M_PI / 180);
-      std::vector<int> regionOf(triangleCount, -1);
-      std::vector<MeshRegion> regions;
+      std::vector<int>& regionOf = out.regionOf;
+      std::vector<MeshRegion>& regions = out.regions;
+      regionOf.assign(triangleCount, -1);
       {
         std::vector<int> order(triangleCount);
         for (int t = 0; t < triangleCount; ++t) order[t] = t;
@@ -5933,7 +6003,8 @@ private:
 
       // Region adjacency, and smooth boundaries (normals under 30 degrees
       // apart, ADR-0066's CREASE) grouping regions into clusters.
-      std::vector<std::vector<int>> regionNeighbours(regionCount);
+      std::vector<std::vector<int>>& regionNeighbours = out.regionNeighbours;
+      regionNeighbours.assign(regionCount, {});
       {
         std::vector<uint64_t> pairs;
         for (int t = 0; t < triangleCount; ++t) {
@@ -5984,7 +6055,7 @@ private:
       // are of one, else unfit.
       std::vector<int> nodeStamp(nodeCount, -1);
       int nodeRound = 0;
-      std::vector<MeshSurface> surfaces;
+      std::vector<MeshSurface>& surfaces = out.surfaces;
       auto planeOf = [&](int r) {
         MeshSurface s;
         s.kind = 0;
@@ -6125,6 +6196,31 @@ private:
                      static_cast<double>(unfitTriangles),
                      unfitFraction,
                      suggested};
+      out.meshArea = meshArea;
+      out.meshVolume = meshVolume;
+      out.planes = planes;
+      out.cylinders = cylinders;
+      out.unfitRegions = unfitRegions;
+      out.unfitFraction = unfitFraction;
+      out.suggested = suggested;
+      return 1;
+    }
+  }
+
+  /**
+   * meshToSolid's prismatic method (ADR-0095 §3 and its 2026-10-21
+   * amendment), over the staged buffers: segmentMesh, then one oversized face
+   * per surface, BOPAlgo_MakerVolume, the cells inside the mesh kept, and the
+   * result checked against the mesh. Fills meshReport_ before a refusal too.
+   */
+  int prismaticFromMesh(double tolerance) {
+    try {
+      MeshSegmentation seg;
+      if (!segmentMesh(tolerance, seg)) return 0;
+      const int planes = seg.planes, cylinders = seg.cylinders, unfitRegions = seg.unfitRegions;
+      const double unfitFraction = seg.unfitFraction, suggested = seg.suggested;
+      const std::string rebuildFailed = "Mesh to Solid couldn't rebuild this mesh as an exact solid within " +
+                                        millimetres(tolerance) + " mm. Raise the tolerance, or use Faceted.";
       if (unfitRegions > 0) {
         const std::string regionsText =
             std::to_string(unfitRegions) + (unfitRegions == 1 ? " region (" : " regions (") +
@@ -6143,8 +6239,8 @@ private:
       }
       // An exception in the booleans is a failed rebuild like any other.
       try {
-        return rebuildPrismatic(tolerance, surfaces, regions, regionOf, regionNeighbours, normals, areas, meshArea,
-                                meshVolume, rebuildFailed);
+        return rebuildPrismatic(tolerance, seg.surfaces, seg.regions, seg.regionOf, seg.regionNeighbours, seg.normals,
+                                seg.areas, seg.meshArea, seg.meshVolume, rebuildFailed);
       } catch (...) {
         return fail(rebuildFailed.c_str());
       }

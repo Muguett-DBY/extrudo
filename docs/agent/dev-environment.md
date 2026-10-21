@@ -90,6 +90,9 @@ them. Notes further down that name a machine apply to that machine only.
   there too (`heapTop()` over 300 vs 1500 iterations). `MODULARIZE` +
   `EXPORT_ES6` and the three exception helpers in `EXPORTED_RUNTIME_METHODS`
   are required.
+  Mesh to Solid's harness (ADR-0095) is `bash spikes/stl-to-solid/run.sh
+  prismatic [case]` (works on the Ubuntu machine too); case `r` runs
+  `meshRegions`, the region preview, with its timings next to the conversion's.
 - **The planegcs WASM is not in git either** (`packages/sketch/planegcs/dist/`):
   CI's `planegcs` job publishes `planegcs-<hash>`, `pnpm wasm` fetches both
   builds. After changing `build.sh`, the `Dockerfile` or the patch, run
