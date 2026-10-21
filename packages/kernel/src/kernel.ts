@@ -1945,7 +1945,8 @@ export class Kernel {
       cones: at(3),
       spheres: at(4),
       tori: at(5),
-      unfit: { regions: at(6), triangles: at(7), fraction: at(8) },
+      // An area share: the sums' rounding can put a whole mesh a hair over 1.
+      unfit: { regions: at(6), triangles: at(7), fraction: Math.min(1, at(8)) },
       ...(at(9) >= 0 ? { suggestedTolerance: at(9) } : {}),
     };
   }

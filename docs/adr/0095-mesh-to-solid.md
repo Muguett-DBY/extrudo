@@ -268,7 +268,12 @@ brand tokens (`docs/05-brand.md`), with a legend line in the dialog.
   | sphere (refused) | 499,000 | 278–330 ms | 274–289 ms (refused after the same segmentation) |
   | staircase, 302 planes | 1,196 | 0.46 ms | 3,080 ms |
 
-  VITEST_TIMINGS
+  In Vitest (CI's WASM, the Ubuntu machine; `describe('Kernel.meshRegions')`
+  prints them): the 500,000-triangle manifold sphere segments in 274 ms
+  (refused by the conversion in 293 ms), the 20,124-triangle plate in 7 ms
+  (converted in 236 ms), the 302-surface staircase in 1 ms (converted in
+  2,774 ms). The unfit fraction is clamped to 1 in the kernel (the area sums
+  round a whole sphere to 1.0000000000000027).
 
   A refused mesh costs the segmentation either way, but a part that
   converts costs seconds per draft as its surfaces grow (MakerVolume's
