@@ -2345,6 +2345,7 @@ new design that opens with the Import dialog on it (`requestModelImport`). No sa
 detail). A skipped feature's `reason` is plain words for people (at most `MAX_REASON`, 120
 characters, never a list in braces: `skippedFeature`, R3-18) and `detail` the technical text. **Amendments of 2026-10-11 and 2026-10-12** closed most of the original gaps: components (each a component of the design, ADR-0081), mirrors, rectangular and path patterns, sweeps, splits, modeled threads, naming a copied face, sketch constraints and dimensions, elliptical arcs as exact conics, fillet and chamfer edges read where the file has them, `skipLostEdges` on every round and chamfer (ADR-0038's and ADR-0043's amendments) and reading the segment under the `[Active]` folder (`activeDesignSegment` in `model.ts`). What still does not come across is in the ADR's Consequences (for example faces given as an extrude's profile that cannot be named).
 **Amendment of 2026-10-14 (skipped features):** an edge recipe whose first face has a negative token runs between its second face and the single one after it (`edgeFaces`, `decode/edges.ts`); a fillet/chamfer none of whose edges passes the weak-edge rule gets one second try (`loose`) by its two faces' names alone, no fingerprint, relying on `skipLostEdges`; a profile region nothing finds is left out with a note only while the operand's other regions are found (else the extrude is skipped as before); a hole without centre points takes them from its own cylinders' axes (`centresFromCylinders`, at most `MAX_FOUND_CENTRES`, never a pattern's copies), and a hole on a body face takes its placement's point and normal only when the recipe's B-rep plane agrees (`readHolePlacement`, `planeThrough`); an extrude head is also looked for at offset 57, after every other offset.
+Parameter value records are read in class versions 5–7 and 9 (2026-10-20, #93). A decode problem must never be silent: `F3dDesign.problems` reach `ImportReport.problems` and one `importNotices` line, and a through-all fallback for a missing distance (`throughAll` in `map.ts`) adds a note when `unreadParameters > 0`.
 
 **Amendment of 2026-10-15 (hostile files, round 2):** every reader stays linear in its input. `readAsm` shares one-byte values and small ints (frozen objects: never mutate an `AsmValue`), needs a class per record and caps values (1 per 4 bytes, 16 M), records (1 per 16 bytes); `asmFaceTags` returns a per-stream shared array (don't mutate it) and, like `asmFaces`' loop walk, spends a per-stream budget; `asm-body` reads each surface, curve and edge record once per stream (`Walk.surfaces/curves/edges`), `asm-spline` each B-spline block once (WeakMap by values array), and `brep-step` writes a B-spline once per body (`shared`, keyed by the spline object; analytic geometry per use) within `MAX_STEP_BYTES`. `archive.ts` inflates streaming into the declared size and must fill it, refuses a declared size over `MAX_RATIO` × compressed + 4 kB before allocating, and walks a Zstandard frame's headers first (one frame, no dictionary, window ≤ `MAX_ZSTD_WINDOW`). `readSegment`: `readOperationTable` spends one budget per segment; timeline items and type-table ids are deduplicated; `scopeOf` memoises `readScope`; `madeBy` is indexed; `refsOf` frames a record under `tryDecode`. Numbers from the file go through `finite` (`bytes.ts`) at decode. Core's expression parser refuses nesting past `MAX_DEPTH` = 256 (parser depth and node height). A new reader keeps to this: no per-byte objects, no walk repeated per referrer, a budget where a search tries every offset.
 
@@ -2703,6 +2704,10 @@ two points** (`b` set) shows **one glyph halfway between them** (a point-style a
 `a`) with the icons `horizontal-points`/`vertical-points` and the label "Horizontal (points)" /
 "Vertical (points)"; `glyphFace(c)` in `apps/web/src/sketch/tools/glyphs.ts` is the only place
 that picks a glyph's icon and label (`ConstraintGlyphs.tsx` draws `PlacedGlyph.icon`/`label`).
+Amendment 2026-10-20: a pair anchor carries a `normal` (up for level, right for plumb) and `pair: true`;
+`layoutGlyphs(anchors, project, curves)` takes the normal's side unless a curve from `glyphCurves(sketch)`
+(non-point entities, construction lines in, datum axes out) is closer than `GLYPH_SIZE / 2 + 2` px and the
+other side is clearer; a pair has its own row key `m:<midpoint>`; other glyphs place as before.
 ADR-0093 (issue #61, 2026-10-19) lets **the dimension and constraint tools pick the origin and
 axes**. Files: `packages/core/src/sketch/projection.ts` (`PROJECTABLE`, `DATUM_SPAN`,
 `isDatumRef`, `syncProjections`' construction flag), `sketch/schema.ts` (`PROJECTABLE`,
@@ -2746,6 +2751,45 @@ paths — with the message "An axis has no length or middle; pick a sketch line.
 `SketchEdit.error` path; the origin point is still accepted by all of them, and Collinear,
 Perpendicular, Symmetric and Tangent take an axis line.
 A line's distance to an axis hangs on the line: `distanceEnds` runs from the sketch line's middle to its foot on the axis whichever was picked first (an axis's middle is arbitrary). The Dimension tool keeps the hovered pick visible: with a line picked, `preview()` hides the length dimension while a second pick is under the cursor (`tools/dimension.ts`). A fresh axis pick counts as a datum in the tool's view: `DimensionTool.#view` adds a stand-in projection (`view:<pick id>` → `{ ref, curves: { axis } }`) for a synthetic line pick whose model is a datum, so its stand-in line is treated like the stored axis (anchor, measure) and the label placed for it stays put once the axis is stored; the host's pending-dimension re-measure keeps `projections` in its view for the same reason (`tools/host.ts` `resolveEdit`). A stored datum axis line is never drawn as a segment, even highlighted: `EntityHighlight` skips `isDatumLine(sketch, id)` (core, `dimensions.ts`) and `curveSegments` hides datum lines; Dimension and Constraint tools show the fresh-axis marker instead (`storedDatumMarker` in `tools/tool.ts`, `Pick.marker` → `modelHover`/`modelPicked`); the origin keeps its point highlight.
+
+ADR-0095 (2026-10-20) keeps **hidden and ghost bodies out of an extrude's or revolve's
+automatic join, cut and intersect** without teaching the kernel about visibility.
+`operate()` (`packages/kernel/src/features/operation.ts`) **always reports**
+`OperationReport.touching` (the bodies the tool touches; `[]` for a new body, and for
+picked bodies cut or intersected, which skips the distance query); extrude and revolve
+pass it as `FeatureOutput.report`, `PreviewResult.operation` carries it, and
+`dialog.ts` keeps it in `DialogPreview.operation` and gives it to `propose`/`validate` as
+`DialogContext.draftOperation`; a preview whose report differs re-runs `refresh` once.
+`apps/web/src/features/operationBodies.ts` (`proposeBodies`, `proposeWithBodies`,
+`allHidden`) is shared by extrude and revolve. **Rules:** the kernel stays visibility-blind
+(an eye toggle never changes a recompute); the proposal never overrides a chosen pick
+(`chosen('operation')` decides which operation it reads; an edited feature that stores
+picks proposes nothing); with a hidden body among `touching` and at least one shown, it
+proposes the shown ones; otherwise it proposes "automatic" (`bodies: []`) **only when the
+current pick is non-empty**, else `undefined` (`changedFields` compares by JSON, and
+`undefined` against `[]` would count as a change, marking an edited feature's empty pick
+as chosen); an empty `touching` proposes nothing; `validate` refuses (field `bodies`)
+when the operation isn't a new body, the pick is empty and every touching body is hidden.
+A ghost is stored with `visible: false`, so it counts as hidden.
+
+ADR-0096 (2026-10-20, #77) adds **parameter name completion to `<ExpressionInput>`**.
+`ExpressionNamesProvider` (`apps/web/src/parameters/expressionNames.tsx`) wraps `AppShell`
+and provides a getter of the document's parameters (name, `formatQuantity` value),
+cached per document; `completion.ts` has `wordAt` (the identifier around the caret, none
+inside a number or in a unit's place after one) and `matching` (contains, ignoring case:
+exact, then prefix, then the rest, in document order). **Rules:** a field filters names by
+**its own `evaluate`**: offered unless `evaluate(name)` fails with `ExprError.code`
+`'unknown-name'` or `'cycle'` (a unit mismatch stays in scope), cached per name per focus;
+keep those codes on the evaluator's "Unknown name" and the graph's "refers to itself"
+errors; no call site passes names. No list opens by typing when its only entry is the
+word itself (it would cover the dialog's OK button; B5's `2 * py`). Enter without an arrow pick commits as before; Tab
+inserts the pick or the first name (not when nothing is picked and the word is already the
+first name); Esc closes the list before it reverts the field, and is stopped there;
+Ctrl+Space opens the list on an empty word. The list is a Radix Popover (portalled,
+`role="listbox"` named `Parameters for <label>`, options `role="option"` with
+`aria-selected`, `onEscapeKeyDown` prevented, no auto focus); the field keeps the
+`textbox` role with `aria-autocomplete`, `aria-controls`, `aria-activedescendant`, and
+`data-keep-escape` while the list is open.
 
 ADR-0097 (P4-13, issue #95) adds **Mesh to Solid**: feature `meshToSolid`
 (`packages/kernel/src/features/mesh-to-solid.ts`, core `meshToSolidFeature`)

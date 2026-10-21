@@ -36,7 +36,7 @@ import type {
   UnitKind,
   Vec3,
 } from '@extrudo/core';
-import type { BodyMesh, MeshRegions, PreviewToolStyle } from '@extrudo/kernel';
+import type { BodyMesh, MeshRegions, OperationReport, PreviewToolStyle } from '@extrudo/kernel';
 import type { ComponentType } from 'react';
 import type { ActiveSource } from '../components/active';
 import type { IconName, ToolCategory } from '../design-system';
@@ -262,6 +262,11 @@ export interface DialogContext {
    * while the draft fails.
    */
   draftEmboss?: EmbossReport;
+  /**
+   * The bodies the draft's tool touches (ADR-0095, from the last preview of an
+   * extrude or revolve that computed): the Bodies field's proposal reads them.
+   */
+  draftOperation?: OperationReport;
   /** The draft's thread report (P4-12: each face's designation). Absent for anything else and while the draft fails. */
   draftThread?: ThreadReport;
   /**

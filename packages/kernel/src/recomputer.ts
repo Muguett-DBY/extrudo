@@ -54,6 +54,7 @@ import {
 } from './client';
 import { isMeshToSolidReport, type MeshToSolidFeatureReport } from './features/mesh-to-solid';
 import type { SmoothFaces } from './features/offset-face';
+import { isOperationReport, type OperationReport } from './features/operation';
 import type { SmoothKind, SubShapeKind } from './history';
 import type { Inspection, InspectTarget } from './inspect';
 import type { Interference } from './interference';
@@ -180,6 +181,8 @@ export interface Preview {
    * computed (P4-12, ADR-0060's amendment): moved, wrapped or projected.
    */
   emboss?: EmbossReport;
+  /** The bodies the draft's tool touches when it is an extrude or revolve that computed (ADR-0095). */
+  operation?: OperationReport;
   /** The draft's designations when it is a thread that computed (P4-12: "NPT 1/2"). */
   thread?: ThreadReport;
   /**
@@ -369,6 +372,7 @@ export class Recomputer {
       ...(isCanvasReport(own) && { canvas: own }),
       ...(isPatternReport(own) && { pattern: own }),
       ...(isEmbossReport(own) && { emboss: own }),
+      ...(isOperationReport(own) && { operation: own }),
       ...(isThreadReport(own) && { thread: own }),
       ...(isSweepReport(own) && { sweep: own }),
       ...(isMeshToSolidReport(own) && { meshToSolid: withoutKind(own) }),

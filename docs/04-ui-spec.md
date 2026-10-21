@@ -463,6 +463,14 @@ Crank or Glide. Since the right button drags, the right-click marking menu
   box and accepts expressions.
 - Invalid input: the field shows a red underline and the message; the preview
   keeps the last valid result, dimmed.
+- **Name completion (ADR-0096), in every expression field:** typing part of
+  a name lists the parameters in that field's scope that contain it, ignoring
+  case (exact and prefix matches first), each with its value ("cut_height =
+  12.00 mm"), in a list under the field (none for a name typed out in full
+  with nothing longer). ↑/↓ pick, Tab or Enter inserts (Enter
+  without a pick commits as usual), Esc closes the list before it reverts the
+  field, Ctrl+Space opens it on an empty field. A parameter that would make a
+  cycle (the one being edited, or one that uses it) isn't offered.
 - OK commits one undoable step and adds (or updates) the timeline chip.
   A new feature that used sketch profiles hides those sketches in the same
   step (as is usual in CAD), so a used profile doesn't float in front of the
@@ -747,7 +755,7 @@ A list on the left, the selected parameter on the right.
   applied. A rectangle corner placed level with the end of a level line makes
   the two edges **Collinear** (ADR-0094); a Horizontal or Vertical between two
   points (a corner level with a circle centre) shows one glyph halfway between
-  them, with a dotted icon and the label "Horizontal (points)".
+  them, on the side away from any curve that passes close to it, with a dotted icon and the label "Horizontal (points)".
 - Pressing a dimension tool on a selection places the most likely dimension
   type.
 - **The origin and axes as picks** (ADR-0093): the dimension and constraint
