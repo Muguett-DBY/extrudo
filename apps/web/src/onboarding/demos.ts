@@ -48,6 +48,7 @@ export const DEMO_TOOLS: readonly string[] = [
   'offsetFace',
   'draft',
   'thread',
+  'meshToSolid',
   'move',
   'mirror',
   'combine',
@@ -103,13 +104,8 @@ export const DEMO_TOOLS: readonly string[] = [
   'exportSketch',
 ];
 
-/**
- * Tiles with no clip yet (P4-13: Mesh to Solid's clip comes with the next
- * slice). They are tiles like any other, so the tools' own list (`DEMO_TOOLS`)
- * leaves them out until `pnpm demos` records the file and the tooltip shows
- * the tool's words alone meanwhile.
- */
-export const DEMO_CLIPS_PENDING: readonly string[] = ['meshToSolid'];
+/** Tiles whose clip is still to record; empty now. */
+export const DEMO_CLIPS_PENDING: readonly string[] = [];
 
 /** Where a tool's clip is, or `undefined` if it has none. */
 export function demoUrl(tool: string): string | undefined {

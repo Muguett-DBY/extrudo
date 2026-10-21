@@ -1057,7 +1057,7 @@ end to end, faster than in established desktop CAD.
 
 ---
 
-- [ ] **P4-13 Mesh to Solid: an imported mesh becomes a B-rep body.** FR-IO-10
+- [x] **P4-13 Mesh to Solid: an imported mesh becomes a B-rep body.** FR-IO-10
   (issue #95; #78 and #79 need it for STLs). Added 2026-10-20 (ADR-0095,
   plan `docs/plans/stl-to-solid-2026-10-20.md`). On its own branch until the
   whole feature lands in one pull request. *AC:* feature `meshToSolid`
