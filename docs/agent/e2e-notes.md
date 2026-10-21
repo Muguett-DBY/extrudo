@@ -1070,8 +1070,8 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
   while a region preview is shown (absent for Faceted); the Result line is
   `[data-info="summary"]` ("6 planes · 0 unfit", "1 unfit", "6 faces" for
   Faceted once its preview is back) with its swatches in
-  `[data-legend="summary"]` (Prismatic only; the second swatch is **Curved**,
-  planes/cylinders/spheres/cones together); the viewport carries
+  `[data-legend="summary"]` (Prismatic only; the second swatch is **Curved**:
+  cylinders, spheres and cones together); the viewport carries
   **`data-preview-regions="<body id>"`** while the view colours the body.
   Method is a native select: `selectOption('faceted')`. The second test's
   shape is an **ellipsoid** (`sphereStl(0.6)`, a UV sphere with its z scaled
