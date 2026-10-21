@@ -6292,16 +6292,9 @@ private:
           s.sag = cylinder.radius * (1 - std::cos(theta / 2));
           return s;
         }
-        const MeshFit sphere = fitMeshSphere(nodes);
-        if (sphere.ok && sphere.deviation <= tolerance) {
-          s.kind = 3;
-          s.origin = sphere.origin;
-          s.radius = sphere.radius;
-          s.direction = gp_Dir(outward.Normalized());
-          const double theta = largestAngle(members, triangles);
-          s.sag = sphere.radius * (1 - std::cos(theta / 2));
-          return s;
-        }
+        // The cone before the sphere: a frustum with only its two end rings
+        // (manifold's cylinder) has all its nodes on a sphere too, and the
+        // facet normals are the only thing that tells them apart.
         const MeshFit cone = fitMeshCone(nodes, triangles, normals, areas);
         if (cone.ok && cone.deviation <= tolerance) {
           s.kind = 2;
@@ -6316,6 +6309,20 @@ private:
             rhoMax = std::max(rhoMax, (q - q.Dot(axis) * axis).Modulus());
           }
           s.sag = (rhoMax / std::cos(cone.semiAngle)) * (1 - std::cos(theta / 2));
+          return s;
+        }
+        const MeshFit sphere = fitMeshSphere(nodes);
+        if (sphere.ok && sphere.deviation <= tolerance) {
+          s.kind = 3;
+          s.origin = sphere.origin;
+          s.radius = sphere.radius;
+          // A full sphere's mean normal cancels to nothing; any axis is a
+          // frame for it, so fall back to Z.
+          gp_XYZ dir = outward;
+          if (dir.Modulus() < 1e-6 * s.area) dir = gp_XYZ(0, 0, 1);
+          s.direction = gp_Dir(dir.Normalized());
+          const double theta = largestAngle(members, triangles);
+          s.sag = sphere.radius * (1 - std::cos(theta / 2));
           return s;
         }
         s.kind = -1;
@@ -6772,9 +6779,12 @@ private:
 
     // 4. Verify: the volume within the mesh's chord error (or 1 %), and
     // every sampled mesh node within the tolerance of the solid's surface.
-    double allowed = 0;
-    for (const MeshSurface& s : surfaces) allowed += s.area * s.sag;
-    allowed = std::max(0.01 * std::fabs(meshVolume), allowed + tolerance * meshArea);
+    // The sagitta sum is doubled: an inscribed mesh's measured polyhedral
+    // deficit is up to ~1.5 x it (a 48-meridian sphere: 41.9 mm3 against
+    // 28.9), so the 1 % floor alone was 0.5 % short.
+    double sagSum = 0;
+    for (const MeshSurface& s : surfaces) sagSum += s.area * s.sag;
+    const double allowed = std::max(0.01 * std::fabs(meshVolume), 2 * sagSum + tolerance * meshArea);
     if (std::fabs(volumeOf(result) - meshVolume) > allowed) return fail(rebuildFailed.c_str());
     NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> resultFaces;
     TopExp::MapShapes(result, TopAbs_FACE, resultFaces);
