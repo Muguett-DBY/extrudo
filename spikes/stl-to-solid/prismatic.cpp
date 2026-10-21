@@ -384,7 +384,7 @@ int main(int argc, char** argv) {
         if (c.Value(c.FirstParameter()).Z() > 9.9 && c.Value(c.LastParameter()).Z() > 9.9) fillet.Add(2.0, TopoDS::Edge(edges(i)));
       }
       TopoDS_Shape rounded = fillet.Shape();
-      h = run(f, "x3 box, 4 top edges filleted r2 (corners are spheres)", meshOf(rounded, 0.01, 0.2), 0.01, exact(rounded));
+      h = run(f, "x3 box, 4 top edges filleted r2 (corners are mitred: no sphere)", meshOf(rounded, 0.01, 0.2), 0.01, exact(rounded));
       if (h) f.release(h);
     }
     {

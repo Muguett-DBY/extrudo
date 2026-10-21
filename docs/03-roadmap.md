@@ -1074,8 +1074,7 @@ end to end, faster than in established desktop CAD.
   bracket fixtures, e2e for the dialog and a fillet on the result.
   *Slices:* (1) facade faceted + kernel; (2) feature, dialog, API, docs,
   e2e; (3) facade prismatic; (4) preview, more surfaces, clip, guide. Done
-  2026-10-21 on the feature branch (slices 1–4c, 4a1 and the clip); tori and
-  splitting a smooth cluster into several primitives follow in slice 4a2.
+  2026-10-21 on the feature branch (slices 1–4c, 4a1, 4a2 and the clip).
 
 ## Phase 5 — Programmatic design (→ v0.6)
 

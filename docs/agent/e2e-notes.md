@@ -1067,7 +1067,7 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
   Import dialog's `data-preview-status="ok"`, then the body row's right-click
   menu → "Convert to Solid…" opens the region "Mesh to Solid dialog". The
   dialog region carries **`data-regions="6 planes, 0 cylinders, 0 unfit"`**
-  while a region preview is shown (absent for Faceted); the Result line is
+  while a region preview is shown (absent for Faceted; spheres, cones and tori appear only when there are some: "…, 1 sphere, 2 tori, 0 unfit"); the Result line is
   `[data-info="summary"]` ("6 planes · 0 unfit", "1 unfit", "6 faces" for
   Faceted once its preview is back) with its swatches in
   `[data-legend="summary"]` (Prismatic only; the second swatch is **Curved**:
