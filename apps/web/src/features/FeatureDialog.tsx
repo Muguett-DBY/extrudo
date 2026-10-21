@@ -540,5 +540,8 @@ const LEGEND_TOKENS: Record<LegendEntry['tone'], string> = {
 /** A region preview's counts for `data-regions`: "6 planes, 0 cylinders, 0 unfit". */
 function regionsText(regions: DialogRegions): string {
   const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
-  return `${plural(regions.planes, 'plane')}, ${plural(regions.cylinders, 'cylinder')}, ${regions.unfit.regions} unfit`;
+  const parts = [plural(regions.planes, 'plane'), plural(regions.cylinders, 'cylinder')];
+  if (regions.spheres > 0) parts.push(plural(regions.spheres, 'sphere'));
+  if (regions.cones > 0) parts.push(plural(regions.cones, 'cone'));
+  return `${parts.join(', ')}, ${regions.unfit.regions} unfit`;
 }

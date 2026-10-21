@@ -10,6 +10,7 @@
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
 #include <BRepPrimAPI_MakeBox.hxx>
+#include <BRepPrimAPI_MakeCone.hxx>
 #include <BRepPrimAPI_MakeCylinder.hxx>
 #include <BRepPrimAPI_MakePrism.hxx>
 #include <BRepPrimAPI_MakeSphere.hxx>
@@ -117,7 +118,13 @@ static std::string kinds(const TopoDS_Shape& s) {
   std::map<int, int> k;
   for (TopExp_Explorer e(s, TopAbs_FACE); e.More(); e.Next()) k[BRepAdaptor_Surface(TopoDS::Face(e.Current())).GetType()]++;
   std::string out;
-  for (auto& [t, n] : k) out += " " + std::to_string(n) + (t == GeomAbs_Plane ? " plane" : t == GeomAbs_Cylinder ? " cyl" : " other");
+  for (auto& [t, n] : k)
+    out += " " + std::to_string(n) +
+           (t == GeomAbs_Plane      ? " plane"
+            : t == GeomAbs_Cylinder ? " cyl"
+            : t == GeomAbs_Cone     ? " cone"
+            : t == GeomAbs_Sphere   ? " sphere"
+                                    : " other");
   return out;
 }
 
@@ -152,6 +159,12 @@ static int run(ExtrudoFacade& f, const char* name, const Mesh& m, double toleran
   for (TopExp_Explorer e(s, TopAbs_FACE); e.More(); e.Next()) {
     BRepAdaptor_Surface a(TopoDS::Face(e.Current()));
     if (a.GetType() == GeomAbs_Cylinder) std::cout << "   cylinder radius " << std::setprecision(12) << a.Cylinder().Radius() << std::setprecision(6) << "\n";
+    if (a.GetType() == GeomAbs_Sphere)
+      std::cout << "   sphere radius " << std::setprecision(12) << a.Sphere().Radius() << " at " << a.Sphere().Location().X() << ","
+                << a.Sphere().Location().Y() << "," << a.Sphere().Location().Z() << std::setprecision(6) << "\n";
+    if (a.GetType() == GeomAbs_Cone)
+      std::cout << "   cone semi-angle " << std::setprecision(12) << a.Cone().SemiAngle() * 180 / M_PI << " deg, apex " << a.Cone().Apex().X()
+                << "," << a.Cone().Apex().Y() << "," << a.Cone().Apex().Z() << std::setprecision(6) << "\n";
     if (getenv("FACES") && *getenv("FACES")) {
       GProp_GProps g;
       BRepGProp::SurfaceProperties(e.Current(), g);
@@ -384,6 +397,63 @@ int main(int argc, char** argv) {
       TopoDS_Shape inner = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(0, 0, -1), gp_Dir(0, 0, 1)), 6, 22).Shape();
       TopoDS_Shape tube = BRepAlgoAPI_Cut(outer, inner).Shape();
       h = run(f, "x7 tube", meshOf(tube, 0.01, 0.1), 0.01, exact(tube));
+      if (h) f.release(h);
+    }
+  }
+  if (want("c")) {
+    // Slice 4a1: spheres and cones (dome, truncated cone, countersink, apex).
+    {
+      const Mesh m = sphere(10, 24, 48);
+      regions(f, "c1 sphere r10", m, 0.01);
+      int h = run(f, "c1 sphere r10", m, 0.01, 4.0 / 3.0 * M_PI * 1000);
+      if (h) f.release(h);
+    }
+    {
+      TopoDS_Shape cyl = BRepPrimAPI_MakeCylinder(10, 10).Shape();
+      TopoDS_Shape cap = BRepPrimAPI_MakeSphere(gp_Pnt(0, 0, 10), 10).Shape();
+      TopoDS_Shape dome = BRepAlgoAPI_Fuse(cyl, cap).Shape();
+      const double exact = M_PI * 100 * 10 + 2.0 / 3.0 * M_PI * 1000;
+      const Mesh fine = meshOf(dome, 0.01, 0.2);
+      const Mesh coarse = meshOf(BRepBuilderAPI_Copy(dome).Shape(), 0.5, 0.5);
+      regions(f, "c2 dome, fine", fine, 0.01);
+      int h = run(f, "c2a dome, fine", fine, 0.01, exact);
+      if (h) f.release(h);
+      regions(f, "c2 dome, coarse", coarse, 0.01);
+      h = run(f, "c2b dome, coarse", coarse, 0.01, exact);
+      if (h) f.release(h);
+    }
+    {
+      TopoDS_Shape cone = BRepPrimAPI_MakeCone(10, 4, 20).Shape();
+      const Mesh m = meshOf(cone, 0.01, 0.2);
+      const double exact = M_PI * 20 * (100 + 40 + 16) / 3;
+      regions(f, "c3 truncated cone", m, 0.01);
+      int h = run(f, "c3 truncated cone", m, 0.01, exact);
+      if (h) f.release(h);
+    }
+    {
+      TopoDS_Shape box = BRepPrimAPI_MakeBox(40, 30, 5).Shape();
+      TopoDS_Shape hole = BRepPrimAPI_MakeCylinder(gp_Ax2(gp_Pnt(20, 15, -1), gp_Dir(0, 0, 1)), 3, 7).Shape();
+      TopoDS_Shape sink = BRepPrimAPI_MakeCone(gp_Ax2(gp_Pnt(20, 15, 5), gp_Dir(0, 0, -1)), 6, 3, 3).Shape();
+      TopoDS_Shape plate = BRepAlgoAPI_Cut(BRepAlgoAPI_Cut(box, hole).Shape(), sink).Shape();
+      const double exact = ExtrudoFacade::volumeOf(plate);
+      const Mesh m = meshOf(plate, 0.01, 0.2);
+      regions(f, "c4 countersunk plate", m, 0.01);
+      int h = run(f, "c4 countersunk plate", m, 0.01, exact);
+      if (h) f.release(h);
+    }
+    {
+      TopoDS_Shape cone = BRepPrimAPI_MakeCone(10, 0, 20).Shape();
+      const Mesh m = meshOf(cone, 0.01, 0.2);
+      const double exact = M_PI * 100 * 20 / 3;
+      regions(f, "c5 pointed cone", m, 0.01);
+      int h = run(f, "c5 pointed cone", m, 0.01, exact);
+      if (h) f.release(h);
+    }
+    {
+      Mesh e = sphere(10, 24, 48);
+      for (size_t i = 2; i < e.nodes.size(); i += 3) e.nodes[i] *= 0.6;
+      regions(f, "c6 ellipsoid", e, 0.01);
+      int h = run(f, "c6 ellipsoid", e, 0.01);
       if (h) f.release(h);
     }
   }

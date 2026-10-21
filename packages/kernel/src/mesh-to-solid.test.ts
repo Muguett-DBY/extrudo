@@ -312,10 +312,13 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
     });
   }
 
-  it('7: refuses a sphere: one region fits no plane or cylinder', () => {
-    const { message } = refusal(meshOf(manifold.Manifold.sphere(10, 48)));
+  it('7: refuses an ellipsoid: one region fits no plane, cylinder, sphere or cone', () => {
+    const sphere = manifold.Manifold.sphere(10, 48);
+    const ellipsoid = sphere.scale([1, 1, 0.6]);
+    sphere.delete();
+    const { message } = refusal(meshOf(ellipsoid));
     expect(message).toBe(
-      "Mesh to Solid couldn't close the body: 1 region (100 % of the surface) fits no plane or cylinder. Use Faceted, or simplify the mesh in your slicer.",
+      "Mesh to Solid couldn't close the body: 1 region (100 % of the surface) fits no plane, cylinder, sphere or cone. Use Faceted, or simplify the mesh in your slicer.",
     );
   });
 
@@ -343,11 +346,13 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
     console.log(`prismatic: the noisy cylinder at 0.001 mm: ${message}`);
     const match = /Raise the tolerance to ([0-9.]+) mm, or use Faceted\.$/.exec(message);
     expect(message).toMatch(
-      /^Mesh to Solid couldn't close the body: 1 region \(\d+ % of the surface\) fits no plane or cylinder\./,
+      /^Mesh to Solid couldn't close the body: 1 region \(\d+ % of the surface\) fits no plane, cylinder, sphere or cone\./,
     );
     expect(match).not.toBeNull();
+    // The sphere through two rings a diameter apart also nearly fits the side,
+    // so the suggestion is the sphere's deviation, not the cylinder's.
     const suggested = Number(match?.[1]);
-    expect(suggested).toBeGreaterThanOrEqual(0.005);
+    expect(suggested).toBeGreaterThanOrEqual(0.002);
     expect(suggested).toBeLessThanOrEqual(0.02);
     const { shape, report } = prismatic(noisyCylinder(), 0.02);
     try {
@@ -358,7 +363,7 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
     }
   });
 
-  it('11: converts a 20k-triangle plate in under 3 s and refuses a 500k-triangle sphere in under 10 s', () => {
+  it('11: converts a 20k-triangle plate and a 500k-triangle sphere in under 3 s and 10 s', () => {
     const mesh = meshOfSolid(plate(), 0.0002, 0.0025);
     const triangles =
       kernel.exportMesh(mesh, { linearDeflection: 1, angularDeflection: 1 }).indices.length / 3;
@@ -374,15 +379,123 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
     const sphere = meshOf(manifold.Manifold.sphere(10, 1000));
     const sphereTriangles =
       kernel.exportMesh(sphere, { linearDeflection: 1, angularDeflection: 1 }).indices.length / 3;
-    const { message, ms } = refusal(sphere);
+    const { shape: ball } = prismatic(sphere);
+    const ballMs = performance.now() - start;
+    try {
+      expect(kernel.count(ball, 'face')).toBe(1);
+      expect(kinds(ball)).toEqual(['sphere']);
+    } finally {
+      kernel.release(ball);
+    }
     console.log(
-      `prismatic: plate ${triangles} triangles converted in ${convert.toFixed(0)} ms; sphere ${sphereTriangles} triangles refused in ${ms.toFixed(0)} ms`,
+      `prismatic: plate ${triangles} triangles converted in ${convert.toFixed(0)} ms; sphere ${sphereTriangles} triangles converted in ${ballMs.toFixed(0)} ms`,
     );
     expect(triangles).toBeGreaterThan(15_000);
     expect(sphereTriangles).toBeGreaterThan(400_000);
-    expect(message).toContain('fits no plane or cylinder');
     expect(convert).toBeLessThan(3000);
-    expect(ms).toBeLessThan(10_000);
+    expect(ballMs).toBeLessThan(10_000);
+  });
+
+  it('12: converts a sphere into one exact sphere face', () => {
+    const { shape, report } = prismatic(meshOf(manifold.Manifold.sphere(10, 48)));
+    try {
+      expect(kernel.count(shape, 'face')).toBe(1);
+      expect(kinds(shape)).toEqual(['sphere']);
+      expect(Math.abs((kernel.surfaceGeometry(shape, 0).radius as number) - 10)).toBeLessThan(1e-3);
+      const volume = kernel.properties(shape).volume;
+      expect(Math.abs(volume / ((4 / 3) * Math.PI * 1000) - 1)).toBeLessThan(0.01);
+      expect(report).toMatchObject({ planes: 0, cylinders: 0, spheres: 1, cones: 0 });
+    } finally {
+      kernel.release(shape);
+    }
+  });
+
+  it('13: rebuilds a dome: the sphere snaps to the cylinder’s radius', () => {
+    const cylinder = manifold.Manifold.cylinder(10, 10, 10, 64);
+    const cap0 = manifold.Manifold.sphere(10, 64);
+    const cap = cap0.translate([0, 0, 10]);
+    cap0.delete();
+    const solid = manifold.Manifold.union(cylinder, cap);
+    cylinder.delete();
+    cap.delete();
+    const { shape } = prismatic(meshOf(solid));
+    try {
+      expect(kernel.count(shape, 'face')).toBe(3);
+      expect(sorted(kinds(shape))).toEqual(['cylinder', 'plane', 'sphere']);
+      const geoms = Array.from({ length: 3 }, (_, i) => kernel.surfaceGeometry(shape, i));
+      const cyl = geoms.find((g) => g.type === 'cylinder');
+      const ball = geoms.find((g) => g.type === 'sphere');
+      expect(Math.abs((ball?.radius as number) - (cyl?.radius as number))).toBeLessThan(1e-6);
+      expect(Math.abs(ball?.origin?.[0] ?? 1)).toBeLessThan(1e-6);
+      expect(Math.abs(ball?.origin?.[1] ?? 1)).toBeLessThan(1e-6);
+      const volume = kernel.properties(shape).volume;
+      expect(Math.abs(volume / (Math.PI * 100 * 10 + (2 / 3) * Math.PI * 1000) - 1)).toBeLessThan(
+        0.01,
+      );
+    } finally {
+      kernel.release(shape);
+    }
+  });
+
+  it('14: rebuilds a truncated cone', () => {
+    const { shape } = prismatic(meshOf(manifold.Manifold.cylinder(20, 10, 4, 64)));
+    try {
+      expect(kernel.count(shape, 'face')).toBe(3);
+      const geoms = Array.from({ length: 3 }, (_, i) => kernel.surfaceGeometry(shape, i));
+      expect(geoms.filter((g) => g.type === 'plane')).toHaveLength(2);
+      const cone = geoms.find((g) => g.type === 'cone');
+      expect(cone).toBeDefined();
+      expect(Math.abs((cone?.halfAngle as number) - Math.atan(6 / 20))).toBeLessThan(1e-3);
+      const volume = kernel.properties(shape).volume;
+      expect(Math.abs(volume / ((Math.PI * 20 * (100 + 40 + 16)) / 3) - 1)).toBeLessThan(0.005);
+    } finally {
+      kernel.release(shape);
+    }
+  });
+
+  it('15: rebuilds a countersunk hole', () => {
+    const cube = manifold.Manifold.cube([40, 30, 5]);
+    const hole0 = manifold.Manifold.cylinder(7, 3, 3, 64);
+    const hole = hole0.translate([20, 15, -1]);
+    hole0.delete();
+    const sink0 = manifold.Manifold.cylinder(3, 3, 6, 64);
+    const sink = sink0.translate([20, 15, 2]);
+    sink0.delete();
+    const drilled = cube.subtract(hole);
+    cube.delete();
+    hole.delete();
+    const solid = drilled.subtract(sink);
+    drilled.delete();
+    sink.delete();
+    const exact = solid.volume();
+    const { shape } = prismatic(meshOf(solid));
+    try {
+      expect(kernel.count(shape, 'face')).toBe(8);
+      const list = kinds(shape);
+      expect(list.filter((k) => k === 'plane')).toHaveLength(6);
+      expect(list).toContain('cylinder');
+      expect(list).toContain('cone');
+      expect(Math.abs(kernel.properties(shape).volume / exact - 1)).toBeLessThan(0.005);
+    } finally {
+      kernel.release(shape);
+    }
+  });
+
+  it('16: converts a pointed cone to a plane and a cone (manifold’s apex works)', () => {
+    // The harness's OCCT cone refuses at the rebuild (MakerVolume can't do
+    // the singular apex); manifold's mesh for the same cone converts.
+    const { shape, report } = prismatic(meshOf(manifold.Manifold.cylinder(20, 10, 0, 64)));
+    try {
+      expect(kernel.count(shape, 'face')).toBe(2);
+      expect(sorted(kinds(shape))).toEqual(['cone', 'plane']);
+      const cone = Array.from({ length: 2 }, (_, i) => kernel.surfaceGeometry(shape, i)).find(
+        (g) => g.type === 'cone',
+      );
+      expect(Math.abs((cone?.halfAngle as number) - Math.atan(10 / 20))).toBeLessThan(1e-3);
+      expect(report).toMatchObject({ planes: 1, cones: 1, spheres: 0 });
+    } finally {
+      kernel.release(shape);
+    }
   });
 });
 
@@ -428,17 +541,29 @@ describe('Kernel.meshRegions', { timeout: 300_000 }, () => {
     expect(side).toBe(64);
   });
 
-  it('marks a sphere as one unfit surface', () => {
-    const regions = regionsOf(meshOf(manifold.Manifold.sphere(10, 48)));
+  it('marks an ellipsoid as one unfit surface', () => {
+    const sphere = manifold.Manifold.sphere(10, 48);
+    const ellipsoid = sphere.scale([1, 1, 0.6]);
+    sphere.delete();
+    const regions = regionsOf(meshOf(ellipsoid));
     expect(Array.from(regions.kinds)).toEqual([-1]);
     expect(regions.surfaceOf.every((s) => s === 0)).toBe(true);
     expect(regions.unfit.regions).toBe(1);
     expect(regions.unfit.fraction).toBe(1);
   });
 
+  it('puts a sphere on one sphere surface', () => {
+    const regions = regionsOf(meshOf(manifold.Manifold.sphere(10, 48)));
+    expect(Array.from(regions.kinds)).toEqual([3]);
+    expect(regions.spheres).toBe(1);
+    expect(regions.cones).toBe(0);
+    expect(regions.unfit.regions).toBe(0);
+  });
+
   it('suggests a tolerance for the noisy 32-gon at 0.001 mm', () => {
     const regions = regionsOf(noisyCylinder(), 0.001);
-    expect(regions.suggestedTolerance).toBeGreaterThanOrEqual(0.005);
+    // The sphere through the two rings also nearly fits, so ~0.003, not 0.006.
+    expect(regions.suggestedTolerance).toBeGreaterThanOrEqual(0.002);
     expect(regions.suggestedTolerance).toBeLessThanOrEqual(0.02);
   });
 
@@ -462,7 +587,8 @@ describe('Kernel.meshRegions', { timeout: 300_000 }, () => {
     const regions = regionsOf(sphere);
     const sphereMs = performance.now() - start;
     expect(regions.surfaceOf.length).toBeGreaterThan(400_000);
-    expect(Array.from(regions.kinds)).toEqual([-1]);
+    expect(Array.from(regions.kinds)).toEqual([3]);
+    expect(regions.spheres).toBe(1);
     const platePieces = meshOfSolid(plate(), 0.0002, 0.0025);
     start = performance.now();
     const plateRegions = kernel.meshRegions(platePieces, 0.01);

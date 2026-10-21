@@ -2597,8 +2597,8 @@ public:
 
   /**
    * Turns the staged mesh into a solid (ADR-0095 §3). method 0 = faceted (one
-   * planar face per coplanar patch), 1 = prismatic (exact planes and
-   * cylinders). Frees the input buffers either way. Returns a handle, or 0;
+   * planar face per coplanar patch), 1 = prismatic (exact planes, cylinders,
+   * cones and spheres). Frees the input buffers either way. Returns a handle, or 0;
    * the report (meshReportPtr/Size) is filled on success, and by prismatic
    * on a refusal after segmentation too.
    */
@@ -5583,20 +5583,26 @@ private:
   static constexpr int PRISMATIC_SURFACE_CAP = 500;
 
   /**
-   * One surface prismatic recognised (ADR-0095 §3): a plane (kind 0), a
-   * cylinder (kind 1) or an unfit region (kind -1), with the planar regions
-   * and triangles it covers.
+   * One surface prismatic recognised (ADR-0095 §3 and §4's slice 4a1): a
+   * plane (kind 0), a cylinder (kind 1), a cone (kind 2), a sphere (kind 3)
+   * or an unfit region (kind -1), with the planar regions and triangles it
+   * covers.
    */
   struct MeshSurface {
     int kind = -1;
     std::vector<int> regions;
     double area = 0;
+    /** A sphere's centre or a cone's apex, else a point on a plane or a cylinder's axis. */
     gp_Pnt origin;
-    gp_Dir direction;  // a plane's normal (outward), a cylinder's axis
+    /** A plane's normal (outward), a cylinder's or cone's axis (from the apex to the nodes), a sphere's frame. */
+    gp_Dir direction;
+    /** A cylinder's or sphere's radius. */
     double radius = 0;
-    /** A curved surface's chord error, r (1 - cos(θ/2)) for its largest facet-to-facet angle θ. */
+    /** A cone's half-angle, radians. */
+    double semiAngle = 0;
+    /** A curved surface's chord error: r (1 - cos(θ/2)) for a cylinder or a sphere, (ρmax / cos α)(1 - cos(θ/2)) for a cone. */
     double sag = 0;
-    /** The smallest tolerance a plane or cylinder would need here (unfit regions). */
+    /** The smallest tolerance a fitted surface would need here (unfit regions). */
     double deviation = 0;
   };
 
@@ -5622,15 +5628,18 @@ private:
     int kind = 0;
     gp_Pln plane;
     gp_Cylinder cylinder;
+    gp_Cone cone;
+    gp_Sphere sphere;
     std::unique_ptr<BRepTopAdaptor_FClass2d> inside;
   };
 
-  /** A plane or cylinder fit over a set of mesh nodes. */
+  /** A plane, cylinder, cone or sphere fit over a set of mesh nodes. */
   struct MeshFit {
     bool ok = false;
     gp_Pnt origin;
     gp_Dir direction;
     double radius = 0;
+    double semiAngle = 0;
     double deviation = 1e300;
   };
 
@@ -5809,6 +5818,176 @@ private:
     return fit;
   }
 
+  /**
+   * The sphere through `nodes`: the centre an algebraic fit (the linear system
+   * 2 Σ q qᵀ c' = Σ q |q|² over the centroid), refined by Gauss-Newton on the
+   * geometric distance, the radius the mean distance. Rejected when the nodes
+   * are nearly coplanar (a plane's covariance's smallest eigenvalue is tiny).
+   */
+  MeshFit fitMeshSphere(const std::vector<int>& nodes) const {
+    MeshFit fit;
+    if (nodes.size() < 8) return fit;
+    const double count = static_cast<double>(nodes.size());
+    gp_XYZ m(0, 0, 0);
+    for (int n : nodes) m += meshNode(n);
+    m /= count;
+    double cov[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}, rhs[3] = {0, 0, 0};
+    for (int n : nodes) {
+      const gp_XYZ q = meshNode(n) - m;
+      const double q2 = q.SquareModulus();
+      for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) cov[i][j] += q.Coord(i + 1) * q.Coord(j + 1);
+        rhs[i] += q.Coord(i + 1) * q2;
+      }
+    }
+    double values[3];
+    gp_XYZ vectors[3];
+    symmetricEigen(cov, values, vectors);
+    // Nearly coplanar nodes are a plane, not a sphere.
+    if (!(values[0] > 1e-6 * values[2])) return fit;
+    double matrix[3][3];
+    for (int i = 0; i < 3; ++i)
+      for (int j = 0; j < 3; ++j) matrix[i][j] = 2 * cov[i][j];
+    double offset[3];
+    if (!solve3(matrix, rhs, offset)) return fit;
+    gp_XYZ c = m + gp_XYZ(offset[0], offset[1], offset[2]);
+    double radius = 0;
+    for (int n : nodes) radius += (meshNode(n) - c).Modulus();
+    radius /= count;
+    for (int iteration = 0; iteration < 8; ++iteration) {
+      double jtj[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}, jtr[3] = {0, 0, 0};
+      for (int n : nodes) {
+        const gp_XYZ q = meshNode(n) - c;
+        const double d = q.Modulus();
+        if (d < 1e-12) continue;
+        const double row[3] = {-q.X() / d, -q.Y() / d, -q.Z() / d}, residual = d - radius;
+        for (int r = 0; r < 3; ++r) {
+          for (int cc = 0; cc < 3; ++cc) jtj[r][cc] += row[r] * row[cc];
+          jtr[r] -= row[r] * residual;
+        }
+      }
+      double step[3];
+      if (!solve3(jtj, jtr, step)) break;
+      c += gp_XYZ(step[0], step[1], step[2]);
+      radius = 0;
+      for (int n : nodes) radius += (meshNode(n) - c).Modulus();
+      radius /= count;
+      if (std::fabs(step[0]) + std::fabs(step[1]) + std::fabs(step[2]) < 1e-13 * (1 + radius)) break;
+    }
+    if (!(radius > 0) || !std::isfinite(radius)) return fit;
+    fit.deviation = 0;
+    for (int n : nodes) fit.deviation = std::max(fit.deviation, std::fabs((meshNode(n) - c).Modulus() - radius));
+    fit.origin = gp_Pnt(c);
+    fit.radius = radius;
+    fit.ok = true;
+    return fit;
+  }
+
+  /**
+   * The cone through `nodes`: the axis the facet normals' area-weighted
+   * covariance's smallest eigenvector (the normals all lie on a cone about
+   * it), the half-angle from their mean along it, the apex the least-squares
+   * meeting point of the facets' tangent planes, the half-angle refined from
+   * the nodes. `origin` is the apex, `direction` points from it towards the
+   * nodes.
+   */
+  MeshFit fitMeshCone(const std::vector<int>& nodes, const std::vector<int>& triangles,
+                      const std::vector<gp_XYZ>& normals, const std::vector<double>& areas) const {
+    MeshFit fit;
+    if (nodes.size() < 8) return fit;
+    double areaSum = 0;
+    gp_XYZ mean(0, 0, 0);
+    for (int t : triangles) {
+      mean += areas[t] * normals[t];
+      areaSum += areas[t];
+    }
+    if (!(areaSum > 0)) return fit;
+    mean /= areaSum;
+    double cov[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
+    for (int t : triangles) {
+      const gp_XYZ d = normals[t] - mean;
+      for (int i = 0; i < 3; ++i)
+        for (int j = 0; j < 3; ++j) cov[i][j] += areas[t] * d.Coord(i + 1) * d.Coord(j + 1);
+    }
+    double values[3];
+    gp_XYZ vectors[3];
+    symmetricEigen(cov, values, vectors);
+    const double trace = values[0] + values[1] + values[2];
+    // Normals that all point one way (a plane) or lie in a plane (a cylinder)
+    // have no cone axis; a sphere's are isotropic but give a zero half-angle.
+    if (!(values[1] > 1e-6 * trace) || vectors[0].Modulus() < 1e-12) return fit;
+    gp_XYZ axis = vectors[0].Normalized();
+    double along = 0;
+    for (int t : triangles) along += areas[t] * normals[t].Dot(axis);
+    along /= areaSum;
+    const double alpha0 = std::asin(std::min(1.0, std::fabs(along)));
+    if (!(alpha0 > M_PI / 180) || !(alpha0 < 89 * M_PI / 180)) return fit;
+    // The apex: the point every tangent plane passes through, least squares.
+    double matrix[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}, rhs[3] = {0, 0, 0};
+    for (int t : triangles) {
+      const gp_XYZ n = normals[t];
+      gp_XYZ centroid(0, 0, 0);
+      for (int k = 0; k < 3; ++k) centroid += meshNode(static_cast<int>(meshTriangles_[3 * t + k]));
+      centroid /= 3;
+      const double nd = n.Dot(centroid);
+      for (int i = 0; i < 3; ++i) {
+        for (int j = 0; j < 3; ++j) matrix[i][j] += areas[t] * n.Coord(i + 1) * n.Coord(j + 1);
+        rhs[i] += areas[t] * n.Coord(i + 1) * nd;
+      }
+    }
+    double apex[3];
+    if (!solve3(matrix, rhs, apex)) return fit;
+    gp_XYZ x(apex[0], apex[1], apex[2]);
+    // Orient the axis towards the nodes; a double cone (nodes on both sides)
+    // is out.
+    std::vector<double> heights(nodes.size());
+    double heightSum = 0;
+    for (size_t i = 0; i < nodes.size(); ++i) {
+      heights[i] = (meshNode(nodes[i]) - x).Dot(axis);
+      heightSum += heights[i];
+    }
+    if (heightSum < 0) {
+      axis.Reverse();
+      for (double& h : heights) h = -h;
+    }
+    double low = 1e300, high = -1e300;
+    for (double h : heights) {
+      low = std::min(low, h);
+      high = std::max(high, h);
+    }
+    // A genuine double cone has nodes on both sides in comparable amount; a
+    // tessellated apex sits a chord error past the facet least-squares apex,
+    // so a small negative side is the tip, not a second cone.
+    if (low < -0.5 * high) return fit;
+    // The half-angle from the nodes, the tip (at or behind the apex) aside.
+    double alphaSum = 0;
+    int alphaCount = 0;
+    for (int n : nodes) {
+      const gp_XYZ q = meshNode(n) - x;
+      const double height = q.Dot(axis);
+      if (height <= 0) continue;
+      alphaSum += std::atan2((q - height * axis).Modulus(), height);
+      ++alphaCount;
+    }
+    if (alphaCount == 0) return fit;
+    const double alpha = alphaSum / alphaCount;
+    if (!(alpha > 0) || !(alpha < M_PI / 2)) return fit;
+    double rhoMax = 0;
+    fit.deviation = 0;
+    for (int n : nodes) {
+      const gp_XYZ q = meshNode(n) - x;
+      const double height = q.Dot(axis);
+      const double rho = (q - height * axis).Modulus();
+      rhoMax = std::max(rhoMax, rho);
+      fit.deviation = std::max(fit.deviation, std::fabs(rho * std::cos(alpha) - height * std::sin(alpha)));
+    }
+    fit.origin = gp_Pnt(x);
+    fit.direction = gp_Dir(axis);
+    fit.semiAngle = alpha;
+    fit.ok = true;
+    return fit;
+  }
+
   /** "1", "0.05", "0.012": up to 3 decimals, trailing zeros dropped. */
   static std::string millimetres(double value) {
     char text[32];
@@ -5856,7 +6035,7 @@ private:
     std::vector<MeshRegion> regions;
     std::vector<std::vector<int>> regionNeighbours;
     std::vector<MeshSurface> surfaces;
-    int planes = 0, cylinders = 0, unfitRegions = 0;
+    int planes = 0, cylinders = 0, cones = 0, spheres = 0, unfitRegions = 0;
     double unfitFraction = 0, suggested = -1;
   };
 
@@ -6051,8 +6230,8 @@ private:
       };
 
       // 2. Fits. A component of planar regions is one plane when all its
-      // nodes are within the tolerance of one, else one cylinder when they
-      // are of one, else unfit.
+      // nodes are within the tolerance of one, else one cylinder, sphere or
+      // cone when they are of one, else unfit.
       std::vector<int> nodeStamp(nodeCount, -1);
       int nodeRound = 0;
       std::vector<MeshSurface>& surfaces = out.surfaces;
@@ -6064,6 +6243,19 @@ private:
         s.origin = regions[r].origin;
         s.direction = regions[r].normal;
         return s;
+      };
+      // The largest facet-to-facet angle inside a component, for the chord error.
+      auto largestAngle = [&](const std::vector<int>& members, const std::vector<int>& triangles) {
+        const int inside = markRound++;
+        for (int r : members) mark[r] = inside;
+        double cosMax = 1;
+        for (int t : triangles) {
+          for (int k = 0; k < 3; ++k) {
+            const int u = neighbour[3 * t + k];
+            if (u > t && mark[regionOf[u]] == inside) cosMax = std::min(cosMax, normals[t].Dot(normals[u]));
+          }
+        }
+        return std::acos(std::max(-1.0, std::min(1.0, cosMax)));
       };
       auto fitComponent = [&](const std::vector<int>& members) {
         MeshSurface s;
@@ -6096,22 +6288,47 @@ private:
           s.origin = cylinder.origin;
           s.direction = cylinder.direction;
           s.radius = cylinder.radius;
-          // The largest facet-to-facet angle inside, for the chord error.
-          const int inside = markRound++;
-          for (int r : members) mark[r] = inside;
-          double cosMax = 1;
-          for (int t : triangles) {
-            for (int k = 0; k < 3; ++k) {
-              const int u = neighbour[3 * t + k];
-              if (u > t && mark[regionOf[u]] == inside) cosMax = std::min(cosMax, normals[t].Dot(normals[u]));
-            }
-          }
-          const double theta = std::acos(std::max(-1.0, std::min(1.0, cosMax)));
+          const double theta = largestAngle(members, triangles);
           s.sag = cylinder.radius * (1 - std::cos(theta / 2));
           return s;
         }
+        // The cone before the sphere: a frustum with only its two end rings
+        // (manifold's cylinder) has all its nodes on a sphere too, and the
+        // facet normals are the only thing that tells them apart.
+        const MeshFit cone = fitMeshCone(nodes, triangles, normals, areas);
+        if (cone.ok && cone.deviation <= tolerance) {
+          s.kind = 2;
+          s.origin = cone.origin;
+          s.direction = cone.direction;
+          s.semiAngle = cone.semiAngle;
+          const double theta = largestAngle(members, triangles);
+          const gp_XYZ axis = cone.direction.XYZ();
+          double rhoMax = 0;
+          for (int n : nodes) {
+            const gp_XYZ q = meshNode(n) - cone.origin.XYZ();
+            rhoMax = std::max(rhoMax, (q - q.Dot(axis) * axis).Modulus());
+          }
+          s.sag = (rhoMax / std::cos(cone.semiAngle)) * (1 - std::cos(theta / 2));
+          return s;
+        }
+        const MeshFit sphere = fitMeshSphere(nodes);
+        if (sphere.ok && sphere.deviation <= tolerance) {
+          s.kind = 3;
+          s.origin = sphere.origin;
+          s.radius = sphere.radius;
+          // A full sphere's mean normal cancels to nothing; any axis is a
+          // frame for it, so fall back to Z.
+          gp_XYZ dir = outward;
+          if (dir.Modulus() < 1e-6 * s.area) dir = gp_XYZ(0, 0, 1);
+          s.direction = gp_Dir(dir.Normalized());
+          const double theta = largestAngle(members, triangles);
+          s.sag = sphere.radius * (1 - std::cos(theta / 2));
+          return s;
+        }
         s.kind = -1;
-        s.deviation = std::min(plane.ok ? plane.deviation : 1e300, cylinder.ok ? cylinder.deviation : 1e300);
+        s.deviation = std::min(
+            {plane.ok ? plane.deviation : 1e300, cylinder.ok ? cylinder.deviation : 1e300,
+             sphere.ok ? sphere.deviation : 1e300, cone.ok ? cone.deviation : 1e300});
         return s;
       };
       // A cluster is a smooth component of all regions. When it fits nothing
@@ -6136,15 +6353,10 @@ private:
         for (int r : cluster) sizes.push_back(regions[r].area);
         std::sort(sizes.begin(), sizes.end());
         const double median = sizes[(sizes.size() - 1) / 2];
-        std::vector<int> rest;
-        bool peeled = false;
+        std::vector<int> large, rest;
         for (int r : cluster) {
-          if (regions[r].area >= 4 * median) {
-            surfaces.push_back(planeOf(r));
-            peeled = true;
-          } else {
-            rest.push_back(r);
-          }
+          if (regions[r].area >= 4 * median) large.push_back(r);
+          else rest.push_back(r);
         }
         // Fewer than four planar regions meeting at shallow angles are
         // planes (a draft, a shallow bevel): a cylinder has more facets.
@@ -6155,9 +6367,16 @@ private:
             surfaces.push_back(std::move(s));
           }
         };
-        if (!peeled) {
+        if (large.empty()) {
           settle(std::move(whole));
           continue;
+        }
+        // The large regions are the flat faces a curved patch leans on, but
+        // they can also be a coarser curved patch's facets (a dome's cylinder
+        // next to a finer sphere): fit them in smooth components too, not one
+        // plane each.
+        for (const std::vector<int>& component : components(large)) {
+          settle(component.size() == 1 ? planeOf(component[0]) : fitComponent(component));
         }
         for (const std::vector<int>& component : components(rest)) {
           settle(component.size() == 1 ? planeOf(component[0]) : fitComponent(component));
@@ -6165,11 +6384,13 @@ private:
       }
 
       // The report, before any refusal.
-      int planes = 0, cylinders = 0, unfitRegions = 0, unfitTriangles = 0;
+      int planes = 0, cylinders = 0, cones = 0, spheres = 0, unfitRegions = 0, unfitTriangles = 0;
       double unfitArea = 0, worstUnfitArea = -1, worstDeviation = 1e300;
       for (const MeshSurface& s : surfaces) {
         if (s.kind == 0) ++planes;
         if (s.kind == 1) ++cylinders;
+        if (s.kind == 2) ++cones;
+        if (s.kind == 3) ++spheres;
         if (s.kind >= 0) continue;
         ++unfitRegions;
         unfitArea += s.area;
@@ -6189,8 +6410,8 @@ private:
       meshReport_ = {0,
                      static_cast<double>(planes),
                      static_cast<double>(cylinders),
-                     0,
-                     0,
+                     static_cast<double>(cones),
+                     static_cast<double>(spheres),
                      0,
                      static_cast<double>(unfitRegions),
                      static_cast<double>(unfitTriangles),
@@ -6200,6 +6421,8 @@ private:
       out.meshVolume = meshVolume;
       out.planes = planes;
       out.cylinders = cylinders;
+      out.cones = cones;
+      out.spheres = spheres;
       out.unfitRegions = unfitRegions;
       out.unfitFraction = unfitFraction;
       out.suggested = suggested;
@@ -6217,7 +6440,8 @@ private:
     try {
       MeshSegmentation seg;
       if (!segmentMesh(tolerance, seg)) return 0;
-      const int planes = seg.planes, cylinders = seg.cylinders, unfitRegions = seg.unfitRegions;
+      const int planes = seg.planes, cylinders = seg.cylinders, cones = seg.cones, spheres = seg.spheres;
+      const int unfitRegions = seg.unfitRegions;
       const double unfitFraction = seg.unfitFraction, suggested = seg.suggested;
       const std::string rebuildFailed = "Mesh to Solid couldn't rebuild this mesh as an exact solid within " +
                                         millimetres(tolerance) + " mm. Raise the tolerance, or use Faceted.";
@@ -6225,16 +6449,17 @@ private:
         const std::string regionsText =
             std::to_string(unfitRegions) + (unfitRegions == 1 ? " region (" : " regions (") +
             std::to_string(static_cast<int>(std::lround(unfitFraction * 100))) + " % of the surface) " +
-            (unfitRegions == 1 ? "fits" : "fit") + " no plane or cylinder. ";
+            (unfitRegions == 1 ? "fits" : "fit") + " no plane, cylinder, sphere or cone. ";
         const std::string message =
             "Mesh to Solid couldn't close the body: " + regionsText +
             (suggested > 0 ? "Raise the tolerance to " + millimetres(suggested) + " mm, or use Faceted."
                            : std::string("Use Faceted, or simplify the mesh in your slicer."));
         return fail(message.c_str());
       }
-      if (planes + cylinders > PRISMATIC_SURFACE_CAP) {
-        const std::string message = "This mesh has " + std::to_string(planes + cylinders) +
-                                    " surfaces; Extrudo rebuilds up to 500. Use Faceted, or simplify the mesh in your slicer.";
+      if (planes + cylinders + cones + spheres > PRISMATIC_SURFACE_CAP) {
+        const std::string message = "This mesh has " + std::to_string(planes + cylinders + cones + spheres) +
+                                    " surfaces; Extrudo rebuilds up to " + std::to_string(PRISMATIC_SURFACE_CAP) +
+                                    ". Use Faceted, or simplify the mesh in your slicer.";
         return fail(message.c_str());
       }
       // An exception in the booleans is a failed rebuild like any other.
@@ -6251,9 +6476,11 @@ private:
 
   /**
    * Prismatic's rebuild and verification (ADR-0095 §3): snaps each cylinder
-   * to the planes it is tangent or square to, makes one oversized face per
-   * surface, splits space with BOPAlgo_MakerVolume, keeps the cells inside
-   * the mesh, merges them, and checks the solid against the mesh.
+   * to the planes it is tangent or square to (a sphere to the cylinders it
+   * shares a radius with, a cone to its cylinder's or end plane's axis) and
+   * makes one oversized face per surface, splits space with
+   * BOPAlgo_MakerVolume, keeps the cells inside the mesh, merges them, and
+   * checks the solid against the mesh.
    */
   int rebuildPrismatic(double tolerance, std::vector<MeshSurface>& surfaces, const std::vector<MeshRegion>& regions,
                        const std::vector<int>& regionOf, const std::vector<std::vector<int>>& regionNeighbours,
@@ -6333,6 +6560,69 @@ private:
       c.origin = gp_Pnt(o);
     }
 
+    // A sphere next to cylinders it shares its radius with (a dome): take
+    // their radius and the point nearest to their axes.
+    for (int i = 0; i < surfaceCount; ++i) {
+      MeshSurface& sphere = surfaces[i];
+      if (sphere.kind != 3) continue;
+      std::vector<int> axes;
+      for (int other : adjacent[i]) {
+        const MeshSurface& c = surfaces[other];
+        if (c.kind == 1 && std::fabs(c.radius - sphere.radius) <= tolerance) axes.push_back(other);
+      }
+      if (axes.empty()) continue;
+      if (axes.size() == 1) {
+        const gp_XYZ o = surfaces[axes[0]].origin.XYZ(), a = surfaces[axes[0]].direction.XYZ();
+        const gp_XYZ c = sphere.origin.XYZ();
+        sphere.origin = gp_Pnt(o + (c - o).Dot(a) * a);
+      } else {
+        double m[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}, b[3] = {0, 0, 0};
+        for (int other : axes) {
+          const gp_XYZ a = surfaces[other].direction.XYZ(), o = surfaces[other].origin.XYZ();
+          for (int r = 0; r < 3; ++r) {
+            for (int cc = 0; cc < 3; ++cc)
+              m[r][cc] += (r == cc ? 1.0 : 0.0) - a.Coord(r + 1) * a.Coord(cc + 1);
+            b[r] += o.Coord(r + 1) - a.Coord(r + 1) * o.Dot(a);
+          }
+        }
+        double x[3];
+        if (solve3(m, b, x)) sphere.origin = gp_Pnt(x[0], x[1], x[2]);
+      }
+      double radius = 0;
+      for (int other : axes) radius += surfaces[other].radius;
+      sphere.radius = radius / static_cast<double>(axes.size());
+    }
+
+    // A cone next to a cylinder shares its axis (a countersink); next to a
+    // plane it is square to, that plane's normal.
+    for (int i = 0; i < surfaceCount; ++i) {
+      MeshSurface& cone = surfaces[i];
+      if (cone.kind != 2) continue;
+      const gp_XYZ a = cone.direction.XYZ();
+      bool snapped = false;
+      for (int other : adjacent[i]) {
+        const MeshSurface& c = surfaces[other];
+        if (c.kind != 1) continue;
+        const gp_XYZ ca = c.direction.XYZ();
+        if (std::fabs(a.Dot(ca)) <= cosOne) continue;
+        const gp_XYZ axis = a.Dot(ca) < 0 ? gp_XYZ(-ca.X(), -ca.Y(), -ca.Z()) : ca;
+        const gp_XYZ o = c.origin.XYZ(), apex = cone.origin.XYZ();
+        cone.direction = gp_Dir(axis);
+        cone.origin = gp_Pnt(o + (apex - o).Dot(axis) * axis);
+        snapped = true;
+        break;
+      }
+      if (snapped) continue;
+      for (int other : adjacent[i]) {
+        const MeshSurface& p = surfaces[other];
+        if (p.kind != 0) continue;
+        const gp_XYZ n = p.direction.XYZ();
+        if (std::fabs(a.Dot(n)) <= cosOne) continue;
+        cone.direction = gp_Dir(a.Dot(n) < 0 ? gp_XYZ(-n.X(), -n.Y(), -n.Z()) : n);
+        break;
+      }
+    }
+
     // 3. One oversized face per surface: grown by 10 x the tolerance, plus
     // twice the largest chord error (a coarse circle's true curve leaves
     // its polygon's box by up to that).
@@ -6358,9 +6648,18 @@ private:
         faces.Append(BRepBuilderAPI_MakeFace(gp_Pln(frame), lo[0] - margin, hi[0] + margin, lo[1] - margin,
                                              hi[1] + margin)
                          .Face());
-      } else {
+      } else if (s.kind == 1) {
         faces.Append(BRepBuilderAPI_MakeFace(gp_Cylinder(frame, s.radius), 0, 2 * M_PI, lo[0] - margin, hi[0] + margin)
                          .Face());
+      } else if (s.kind == 2) {
+        // A cone: v along a generatrix from the apex (h / cos α), from the
+        // lowest node to above the highest.
+        const double cosAlpha = std::cos(s.semiAngle);
+        const double v1 = std::max(0.0, lo[0] / cosAlpha - margin), v2 = hi[0] / cosAlpha + margin;
+        faces.Append(
+            BRepBuilderAPI_MakeFace(gp_Cone(gp_Ax3(s.origin, s.direction), s.semiAngle, 0), 0, 2 * M_PI, v1, v2).Face());
+      } else {
+        faces.Append(BRepBuilderAPI_MakeFace(gp_Sphere(gp_Ax3(s.origin, s.direction), s.radius)).Face());
       }
     }
     BOPAlgo_MakerVolume maker;
@@ -6480,26 +6779,40 @@ private:
 
     // 4. Verify: the volume within the mesh's chord error (or 1 %), and
     // every sampled mesh node within the tolerance of the solid's surface.
-    double allowed = 0;
-    for (const MeshSurface& s : surfaces) allowed += s.area * s.sag;
-    allowed = std::max(0.01 * std::fabs(meshVolume), allowed + tolerance * meshArea);
+    // The sagitta sum is doubled: an inscribed mesh's measured polyhedral
+    // deficit is up to ~1.5 x it (a 48-meridian sphere: 41.9 mm3 against
+    // 28.9), so the 1 % floor alone was 0.5 % short.
+    double sagSum = 0;
+    for (const MeshSurface& s : surfaces) sagSum += s.area * s.sag;
+    const double allowed = std::max(0.01 * std::fabs(meshVolume), 2 * sagSum + tolerance * meshArea);
     if (std::fabs(volumeOf(result) - meshVolume) > allowed) return fail(rebuildFailed.c_str());
     NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> resultFaces;
     TopExp::MapShapes(result, TopAbs_FACE, resultFaces);
     std::vector<MeshCheckedFace> checked;
-    int resultPlanes = 0, resultCylinders = 0;
+    int resultPlanes = 0, resultCylinders = 0, resultCones = 0, resultSpheres = 0;
     for (int i = 1; i <= resultFaces.Extent(); ++i) {
       MeshCheckedFace c;
       c.face = TopoDS::Face(resultFaces(i));
       const BRepAdaptor_Surface surface(c.face, false);
-      c.kind = surface.GetType() == GeomAbs_Plane ? 0 : surface.GetType() == GeomAbs_Cylinder ? 1 : -1;
+      const GeomAbs_SurfaceType type = surface.GetType();
+      c.kind = type == GeomAbs_Plane ? 0
+               : type == GeomAbs_Cylinder ? 1
+               : type == GeomAbs_Cone     ? 2
+               : type == GeomAbs_Sphere   ? 3
+                                          : -1;
       if (c.kind < 0) return fail(rebuildFailed.c_str());
       if (c.kind == 0) {
         c.plane = surface.Plane();
         ++resultPlanes;
-      } else {
+      } else if (c.kind == 1) {
         c.cylinder = surface.Cylinder();
         ++resultCylinders;
+      } else if (c.kind == 2) {
+        c.cone = surface.Cone();
+        ++resultCones;
+      } else {
+        c.sphere = surface.Sphere();
+        ++resultSpheres;
       }
       BRepBndLib::Add(c.face, c.box);
       c.box.Enlarge(tolerance * 1.01);
@@ -6519,9 +6832,15 @@ private:
         if (c.kind == 0) {
           ElSLib::Parameters(c.plane, p, u, v);
           q = ElSLib::Value(u, v, c.plane);
-        } else {
+        } else if (c.kind == 1) {
           ElSLib::Parameters(c.cylinder, p, u, v);
           q = ElSLib::Value(u, v, c.cylinder);
+        } else if (c.kind == 2) {
+          ElSLib::Parameters(c.cone, p, u, v);
+          q = ElSLib::Value(u, v, c.cone);
+        } else {
+          ElSLib::Parameters(c.sphere, p, u, v);
+          q = ElSLib::Value(u, v, c.sphere);
         }
         if (p.Distance(q) <= reach && c.inside->Perform(gp_Pnt2d(u, v)) != TopAbs_OUT) {
           near = true;
@@ -6536,6 +6855,8 @@ private:
     meshReport_[0] = static_cast<double>(resultFaces.Extent());
     meshReport_[1] = static_cast<double>(resultPlanes);
     meshReport_[2] = static_cast<double>(resultCylinders);
+    meshReport_[3] = static_cast<double>(resultCones);
+    meshReport_[4] = static_cast<double>(resultSpheres);
     return store(result);
   }
 

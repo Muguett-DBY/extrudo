@@ -1070,18 +1070,20 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
   while a region preview is shown (absent for Faceted); the Result line is
   `[data-info="summary"]` ("6 planes · 0 unfit", "1 unfit", "6 faces" for
   Faceted once its preview is back) with its swatches in
-  `[data-legend="summary"]` (Prismatic only); the viewport carries
+  `[data-legend="summary"]` (Prismatic only; the second swatch is **Curved**,
+  planes/cylinders/spheres/cones together); the viewport carries
   **`data-preview-regions="<body id>"`** while the view colours the body.
-  Method is a native select: `selectOption('faceted')`. The sphere is a UV
-  sphere written in the test with `writeStl` (12 rings × 22 segments, 484
-  triangles, r 10): `data-regions="0 planes, 0 cylinders, 1 unfit"`, the
-  preview `error` with "Mesh to Solid couldn't close the body: 1 region
+  Method is a native select: `selectOption('faceted')`. The second test's
+  shape is an **ellipsoid** (`sphereStl(0.6)`, a UV sphere with its z scaled
+  by 0.6: 12 rings × 22 segments, 484 triangles, r 10 in x/y): it fits no
+  sphere, so `data-regions="0 planes, 0 cylinders, 1 unfit"`, the preview
+  `error` with "Mesh to Solid couldn't close the body: 1 region
   (100 % of the surface)" in the region "Feature status" and OK
   `aria-disabled="true"`; the regions stay drawn while the draft is refused.
   The report on the status shows in the chip's tooltip: hover
   `Mesh to Solid1`, `getByRole('tooltip')` contains "6 planes · 0 unfit".
-  Two screenshots go to the test's output folder (`sphere-regions.png`,
-  `cube-regions.png`) for a look, not compared. **3 tests, 24.9 s** (10–14 s each) on the Ubuntu machine with `--workers=2`.
+  Two screenshots go to the test's output folder (`ellipsoid-regions.png`,
+  `cube-regions.png`) for a look, not compared. **3 tests, 11.4 s** (4.4–5.8 s each) on the Ubuntu machine with `--workers=2`.
 
 ### `e2e/import-scad.spec.ts`
 

@@ -42,7 +42,7 @@ function summary(
 
 const LEGEND: readonly LegendEntry[] = [
   { tone: 'create', label: 'Planes' },
-  { tone: 'sketch', label: 'Cylinders' },
+  { tone: 'sketch', label: 'Curved' },
   { tone: 'error', label: 'Fits nothing' },
 ];
 
@@ -80,7 +80,7 @@ export const meshToSolidDialog = defineFeatureDialog({
       kind: 'info',
       name: 'summary',
       label: 'Result',
-      hint: 'What Prismatic found on the mesh: its colours in the view. For a region that fits nothing, raise the tolerance or use Faceted.',
+      hint: 'What Prismatic found on the mesh: its colours in the view: planes, curved surfaces (cylinders, spheres, cones), and what fits nothing. For a region that fits nothing, raise the tolerance or use Faceted.',
       shown: (values, ctx) => summary(values, ctx) !== undefined,
       text: (values, ctx) => summary(values, ctx) ?? '',
       legend: (values, ctx) => (isPrismatic(values) && ctx.draftRegions ? LEGEND : []),
