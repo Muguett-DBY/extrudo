@@ -117,7 +117,9 @@ test('the cube shows six planes before it converts; Faceted says six faces', asy
   });
 });
 
-test('an ellipsoid fits nothing: all red, refused, and Cancel leaves the mesh', async ({ page }) => {
+test('an ellipsoid fits nothing: all red, refused, and Cancel leaves the mesh', async ({
+  page,
+}) => {
   await openProject(page);
   await kernelReady(page);
   await importMesh(page, { name: 'ellipsoid.stl', buffer: sphereStl(0.6) });

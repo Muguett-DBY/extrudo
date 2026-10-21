@@ -429,9 +429,9 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
       expect(Math.abs(ball?.origin?.[0] ?? 1)).toBeLessThan(1e-6);
       expect(Math.abs(ball?.origin?.[1] ?? 1)).toBeLessThan(1e-6);
       const volume = kernel.properties(shape).volume;
-      expect(
-        Math.abs(volume / (Math.PI * 100 * 10 + (2 / 3) * Math.PI * 1000) - 1),
-      ).toBeLessThan(0.01);
+      expect(Math.abs(volume / (Math.PI * 100 * 10 + (2 / 3) * Math.PI * 1000) - 1)).toBeLessThan(
+        0.01,
+      );
     } finally {
       kernel.release(shape);
     }
