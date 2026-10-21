@@ -31,8 +31,8 @@ const chip = (page: Page, name: string) =>
     .getByRole('button', { name: new RegExp(`^${name}`) });
 const bodyRow = (page: Page) => page.locator('[data-body]').first();
 
-/** A UV sphere of radius 10, 12 rings of 22 segments: 484 triangles, facing out. */
-function sphereStl(): Buffer {
+/** A UV sphere of radius 10, 12 rings of 22 segments (484 triangles, facing out); `scaleZ` squashes it into an ellipsoid. */
+function sphereStl(scaleZ = 1): Buffer {
   const rings = 12;
   const segments = 22;
   const r = 10;
@@ -49,6 +49,7 @@ function sphereStl(): Buffer {
     }
   }
   positions.push(0, 0, r);
+  for (let i = 2; i < positions.length; i += 3) positions[i] *= scaleZ;
   const top = positions.length / 3 - 1;
   const at = (j: number, i: number) => 1 + (j - 1) * segments + (i % segments);
   const indices: number[] = [];
@@ -99,7 +100,7 @@ test('the cube shows six planes before it converts; Faceted says six faces', asy
   });
   await expect(dialog.locator('[data-info="summary"]')).toHaveText('6 planes · 0 unfit');
   await expect(dialog.locator('[data-legend="summary"]')).toHaveText(
-    /Planes.*Cylinders.*Fits nothing/,
+    /Planes.*Curved.*Fits nothing/,
   );
   // The view colours the mesh body in place of the drawing.
   await expect(viewport(page)).toHaveAttribute('data-preview-regions', /.+/);
@@ -116,10 +117,10 @@ test('the cube shows six planes before it converts; Faceted says six faces', asy
   });
 });
 
-test('a sphere fits nothing: all red, refused, and Cancel leaves the mesh', async ({ page }) => {
+test('an ellipsoid fits nothing: all red, refused, and Cancel leaves the mesh', async ({ page }) => {
   await openProject(page);
   await kernelReady(page);
-  await importMesh(page, { name: 'sphere.stl', buffer: sphereStl() });
+  await importMesh(page, { name: 'ellipsoid.stl', buffer: sphereStl(0.6) });
 
   const dialog = await convertDialog(page);
   await expect(dialog).toHaveAttribute('data-regions', '0 planes, 0 cylinders, 1 unfit', {
@@ -136,7 +137,7 @@ test('a sphere fits nothing: all red, refused, and Cancel leaves the mesh', asyn
   );
   // The regions stay drawn while the draft is refused.
   await expect(viewport(page)).toHaveAttribute('data-preview-regions', /.+/);
-  await viewport(page).screenshot({ path: test.info().outputPath('sphere-regions.png') });
+  await viewport(page).screenshot({ path: test.info().outputPath('ellipsoid-regions.png') });
 
   await dialog.getByRole('button', { name: 'Cancel' }).first().click();
   await expect(dialog).toBeHidden();

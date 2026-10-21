@@ -112,6 +112,7 @@ describe('the mesh to solid dialog: regions and the Result line (ADR-0095 §4, �
     expect(surfaceSummary({ ...counts, planes: 6, cylinders: 1 })).toBe(
       '6 planes, 1 cylinder · 0 unfit',
     );
+    expect(surfaceSummary({ ...counts, planes: 1, spheres: 1 })).toBe('1 plane, 1 sphere · 0 unfit');
     expect(surfaceSummary({ ...counts, planes: 1, tori: 2, unfit: { ...NONE, regions: 3 } })).toBe(
       '1 plane, 2 tori · 3 unfit',
     );
