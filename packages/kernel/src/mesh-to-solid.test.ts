@@ -481,11 +481,21 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
     }
   });
 
-  it('16: refuses a pointed cone at the rebuild (MakerVolume can’t do the apex)', () => {
-    const { message } = refusal(meshOf(manifold.Manifold.cylinder(20, 10, 0, 64)));
-    expect(message).toBe(
-      "Mesh to Solid couldn't rebuild this mesh as an exact solid within 0.01 mm. Raise the tolerance, or use Faceted.",
-    );
+  it('16: converts a pointed cone to a plane and a cone (manifold’s apex works)', () => {
+    // The harness's OCCT cone refuses at the rebuild (MakerVolume can't do
+    // the singular apex); manifold's mesh for the same cone converts.
+    const { shape, report } = prismatic(meshOf(manifold.Manifold.cylinder(20, 10, 0, 64)));
+    try {
+      expect(kernel.count(shape, 'face')).toBe(2);
+      expect(sorted(kinds(shape))).toEqual(['cone', 'plane']);
+      const cone = Array.from({ length: 2 }, (_, i) => kernel.surfaceGeometry(shape, i)).find(
+        (g) => g.type === 'cone',
+      );
+      expect(Math.abs((cone?.halfAngle as number) - Math.atan(10 / 20))).toBeLessThan(1e-3);
+      expect(report).toMatchObject({ planes: 1, cones: 1, spheres: 0 });
+    } finally {
+      kernel.release(shape);
+    }
   });
 });
 

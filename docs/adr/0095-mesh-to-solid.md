@@ -292,7 +292,7 @@ Measured, native (ms under node; the same matrix passes in Vitest):
 | dome (cylinder + hemisphere), fine / coarse | 5,472 / 254 | 1 plane + 1 cylinder + 1 sphere, sphere r = cylinder r (±1e-11), ±3e-6 % | 435 / 25 |
 | truncated cone r 10 → 4, h 20 | 1,600 | 2 planes + 1 cone, half-angle 16.716° (atan(6/20) is 16.699°), +0.025 % | 81 |
 | countersunk plate (box, hole r 3, sink r 6 → 3) | 754 | 6 planes + 1 cylinder + 1 cone, −7e-4 % | 120 |
-| pointed cone r 10, h 20 | 1,476 | refused at the rebuild (MakerVolume can't do the apex) | 61 |
+| pointed cone r 10, h 20 | 1,476 | refused at the rebuild (MakerVolume can't do the OCCT cone's singular apex; manifold's mesh of the same cone converts to a plane + a cone) | 61 |
 | ellipsoid (sphere × 0.6 in z) | 2,208 | refused, 1 region (100 %) | 1 |
 
 The plain sphere and the 499k-triangle sphere, refused in slice 3's table,
