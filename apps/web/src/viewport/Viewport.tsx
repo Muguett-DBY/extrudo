@@ -646,6 +646,7 @@ export function Viewport({
       data-joint-check={jointCheck?.summary}
       data-preview={previewSummary(preview)}
       data-preview-dimmed={preview?.dimmed || undefined}
+      data-preview-regions={preview?.regions?.body}
       className="relative isolate min-w-0 flex-1 overflow-hidden"
       style={{ background: 'var(--x-viewport-glow)' }}
     >

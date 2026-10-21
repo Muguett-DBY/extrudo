@@ -8,8 +8,9 @@ import {
   type BodyId,
   MESH_TO_SOLID_METHODS,
   type MeshToSolidMethod,
-  type MeshToSolidReport,
+  meshSurfaceSummary,
   meshToSolidFeature,
+  meshToSolidSummary,
 } from '@extrudo/core';
 import {
   type DialogContext,
@@ -27,33 +28,6 @@ const METHOD_LABELS: Record<MeshToSolidMethod, string> = {
 const isPrismatic = (v: Pick<DialogValues, 'choices'>) =>
   (v.choices.method ?? 'prismatic') === 'prismatic';
 
-/** The surface counts a Result line reads (the report's, or the region preview's). */
-type Counts = Pick<
-  MeshToSolidReport,
-  'planes' | 'cylinders' | 'cones' | 'spheres' | 'tori' | 'unfit'
->;
-
-const KINDS = [
-  ['planes', 'plane'],
-  ['cylinders', 'cylinder'],
-  ['cones', 'cone'],
-  ['spheres', 'sphere'],
-  ['tori', 'torus'],
-] as const;
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
-
-/**
- * "6 planes, 1 cylinder · 0 unfit" (ADR-0095 §4): every kind found, and the
- * unfit regions always.
- */
-export function surfaceSummary(counts: Counts): string {
-  const found = KINDS.filter(([key]) => counts[key] > 0).map(([key, one]) =>
-    plural(counts[key], one, key === 'tori' ? 'tori' : undefined),
-  );
-  return [found.join(', '), `${counts.unfit.regions} unfit`].filter(Boolean).join(' · ');
-}
-
 /** The Result line: the region preview while prismatic, else the draft's report. */
 function summary(
   values: Pick<DialogValues, 'choices'>,
@@ -61,9 +35,9 @@ function summary(
 ): string | undefined {
   const regions = ctx?.draftRegions;
   const report = ctx?.draftMeshToSolid;
-  if (isPrismatic(values) && regions) return surfaceSummary(regions);
+  if (isPrismatic(values) && regions) return meshSurfaceSummary(regions);
   if (!report || report.method !== (values.choices.method ?? 'prismatic')) return undefined;
-  return report.method === 'faceted' ? plural(report.faces, 'face') : surfaceSummary(report);
+  return meshToSolidSummary(report);
 }
 
 const LEGEND: readonly LegendEntry[] = [

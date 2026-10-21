@@ -2,12 +2,13 @@ import {
   type FeatureId,
   MeshToSolidInputsSchema,
   type MeshToSolidReport,
+  meshSurfaceSummary as surfaceSummary,
   meshToSolidSettings,
 } from '@extrudo/core';
 import type { MeshRegions, Preview } from '@extrudo/kernel';
 import { describe, expect, it } from 'vitest';
 import { viewPreview } from './dialog';
-import { meshToSolidDialog, surfaceSummary } from './mesh-to-solid';
+import { meshToSolidDialog } from './mesh-to-solid';
 import { featureDialogs, specForCommand } from './registry';
 import type { InfoField } from './spec';
 import { BOX, settle, setupDialogs } from './testing';

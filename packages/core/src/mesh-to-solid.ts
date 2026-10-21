@@ -83,6 +83,40 @@ export interface MeshToSolidReport {
   suggestedTolerance?: number;
 }
 
+/** The surface counts of a report or of a region preview. */
+export type MeshSurfaceCounts = Pick<
+  MeshToSolidReport,
+  'planes' | 'cylinders' | 'cones' | 'spheres' | 'tori' | 'unfit'
+>;
+
+const SURFACE_KINDS = [
+  ['planes', 'plane', 'planes'],
+  ['cylinders', 'cylinder', 'cylinders'],
+  ['cones', 'cone', 'cones'],
+  ['spheres', 'sphere', 'spheres'],
+  ['tori', 'torus', 'tori'],
+] as const;
+
+const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/**
+ * "6 planes, 1 cylinder · 0 unfit" (ADR-0095 §4): every kind found, and the
+ * unfit regions always.
+ */
+export function meshSurfaceSummary(counts: MeshSurfaceCounts): string {
+  const found = SURFACE_KINDS.filter(([key]) => counts[key] > 0).map(([key, one, many]) =>
+    count(counts[key], one, many),
+  );
+  return [found.join(', '), `${counts.unfit.regions} unfit`].filter(Boolean).join(' · ');
+}
+
+/** A conversion's report in one line: "6 faces" (faceted), "6 planes, 1 cylinder · 0 unfit" (prismatic). */
+export function meshToSolidSummary(report: MeshToSolidReport): string {
+  return report.method === 'faceted'
+    ? count(report.faces, 'face', 'faces')
+    : meshSurfaceSummary(report);
+}
+
 /**
  * A surface kind of Mesh to Solid's region preview (ADR-0095 §5), as the
  * kernel's `meshRegions` reports it per surface.
