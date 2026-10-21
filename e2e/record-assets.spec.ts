@@ -28,6 +28,7 @@ import {
   pickTool,
   projector,
   selectParameter,
+  selectTab,
   startFromTemplate,
 } from './helpers';
 
@@ -423,7 +424,7 @@ test('demo: sketch', async ({ page }) => {
   const clip = await frameAt(page, at([0, 0, 0]));
   const s = Number(await attr(viewport, 'data-camera-size')) * 0.16;
   // Off the axes, which a hover would light up.
-  await p.jump({ x: clip.x + clip.width - 60, y: clip.y + clip.height / 2 });
+  await p.jump({ x: clip.x + clip.width - 30, y: clip.y + clip.height / 2 });
   await record(page, 'sketch', clip, async () => {
     await page.waitForTimeout(300);
     await runTool(page, 'sketch', 'solid');
@@ -1321,6 +1322,40 @@ test('demo: thread', async ({ page }) => {
       timeout: 90_000,
     });
     await commit(page, dialog);
+    await page.waitForTimeout(400);
+  });
+});
+
+test('demo: meshToSolid', async ({ page }) => {
+  // The plate is an STL (`fixtures/demos/meshToSolid.stl`), imported before recording starts.
+  await demoProject(page, 'blank');
+  const chooser = page.waitForEvent('filechooser');
+  await selectTab(page, 'Home');
+  await page.getByRole('button', { name: 'Import Model', exact: true }).click();
+  await (await chooser).setFiles(join(process.cwd(), 'fixtures', 'demos', 'meshToSolid.stl'));
+  const importDialog = page.getByRole('region', { name: 'Import dialog' });
+  await expect(importDialog).toHaveAttribute('data-preview-status', 'ok', { timeout: 90_000 });
+  await importDialog.getByRole('button', { name: /^OK/ }).click();
+  const row = page.locator('[data-body]').first();
+  await expect(row).toHaveAttribute('data-body-mesh', 'true', { timeout: 60_000 });
+  await kernelReady(page);
+  await turnView(page, 'Shift+1');
+  const { at, clip } = await frameWorld(page, boxPoints([-20, -15, 0], [20, 15, 5]));
+  const p = pointer(page);
+  await p.jump({ x: clip.x + clip.width - 50, y: clip.y + clip.height - 30 });
+  const dialog = page.getByRole('region', { name: 'Mesh to Solid dialog' });
+  await record(page, 'meshToSolid', clip, async () => {
+    await page.waitForTimeout(300);
+    await runTool(page, 'meshToSolid', 'modify');
+    await expect(dialog).toBeVisible();
+    // The Body field is picking: a click on the plate chooses its body.
+    await pickModel(page, p, at, [14, -9, 5], /./);
+    await expect(dialog).toHaveAttribute('data-regions', /planes/, { timeout: 60_000 });
+    await previewed(dialog);
+    await page.waitForTimeout(600);
+    await commit(page, dialog);
+    await expect(row).not.toHaveAttribute('data-body-mesh', 'true');
+    await p.moveTo({ x: clip.x + clip.width - 30, y: clip.y + 130 }, 400);
     await page.waitForTimeout(400);
   });
 });
