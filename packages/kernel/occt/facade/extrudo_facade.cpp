@@ -5937,8 +5937,9 @@ private:
     }
     double apex[3];
     if (!solve3(matrix, rhs, apex)) return fit;
-    const gp_XYZ x(apex[0], apex[1], apex[2]);
-    // Orient the axis towards the nodes; a double cone (nodes on both sides) is out.
+    gp_XYZ x(apex[0], apex[1], apex[2]);
+    // Orient the axis towards the nodes; a double cone (nodes on both sides)
+    // is out.
     std::vector<double> heights(nodes.size());
     double heightSum = 0;
     for (size_t i = 0; i < nodes.size(); ++i) {
@@ -5954,14 +5955,22 @@ private:
       low = std::min(low, h);
       high = std::max(high, h);
     }
-    if (low < -1e-6 * high) return fit;
+    // A genuine double cone has nodes on both sides in comparable amount; a
+    // tessellated apex sits a chord error past the facet least-squares apex,
+    // so a small negative side is the tip, not a second cone.
+    if (low < -0.5 * high) return fit;
+    // The half-angle from the nodes, the tip (at or behind the apex) aside.
     double alphaSum = 0;
+    int alphaCount = 0;
     for (int n : nodes) {
       const gp_XYZ q = meshNode(n) - x;
       const double height = q.Dot(axis);
+      if (height <= 0) continue;
       alphaSum += std::atan2((q - height * axis).Modulus(), height);
+      ++alphaCount;
     }
-    const double alpha = alphaSum / static_cast<double>(nodes.size());
+    if (alphaCount == 0) return fit;
+    const double alpha = alphaSum / alphaCount;
     if (!(alpha > 0) || !(alpha < M_PI / 2)) return fit;
     double rhoMax = 0;
     fit.deviation = 0;
