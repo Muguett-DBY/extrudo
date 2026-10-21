@@ -6141,8 +6141,13 @@ private:
                                     " surfaces; Extrudo rebuilds up to 500. Use Faceted, or simplify the mesh in your slicer.";
         return fail(message.c_str());
       }
-      return rebuildPrismatic(tolerance, surfaces, regions, regionOf, regionNeighbours, normals, areas, meshArea,
-                              meshVolume, rebuildFailed);
+      // An exception in the booleans is a failed rebuild like any other.
+      try {
+        return rebuildPrismatic(tolerance, surfaces, regions, regionOf, regionNeighbours, normals, areas, meshArea,
+                                meshVolume, rebuildFailed);
+      } catch (...) {
+        return fail(rebuildFailed.c_str());
+      }
     } catch (...) {
       return failFromException("Mesh to Solid failed");
     }
