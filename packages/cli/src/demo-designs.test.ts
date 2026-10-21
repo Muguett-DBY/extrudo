@@ -244,3 +244,26 @@ describe('the tooltip clips start from small designs (R3-16)', () => {
     });
   }
 });
+
+// Mesh to Solid's scene starts from an imported mesh, not a design: a 40 x 30 x 5 mm plate with a
+// through hole of radius 3 (six planes, one cylinder), exported as an STL by the API's own
+// export. `fixtures/demos/meshToSolid.stl` is written here under `WRITE_FIXTURES=1`.
+describe('Mesh to Solid starts from a plate mesh (ADR-0095 §6)', () => {
+  it('meshToSolid.stl is the plate, exported', { timeout: 60_000 }, async () => {
+    const d = Design.create({ name: 'Plate', units: 'mm' });
+    d.box({ length: '40 mm', width: '30 mm', height: '5 mm' });
+    d.cylinder({ diameter: '6 mm', height: '5 mm', operation: 'cut' });
+    const { job } = await openDesign(await d.toFile());
+    try {
+      await job.compute();
+      const [file] = await job.export({ format: 'stl', resolution: 0.05, singleFile: true });
+      if (!file?.closed) throw new Error('the plate did not export as a closed mesh');
+      expect(file.bytes.length).toBeLessThan(100_000);
+      const path = `${DEMOS}meshToSolid.stl`;
+      if (process.env.WRITE_FIXTURES) await writeFile(path, file.bytes);
+      expect(new Uint8Array(await readFile(path))).toEqual(file.bytes);
+    } finally {
+      await job.dispose();
+    }
+  });
+});
