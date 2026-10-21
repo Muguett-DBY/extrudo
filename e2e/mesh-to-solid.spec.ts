@@ -3,7 +3,7 @@ import { writeStl } from '../packages/io/src/index';
 import { ok } from './benchmark-helpers';
 import { kernelReady, openProject, selectTab } from './helpers';
 
-// P4-13, slice 4: Mesh to Solid's region preview and report (ADR-0095 §4,
+// P4-13, slice 4: Mesh to Solid's region preview and report (ADR-0097 §4,
 // §5). While the dialog is open with Prismatic, the view colours the mesh by
 // what the segmentation found and the dialog says it in one line; the report
 // of the conversion stays on the feature's status (its chip's tooltip).

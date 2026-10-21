@@ -307,7 +307,7 @@ export class RecomputeEngine {
   }
 
   /**
-   * Mesh to Solid's region preview (ADR-0095 §5) of a mesh body of the last
+   * Mesh to Solid's region preview (ADR-0097 §5) of a mesh body of the last
    * finished recompute, or with `base` of the last preview's base (editing
    * the feature that replaced it): prismatic's segmentation within
    * `tolerance`, no solid built. Undefined if there is no such body; a solid

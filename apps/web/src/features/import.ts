@@ -291,7 +291,7 @@ export const importDialog = defineFeatureDialog({
   extra: ScadOverrides,
   // The attachment record, in the same undo step as the feature (ADR-0066 §0);
   // with As solid ticked, the Mesh to Solid feature right after the import
-  // (ADR-0095 §6), so one undo step holds the file, the import and the conversion.
+  // (ADR-0097 §6), so one undo step holds the file, the import and the conversion.
   commitWith(values: DialogValues, ctx: DialogContext): readonly Command<unknown>[] {
     const file = importedFile(ctx);
     if (!file || ctx.feature) return [];

@@ -1,4 +1,4 @@
-// Mesh to Solid, prismatic (ADR-0095 §3, slices 3, 4a1 and 4a2): the facade's own
+// Mesh to Solid, prismatic (ADR-0097 §3, slices 3, 4a1 and 4a2): the facade's own
 // meshToSolid(1, tolerance) on the test matrix of the slice, natively in the
 // pinned OCCT image; case r runs meshRegions (the region preview, slice 4).
 // run.sh copies the facade with its private members made

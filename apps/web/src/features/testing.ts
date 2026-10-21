@@ -186,7 +186,7 @@ export interface FakeKernel extends DialogKernel {
   }[];
   /** Whether each `reference` call asked for the preview's base. */
   references: boolean[];
-  /** Each region preview asked for (ADR-0095 §5), to answer. */
+  /** Each region preview asked for (ADR-0097 §5), to answer. */
   regions: {
     body: BodyId;
     tolerance: number;

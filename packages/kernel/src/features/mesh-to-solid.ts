@@ -1,5 +1,5 @@
 /**
- * The Mesh to Solid feature in the kernel (P4-13, FR-IO-10, ADR-0095): turns
+ * The Mesh to Solid feature in the kernel (P4-13, FR-IO-10, ADR-0097): turns
  * one imported mesh body into a B-rep solid through `Kernel.meshToSolid`
  * (§3), under the same body ID, so the body keeps its name, colour and place
  * in the browser. Suppressing the feature gives the mesh back.
@@ -29,7 +29,7 @@ import type { EvalContext, FeatureOutput, KernelFeatureDefinition } from '../rec
 import { splitSolids } from './bodies';
 import { existing } from './transform';
 
-/** The feature's report (ADR-0095 §4): `kind` plus the kernel's `MeshToSolidReport`. */
+/** The feature's report (ADR-0097 §4): `kind` plus the kernel's `MeshToSolidReport`. */
 export interface MeshToSolidFeatureReport extends MeshToSolidReport {
   kind: 'meshToSolid';
 }
@@ -54,7 +54,7 @@ function evaluateMeshToSolid(ctx: EvalContext<MeshToSolidInputs>): FeatureOutput
   const shape = ctx.bodies.get(id) as ShapeHandle;
   if (!kernel.isMesh(shape)) {
     // The kernel throws the same text; checking first keeps the feature's
-    // message exact (ADR-0095 §1).
+    // message exact (ADR-0097 §1).
     throw new KernelError('Mesh to Solid needs a mesh body: this body is already a solid.');
   }
   const tolerance = ctx.inputs.tolerance ? ctx.value('tolerance') : MESH_TO_SOLID_DEFAULT_TOLERANCE;

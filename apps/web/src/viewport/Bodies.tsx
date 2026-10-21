@@ -92,7 +92,7 @@ export interface BodiesProps {
    */
   posed?: Readonly<Record<BodyId, Matrix12>>;
   /**
-   * Mesh to Solid's region preview (ADR-0095 §5): the named body's triangles
+   * Mesh to Solid's region preview (ADR-0097 §5): the named body's triangles
    * coloured by surface kind, drawn in place of its faces.
    */
   regions?: BodyRegions;
@@ -439,7 +439,7 @@ function useFaceColors(
 }
 
 /**
- * The de-indexed, coloured copy of a mesh body for a region preview (ADR-0095
+ * The de-indexed, coloured copy of a mesh body for a region preview (ADR-0097
  * §5), built only while one is shown and again when the mesh, the regions or
  * the theme change. Undefined without regions, or for regions of another mesh.
  */

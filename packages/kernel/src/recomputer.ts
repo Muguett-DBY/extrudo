@@ -188,7 +188,7 @@ export interface Preview {
    * placement line.
    */
   sweep?: SweepReport;
-  /** The draft's report when it is a Mesh to Solid that computed (ADR-0095 §4): the dialog's Result line. */
+  /** The draft's report when it is a Mesh to Solid that computed (ADR-0097 §4): the dialog's Result line. */
   meshToSolid?: MeshToSolidReport;
 }
 
@@ -413,7 +413,7 @@ export class Recomputer {
     }
   }
   /**
-   * Mesh to Solid's region preview (ADR-0095 §5) of a mesh body the model
+   * Mesh to Solid's region preview (ADR-0097 §5) of a mesh body the model
    * store shows, or with `base` of the last preview's base (editing the
    * feature that replaced it): a surface per triangle (in `BodyMesh.indices`
    * / 3 order) and a kind per surface. Undefined on any error: a solid body,

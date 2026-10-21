@@ -1,5 +1,5 @@
 /**
- * The Mesh to Solid feature (P4-13, FR-IO-10, ADR-0095 §1): turns an
+ * The Mesh to Solid feature (P4-13, FR-IO-10, ADR-0097 §1): turns an
  * imported mesh body into a B-rep solid with real faces, so it fillets,
  * shells and takes sketches like any body. `body` is the mesh body (a solid
  * is refused); `method` says how: `prismatic` recognises planes and
@@ -20,11 +20,11 @@ import { z } from './zod';
 
 export const MESH_TO_SOLID_TYPE = 'meshToSolid';
 
-/** How a mesh is turned into a solid (ADR-0095 §3). */
+/** How a mesh is turned into a solid (ADR-0097 §3). */
 export const MESH_TO_SOLID_METHODS = ['prismatic', 'faceted'] as const;
 export type MeshToSolidMethod = (typeof MESH_TO_SOLID_METHODS)[number];
 
-/** How far a facet may sit from a fitted surface, in mm (ADR-0095 §1). */
+/** How far a facet may sit from a fitted surface, in mm (ADR-0097 §1). */
 export const MESH_TO_SOLID_DEFAULT_TOLERANCE = 0.01;
 
 export const MeshToSolidInputsSchema = z.strictObject({
@@ -51,7 +51,7 @@ export const meshToSolidFeature: FeatureDefinition<MeshToSolidInputs> = {
   category: 'modify',
   icon: 'mesh-to-solid',
   inputsSchema: MeshToSolidInputsSchema,
-  // ADR-0095 §2: every face of the result, by position (there is no history
+  // ADR-0097 §2: every face of the result, by position (there is no history
   // into the mesh to name them from).
   faceRoles: [
     {
@@ -63,7 +63,7 @@ export const meshToSolidFeature: FeatureDefinition<MeshToSolidInputs> = {
 
 /**
  * What a conversion made, or what its segmentation found before a refusal
- * (ADR-0095 §4): the result's faces counted by surface kind, the regions that
+ * (ADR-0097 §4): the result's faces counted by surface kind, the regions that
  * fit nothing, and the tolerance that would have fitted the largest of them.
  * Derived, never stored: the kernel's report, `FeatureStatus.meshToSolid`
  * and the dialog's preview carry it.
@@ -100,7 +100,7 @@ const SURFACE_KINDS = [
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
 /**
- * "6 planes, 1 cylinder · 0 unfit" (ADR-0095 §4): every kind found, and the
+ * "6 planes, 1 cylinder · 0 unfit" (ADR-0097 §4): every kind found, and the
  * unfit regions always.
  */
 export function meshSurfaceSummary(counts: MeshSurfaceCounts): string {
@@ -118,7 +118,7 @@ export function meshToSolidSummary(report: MeshToSolidReport): string {
 }
 
 /**
- * A surface kind of Mesh to Solid's region preview (ADR-0095 §5), as the
+ * A surface kind of Mesh to Solid's region preview (ADR-0097 §5), as the
  * kernel's `meshRegions` reports it per surface.
  */
 export const MESH_REGION_KIND = {

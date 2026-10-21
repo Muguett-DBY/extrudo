@@ -276,7 +276,7 @@ export interface FeatureStatus {
    */
   script?: ScriptRunStatus;
   /**
-   * A Mesh to Solid feature's report (P4-13, ADR-0095 §4): the result's faces
+   * A Mesh to Solid feature's report (P4-13, ADR-0097 §4): the result's faces
    * by surface kind. Absent for every other feature and when it failed.
    */
   meshToSolid?: MeshToSolidReport;

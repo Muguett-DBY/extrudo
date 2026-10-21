@@ -2747,7 +2747,7 @@ paths — with the message "An axis has no length or middle; pick a sketch line.
 Perpendicular, Symmetric and Tangent take an axis line.
 A line's distance to an axis hangs on the line: `distanceEnds` runs from the sketch line's middle to its foot on the axis whichever was picked first (an axis's middle is arbitrary). The Dimension tool keeps the hovered pick visible: with a line picked, `preview()` hides the length dimension while a second pick is under the cursor (`tools/dimension.ts`). A fresh axis pick counts as a datum in the tool's view: `DimensionTool.#view` adds a stand-in projection (`view:<pick id>` → `{ ref, curves: { axis } }`) for a synthetic line pick whose model is a datum, so its stand-in line is treated like the stored axis (anchor, measure) and the label placed for it stays put once the axis is stored; the host's pending-dimension re-measure keeps `projections` in its view for the same reason (`tools/host.ts` `resolveEdit`). A stored datum axis line is never drawn as a segment, even highlighted: `EntityHighlight` skips `isDatumLine(sketch, id)` (core, `dimensions.ts`) and `curveSegments` hides datum lines; Dimension and Constraint tools show the fresh-axis marker instead (`storedDatumMarker` in `tools/tool.ts`, `Pick.marker` → `modelHover`/`modelPicked`); the origin keeps its point highlight.
 
-ADR-0095 (P4-13, issue #95) adds **Mesh to Solid**: feature `meshToSolid`
+ADR-0097 (P4-13, issue #95) adds **Mesh to Solid**: feature `meshToSolid`
 (`packages/kernel/src/features/mesh-to-solid.ts`, core `meshToSolidFeature`)
 with `body` (one mesh body), `method` `prismatic` | `faceted` and
 `tolerance` (mm), `bodyAccess: 'write'`; the result **replaces the mesh body

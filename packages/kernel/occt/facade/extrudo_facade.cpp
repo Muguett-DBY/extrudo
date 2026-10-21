@@ -2575,7 +2575,7 @@ public:
   // ---------------------------------------------------------- mesh to solid --
 
   /**
-   * Mesh to Solid's input buffers (ADR-0095 §3), written in place by the
+   * Mesh to Solid's input buffers (ADR-0097 §3), written in place by the
    * kernel right after it reads each pointer: nodes as x, y, z doubles,
    * triangles as three 0-based uint32 node indices each, facing outward.
    * Returns 1, or 0 for a count out of range.
@@ -2596,7 +2596,7 @@ public:
   uintptr_t meshTrianglesPtr() const { return reinterpret_cast<uintptr_t>(meshTriangles_.data()); }
 
   /**
-   * Turns the staged mesh into a solid (ADR-0095 §3). method 0 = faceted (one
+   * Turns the staged mesh into a solid (ADR-0097 §3). method 0 = faceted (one
    * planar face per coplanar patch), 1 = prismatic (exact planes, cylinders,
    * cones, spheres and tori). Frees the input buffers either way. Returns a handle, or 0;
    * the report (meshReportPtr/Size) is filled on success, and by prismatic
@@ -2616,7 +2616,7 @@ public:
   }
 
   /**
-   * Mesh to Solid's region preview (ADR-0095 §5 and its 2026-10-22
+   * Mesh to Solid's region preview (ADR-0097 §5 and its 2026-10-22
    * amendment): prismatic's segmentation and fits over the staged mesh, no
    * solid. Fills meshReport_ as a refusal would (faces 0), one surface index
    * per triangle (meshRegionsPtr, int32, in the staged triangle order) and
@@ -5507,10 +5507,10 @@ private:
   /** meshRegions' output: a surface index per triangle, a kind per surface. */
   std::vector<int32_t> meshRegionOf_;
   std::vector<int32_t> meshRegionKinds_;
-  /** Faceted refuses a result with more faces than this (ADR-0095 §3). */
+  /** Faceted refuses a result with more faces than this (ADR-0097 §3). */
   static constexpr int FACETED_FACE_CAP = 2000;
 
-  /** meshToSolid's faceted method (ADR-0095 §3), over the staged buffers. */
+  /** meshToSolid's faceted method (ADR-0097 §3), over the staged buffers. */
   int facetedFromMesh() {
     static const char* const notClosed =
         "Mesh to Solid couldn't make a closed solid from this mesh: repair it in your slicer or a mesh tool and try again.";
@@ -5579,11 +5579,11 @@ private:
     }
   }
 
-  /** Prismatic refuses more recognised surfaces than this (ADR-0095 §3). */
+  /** Prismatic refuses more recognised surfaces than this (ADR-0097 §3). */
   static constexpr int PRISMATIC_SURFACE_CAP = 500;
 
   /**
-   * One surface prismatic recognised (ADR-0095 §3, slices 4a1 and 4a2): a
+   * One surface prismatic recognised (ADR-0097 §3, slices 4a1 and 4a2): a
    * plane (kind 0), a cylinder (kind 1), a cone (kind 2), a sphere (kind 3),
    * a torus (kind 4) or an unfit region (kind -1), with the planar regions
    * and triangles it covers.
@@ -6039,7 +6039,7 @@ private:
   }
 
   /**
-   * The torus through `nodes` (ADR-0095 §3, slice 4a2). Every normal line of
+   * The torus through `nodes` (ADR-0097 §3, slice 4a2). Every normal line of
    * a torus meets its spine circle: for the signed tube radius ρ (> 0 when
    * the normals point away from the spine, a donut or an outside fillet;
    * < 0 on the concave side) the points centroid_t − ρ n_t lie on one
@@ -6325,7 +6325,7 @@ private:
   };
 
   /**
-   * Prismatic's segmentation and fits (ADR-0095 §3 and its 2026-10-21
+   * Prismatic's segmentation and fits (ADR-0097 §3 and its 2026-10-21
    * amendments), over the staged buffers: planar regions, then smooth clusters
    * fitted as planes, cylinders, cones, spheres or tori, a cluster that fits
    * nothing whole split into several. Fills `out` and meshReport_ (the counts, no
@@ -6691,7 +6691,7 @@ private:
         return s;
       };
       // Splits a smooth component that fits nothing whole into primitives by
-      // seeded region growing (ADR-0095 §3, slice 4a2). The seed is the
+      // seeded region growing (ADR-0097 §3, slice 4a2). The seed is the
       // largest region left. A large one (4 x the component's median region
       // area: a flat face between fillets) is a plane. Else its patch adds
       // the neighbour sharing the longest border with it, one at a time,
@@ -7054,7 +7054,7 @@ private:
   }
 
   /**
-   * meshToSolid's prismatic method (ADR-0095 §3 and its 2026-10-21
+   * meshToSolid's prismatic method (ADR-0097 §3 and its 2026-10-21
    * amendment), over the staged buffers: segmentMesh, then one oversized face
    * per surface, BOPAlgo_MakerVolume, the cells inside the mesh kept, and the
    * result checked against the mesh. Fills meshReport_ before a refusal too.
@@ -7098,7 +7098,7 @@ private:
   }
 
   /**
-   * Prismatic's rebuild and verification (ADR-0095 §3): snaps each cylinder
+   * Prismatic's rebuild and verification (ADR-0097 §3): snaps each cylinder
    * to the planes it is tangent or square to (a sphere to the cylinders it
    * shares a radius with, a cone or a torus to its cylinder's or end plane's
    * axis, a torus's spine to the plane it touches) and

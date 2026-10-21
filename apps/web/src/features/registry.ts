@@ -74,7 +74,7 @@ export function featureDialogs(): FeatureDialogs {
   dialogs.register(removeDialog);
   // Import: a STEP file as bodies (P4-06, ADR-0066 §2).
   dialogs.register(importDialog);
-  // Mesh to Solid: an imported mesh becomes a B-rep body (P4-13, ADR-0095).
+  // Mesh to Solid: an imported mesh becomes a B-rep body (P4-13, ADR-0097).
   dialogs.register(meshToSolidDialog);
   // Canvas: a reference image on a plane (P4-06, ADR-0066 §5).
   dialogs.register(canvasDialog);

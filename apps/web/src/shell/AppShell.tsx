@@ -744,7 +744,7 @@ export function AppShell({
       ...createBodyActions({ store, session }, () => bodyListRef.current, notify),
       // A body's menu exports it (P2-12).
       exportBodies: (ids: readonly BodyId[]) => setModelExport({ bodies: ids }),
-      // A body's menu opens Mesh to Solid with the body picked (P4-13, ADR-0095 §5);
+      // A body's menu opens Mesh to Solid with the body picked (P4-13, ADR-0097 §5);
       // the selection and `run` are defined later, so the menu reaches them through a ref.
       convertToSolid: (id: BodyId) => convertToSolidRef.current(id),
     }),
@@ -2210,7 +2210,7 @@ export function AppShell({
           ? project.select
           : (measureSelect ?? sessionSelect);
   // A body menu's Convert to Solid… selects the body the way a browser row's click
-  // does, then runs the tool the way a tile click does (P4-13, ADR-0095 §5): the
+  // does, then runs the tool the way a tile click does (P4-13, ADR-0097 §5): the
   // dialog pre-selects from the session's selection.
   convertToSolidRef.current = (id) => {
     modelSelect?.onClick({ kind: 'body', id }, false);

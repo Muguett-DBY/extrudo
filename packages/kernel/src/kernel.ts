@@ -121,17 +121,17 @@ export class MeshBodyError extends KernelError {
   override name = 'MeshBodyError';
 }
 
-/** Mesh to Solid's options (ADR-0095 §3): the method, and its fitting tolerance in mm. */
+/** Mesh to Solid's options (ADR-0097 §3): the method, and its fitting tolerance in mm. */
 export interface MeshToSolidOptions {
   method: 'faceted' | 'prismatic';
   tolerance: number;
 }
 
-/** What Mesh to Solid made (ADR-0095 §4); the type lives in core, which has no WASM. */
+/** What Mesh to Solid made (ADR-0097 §4); the type lives in core, which has no WASM. */
 export type { MeshToSolidReport };
 
 /**
- * Mesh to Solid's region preview (ADR-0095 §5): prismatic's segmentation of a
+ * Mesh to Solid's region preview (ADR-0097 §5): prismatic's segmentation of a
  * mesh body, no solid. `surfaceOf[t]` is the surface of triangle `t` in the
  * body's `Manifold.getMesh()` order (so of `BodyMesh.indices` / 3), `kinds[s]`
  * that surface's kind (core's `MESH_REGION_KIND`). The counts are the report's.
@@ -153,7 +153,7 @@ export interface MeshToSolidResult {
   report: MeshToSolidReport;
 }
 
-/** ADR-0095 §3: faceted refuses more faces than this, prismatic more surfaces than this. */
+/** ADR-0097 §3: faceted refuses more faces than this, prismatic more surfaces than this. */
 export const FACETED_FACE_CAP = 2000;
 export const PRISMATIC_SURFACE_CAP = 500;
 
@@ -1869,7 +1869,7 @@ export class Kernel {
   }
 
   /**
-   * Turns a mesh body into a B-rep solid (ADR-0095 §3). The mesh handle is
+   * Turns a mesh body into a B-rep solid (ADR-0097 §3). The mesh handle is
    * untouched; the caller owns the returned shape.
    */
   meshToSolid(shape: ShapeHandle, options: MeshToSolidOptions): MeshToSolidResult {
@@ -1882,7 +1882,7 @@ export class Kernel {
   }
 
   /**
-   * Mesh to Solid's region preview (ADR-0095 §5): prismatic's segmentation
+   * Mesh to Solid's region preview (ADR-0097 §5): prismatic's segmentation
    * and fits of a mesh body within `tolerance` (mm), no solid built. The same
    * code as `meshToSolid`'s prismatic method, so the two always agree.
    */
@@ -1902,7 +1902,7 @@ export class Kernel {
     }
   }
 
-  /** Writes a mesh body's welded triangles into the facade's mesh buffers (ADR-0095 §3). */
+  /** Writes a mesh body's welded triangles into the facade's mesh buffers (ADR-0097 §3). */
   #stageMesh(shape: ShapeHandle): void {
     if (!this.isMesh(shape)) {
       throw new KernelError('Mesh to Solid needs a mesh body: this body is already a solid.');

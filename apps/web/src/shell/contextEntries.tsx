@@ -313,7 +313,7 @@ function modelGroups(input: ContextInput): MarkingEntry[][] {
         onSelect: () => bodyActions.exportBodies?.(ids),
       });
     }
-    // One mesh body opens Mesh to Solid with it picked (P4-13, ADR-0095 §5).
+    // One mesh body opens Mesh to Solid with it picked (P4-13, ADR-0097 §5).
     if (single?.mesh && bodyActions.convertToSolid) {
       body.push({
         id: 'convertToSolid',

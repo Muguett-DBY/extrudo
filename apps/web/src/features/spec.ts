@@ -158,7 +158,7 @@ export interface InfoField extends FieldBase {
   kind: 'info';
   text(values: DialogValues, ctx: DialogContext): string;
   /**
-   * Colour swatches under the line (Mesh to Solid's region kinds, ADR-0095
+   * Colour swatches under the line (Mesh to Solid's region kinds, ADR-0097
    * §5), each a theme token's colour and what it means. Empty or absent: none.
    */
   legend?(values: DialogValues, ctx: DialogContext): readonly LegendEntry[];
@@ -171,7 +171,7 @@ export interface LegendEntry {
 }
 
 /**
- * What a dialog's region preview segments (Mesh to Solid, ADR-0095 §5): a
+ * What a dialog's region preview segments (Mesh to Solid, ADR-0097 §5): a
  * mesh body, within a tolerance in mm.
  */
 export interface RegionsRequest {
@@ -270,10 +270,10 @@ export interface DialogContext {
    * while the draft fails.
    */
   draftSweep?: SweepReport;
-  /** The draft's Mesh to Solid report (ADR-0095 §4). Absent for anything else and while the draft fails. */
+  /** The draft's Mesh to Solid report (ADR-0097 §4). Absent for anything else and while the draft fails. */
   draftMeshToSolid?: MeshToSolidReport;
   /**
-   * The region preview's latest answer (`FeatureDialogSpec.regions`, ADR-0095
+   * The region preview's latest answer (`FeatureDialogSpec.regions`, ADR-0097
    * §5). Absent while there is none, for any other dialog, and when the spec
    * asks for none.
    */
@@ -554,7 +554,7 @@ export interface FeatureDialogSpec<I extends FeatureInputs = FeatureInputs>
    */
   previewStyle?(values: DialogValues): PreviewToolStyle;
   /**
-   * The region preview (Mesh to Solid, ADR-0095 §5): which mesh body the
+   * The region preview (Mesh to Solid, ADR-0097 §5): which mesh body the
    * kernel segments, within which tolerance, or undefined for none. The
    * controller asks again when the answer changes (dropping late answers),
    * keeps the result in `preview.regions` and `ctx.draftRegions`, where the

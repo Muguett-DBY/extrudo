@@ -1,5 +1,5 @@
 /**
- * Mesh to Solid's region preview in the view (ADR-0095 §5): a mesh body's
+ * Mesh to Solid's region preview in the view (ADR-0097 §5): a mesh body's
  * triangles coloured by the kind of surface prismatic's segmentation put
  * them on. A mesh shares its nodes between triangles of different surfaces,
  * so the coloured copy is de-indexed: three nodes of its own per triangle.

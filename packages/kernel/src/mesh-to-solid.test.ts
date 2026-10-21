@@ -1,4 +1,4 @@
-// Mesh to Solid (P4-13, ADR-0095 §3): a mesh body's triangles go through the
+// Mesh to Solid (P4-13, ADR-0097 §3): a mesh body's triangles go through the
 // facade into one B-rep solid. Faceted merges coplanar facets; prismatic
 // recognises planes and cylinders and rebuilds the body from exact surfaces.
 // Real OCCT, a real manifold module and `strictLeaks`: a mesh handle or a

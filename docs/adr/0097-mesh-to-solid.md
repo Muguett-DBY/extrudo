@@ -1,4 +1,4 @@
-# ADR-0095: Mesh to Solid: an imported mesh becomes a B-rep body
+# ADR-0097: Mesh to Solid: an imported mesh becomes a B-rep body
 
 - **Status:** Accepted, 2026-10-20 (the owner's decisions 1.1, 2.1, 3.1, 4.1
   and 5.1 of `docs/plans/stl-to-solid-2026-10-20.md`; issue #95, with #78

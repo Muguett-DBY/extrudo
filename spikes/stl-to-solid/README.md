@@ -34,7 +34,7 @@ The meshes: `fixtures/imports/cube.stl`; cylinders r 5 h 20 at 32, 360 and
 only); OCCT solids meshed fine or coarse and read back welded through STL (a
 plate with a hole, a box with a filleted edge, a 299-step staircase); a UV
 sphere (2,208 and 499,000 triangles); the 32-gon with its nodes moved
-radially by up to ±0.005 mm. `c` adds the curved cases (slice 4a1, ADR-0095
+radially by up to ±0.005 mm. `c` adds the curved cases (slice 4a1, ADR-0097
 §3): a sphere r 10, a dome (a cylinder fused with a hemisphere) fine and
 coarse, a truncated cone, a countersunk plate, a pointed cone and an
 ellipsoid. `t` adds the tori and the split clusters (slice 4a2): a donut
@@ -43,6 +43,6 @@ with a filleted end, a plate whose hole's top edge is filleted, a box with
 all twelve edges filleted, and the ellipsoid again. `x` adds an L-bracket, boxes with four filleted vertical or top
 edges, a plate with a 12-gon hole, a slot and a boss, and a tube. It prints
 the time, the report, the faces by kind, the validity and the volume against
-the exact one. The numbers are in ADR-0095's amendments of 2026-10-21;
+the exact one. The numbers are in ADR-0097's amendments of 2026-10-21;
 disabling the cylinder snap (an edit of the copy) makes the coarse
 four-fillet box and the slot fail.

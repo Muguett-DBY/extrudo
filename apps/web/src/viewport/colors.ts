@@ -50,7 +50,7 @@ export interface SceneColors {
   overhang: Rgba;
   /** The wall-thickness check's shading (P5-06): the error colour, as the overhang's. */
   thickness: Rgba;
-  /** Mesh to Solid's region preview (ADR-0095 §5): planes in the Create category's colour. */
+  /** Mesh to Solid's region preview (ADR-0097 §5): planes in the Create category's colour. */
   regionPlane: Rgba;
   /** Cylinders and the other curved kinds in the Sketch category's. */
   regionCurved: Rgba;

@@ -45,7 +45,7 @@ export const DIALOG_COLUMN = 280;
  * Test hooks: `data-feature-dialog` (the feature type), `data-dialog-mode`
  * (`create`/`edit`), `data-dialog-valid`, `data-preview-status`
  * (`pending`, `ok`, `warning`, `error`, or absent before the first preview),
- * `data-regions` while a region preview is shown (ADR-0095 §5: "6 planes,
+ * `data-regions` while a region preview is shown (ADR-0097 §5: "6 planes,
  * 0 cylinders, 0 unfit").
  */
 export function FeatureDialog({ controller, settings }: FeatureDialogProps) {

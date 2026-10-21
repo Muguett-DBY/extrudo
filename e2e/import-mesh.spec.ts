@@ -84,7 +84,7 @@ test('an STL becomes one mesh body, and undo takes it away', async ({ page }) =>
   await expect(panel.locator('[data-info="file"]')).toContainText('cube.stl');
   // A mesh file has its own units, so the dialog offers them (ADR-0066 §2).
   await expect(panel.getByRole('combobox', { name: 'Units' })).toHaveValue('auto');
-  // A mesh import can also convert at once (ADR-0095 §6): the checkbox is
+  // A mesh import can also convert at once (ADR-0097 §6): the checkbox is
   // there for a mesh file (a STEP one has none, see import-step.spec.ts).
   await expect(panel.getByRole('checkbox', { name: 'As solid' })).toBeVisible();
   // The live preview needs manifold-3d in the worker, which the recomputer
@@ -486,7 +486,7 @@ test('a mesh body moves, and splits along a plane', async ({ page }) => {
   expect((volumes[0] ?? 0) + (volumes[1] ?? 0)).toBeCloseTo(8000, -1);
 });
 
-// P4-13: Mesh to Solid (ADR-0095). The converted body replaces the mesh under
+// P4-13: Mesh to Solid (ADR-0097). The converted body replaces the mesh under
 // its own name and is a plain solid: every feature works on it again.
 
 test('Convert to Solid… turns the mesh into a six-face solid that fillets', async ({ page }) => {

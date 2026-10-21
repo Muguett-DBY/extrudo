@@ -5,7 +5,7 @@ export function scriptChipHint(status?: FeatureStatus): string | undefined {
   return status?.script ? `made ${status.script.generated.length} features` : undefined;
 }
 
-/** A Mesh to Solid chip's line (ADR-0095 §4): what the conversion made, "6 planes · 0 unfit". */
+/** A Mesh to Solid chip's line (ADR-0097 §4): what the conversion made, "6 planes · 0 unfit". */
 export function meshToSolidChipHint(status?: FeatureStatus): string | undefined {
   return status?.meshToSolid && meshToSolidSummary(status.meshToSolid);
 }

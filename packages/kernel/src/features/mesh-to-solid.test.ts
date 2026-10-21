@@ -1,4 +1,4 @@
-// The Mesh to Solid feature (P4-13, ADR-0095, slices 2 and 3) through the recompute
+// The Mesh to Solid feature (P4-13, ADR-0097, slices 2 and 3) through the recompute
 // engine: an imported mesh body becomes a solid under its own ID, fillets
 // like a native solid, refuses a solid body and a bad tolerance, and gives
 // the mesh back when suppressed. Real OCCT, a real manifold module and
@@ -112,7 +112,7 @@ const faceIds = (result: Done, id: string): string[] => [
   ...(result.bodies.find((b) => b.id === id)?.mesh?.faceIds ?? []),
 ];
 
-describe('the Mesh to Solid feature (P4-13, ADR-0095)', { timeout: 300_000 }, () => {
+describe('the Mesh to Solid feature (P4-13, ADR-0097)', { timeout: 300_000 }, () => {
   it('converts an imported mesh into a six-plane solid under the same body ID', async () => {
     const result = ok(
       await recompute([importMesh('Import1'), meshToSolid('MeshToSolid1', CUBE_BODY)]),
@@ -125,7 +125,7 @@ describe('the Mesh to Solid feature (P4-13, ADR-0095)', { timeout: 300_000 }, ()
       Array.from({ length: 6 }, (_, i) => `toSolid:MeshToSolid1:face:${i + 1}`),
     );
     expect(kernel.properties(bodyShape(CUBE_BODY)).volume).toBeCloseTo(8000, 6);
-    // The report (ADR-0095 §4).
+    // The report (ADR-0097 §4).
     expect(result.reports['MeshToSolid1' as FeatureId]).toEqual({
       kind: 'meshToSolid',
       method: 'faceted',

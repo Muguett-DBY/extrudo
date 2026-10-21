@@ -1,5 +1,5 @@
 /**
- * The Mesh to Solid dialog (P4-13, FR-IO-10, ADR-0095): a mesh body, the
+ * The Mesh to Solid dialog (P4-13, FR-IO-10, ADR-0097): a mesh body, the
  * method and (prismatic only) the fitting tolerance. Fields are named like
  * the feature's inputs (`MeshToSolidInputs`), so the framework's default
  * mapping turns them into inputs and back.
@@ -24,7 +24,7 @@ const METHOD_LABELS: Record<MeshToSolidMethod, string> = {
   faceted: 'Faceted',
 };
 
-// The tolerance only matters to prismatic (ADR-0095 §1).
+// The tolerance only matters to prismatic (ADR-0097 §1).
 const isPrismatic = (v: Pick<DialogValues, 'choices'>) =>
   (v.choices.method ?? 'prismatic') === 'prismatic';
 
@@ -88,7 +88,7 @@ export const meshToSolidDialog = defineFeatureDialog({
   ],
   // The solid replaces the mesh body under its own ID: drawn as a body.
   previewStyle: () => 'new',
-  // ADR-0095 §5: prismatic colours the mesh by what its segmentation found,
+  // ADR-0097 §5: prismatic colours the mesh by what its segmentation found,
   // in milliseconds, while the draft's solid (its status, the Result line's
   // report) is built behind it.
   regions: (values, ctx) => {

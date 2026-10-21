@@ -46,7 +46,7 @@ describe('the mesh to solid dialog', () => {
     t.session.getState().select([{ kind: 'body', id: BOX }]);
     t.controller.start('meshToSolid');
     expect(t.open()?.values.refs.body).toEqual([{ kind: 'body', id: BOX }]);
-    // The method defaults to prismatic (ADR-0095 §1).
+    // The method defaults to prismatic (ADR-0097 §1).
     expect(t.open()?.values.choices.method).toBe('prismatic');
     expect(MeshToSolidInputsSchema.safeParse(t.open()?.draft.inputs).success).toBe(true);
     expect(t.controller.ok()).toBe(true);
@@ -82,7 +82,7 @@ function previewWith(id: FeatureId, report: MeshToSolidReport): Preview {
 
 const counts = { planes: 0, cylinders: 0, cones: 0, spheres: 0, tori: 0, unfit: NONE };
 
-describe('the mesh to solid dialog: regions and the Result line (ADR-0095 §4, §5)', () => {
+describe('the mesh to solid dialog: regions and the Result line (ADR-0097 §4, §5)', () => {
   const summaryField = meshToSolidDialog.fields.find((f) => f.name === 'summary') as InfoField;
 
   /** The Result line and its legend as the dialog shows them, or undefined while hidden. */

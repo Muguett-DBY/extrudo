@@ -163,7 +163,7 @@ export interface KernelApi {
     keepRounds?: boolean,
   ): Promise<SmoothFaces | undefined>;
   /**
-   * Mesh to Solid's region preview (ADR-0095 §5) of a mesh body (`base` as
+   * Mesh to Solid's region preview (ADR-0097 §5) of a mesh body (`base` as
    * for `reference`): one surface per triangle and a kind per surface, no
    * solid built. Undefined if the body is gone; a solid body throws.
    */

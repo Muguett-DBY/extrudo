@@ -1029,7 +1029,7 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
   body **in creation order**, so a mesh target and a solid tool warn about
   nothing.
 
-- **Convert to Solid e2e** (the file's last test, P4-13, ADR-0095):
+- **Convert to Solid e2e** (the file's last test, P4-13, ADR-0097):
   right-click the row (`bodyRow(page).click({ button: 'right' })`) and click
   the `menuitem` named "Convert to Solid…" (the browser row's own Radix menu,
   the same pattern as `e2e/bodies.spec.ts`), which opens the region "Mesh to
@@ -1046,7 +1046,7 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
   filleted edge adds one face: `faces: 7`. Two `Control+z` are back to one
   face with `data-body-mesh="true"`.
 
-- **As solid e2e** (the file's last test, P4-13 slice 4c, ADR-0095 §6): the
+- **As solid e2e** (the file's last test, P4-13 slice 4c, ADR-0097 §6): the
   Import dialog's toggle is a plain `<input type="checkbox">`, so the
   selector is `panel.getByRole('checkbox', { name: 'As solid' })` — visible
   for a mesh file only (the plain-STL test asserts it too), absent for a STEP
@@ -1061,7 +1061,7 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
 ### `e2e/mesh-to-solid.spec.ts`
 
 - **Mesh to Solid region preview e2e** (`e2e/mesh-to-solid.spec.ts`, P4-13
-  slice 4b, ADR-0095's 2026-10-22 amendment): its own helpers (it doesn't
+  slice 4b, ADR-0097's 2026-10-22 amendment): its own helpers (it doesn't
   touch `import-mesh.spec.ts`): Home › Import Model through the file chooser
   (a path, or `{ name, mimeType, buffer }` for the sphere), OK once the
   Import dialog's `data-preview-status="ok"`, then the body row's right-click

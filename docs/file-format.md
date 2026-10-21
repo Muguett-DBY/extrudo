@@ -1523,7 +1523,7 @@ with one start the names are exactly as before).
 ### 6.34 `meshToSolid`
 
 Turns an imported mesh body into a B-rep solid with real faces (P4-13,
-ADR-0095). No new keys.
+ADR-0097). No new keys.
 
 | Input | Kind | Required | Rule |
 |---|---|---|---|

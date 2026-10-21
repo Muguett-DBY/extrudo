@@ -248,7 +248,7 @@ describe('the tooltip clips start from small designs (R3-16)', () => {
 // Mesh to Solid's scene starts from an imported mesh, not a design: a 40 x 30 x 5 mm plate with a
 // through hole of radius 3 (six planes, one cylinder), exported as an STL by the API's own
 // export. `fixtures/demos/meshToSolid.stl` is written here under `WRITE_FIXTURES=1`.
-describe('Mesh to Solid starts from a plate mesh (ADR-0095 §6)', () => {
+describe('Mesh to Solid starts from a plate mesh (ADR-0097 §6)', () => {
   it('meshToSolid.stl is the plate, exported', { timeout: 60_000 }, async () => {
     const d = Design.create({ name: 'Plate', units: 'mm' });
     d.box({ length: '40 mm', width: '30 mm', height: '5 mm' });

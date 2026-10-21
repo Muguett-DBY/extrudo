@@ -138,7 +138,7 @@ export interface DialogKernel {
    */
   scadParameters?(file: AttachmentId): Promise<ScadParametersResult>;
   /**
-   * Mesh to Solid's region preview of a mesh body (ADR-0095 §5), with `base`
+   * Mesh to Solid's region preview of a mesh body (ADR-0097 §5), with `base`
    * of the last preview's base bodies: for specs with `regions`. Absent: no
    * region preview. Undefined on any error.
    */
@@ -164,10 +164,10 @@ export interface DialogPreview {
   thread?: ThreadReport;
   /** The draft's sweep report from the latest preview (P4-12): where the profile sits. */
   sweep?: SweepReport;
-  /** The draft's Mesh to Solid report from the latest preview (ADR-0095 §4). */
+  /** The draft's Mesh to Solid report from the latest preview (ADR-0097 §4). */
   meshToSolid?: MeshToSolidReport;
   /**
-   * The region preview's latest answer (`FeatureDialogSpec.regions`, ADR-0095
+   * The region preview's latest answer (`FeatureDialogSpec.regions`, ADR-0097
    * §5): the view colours the body's triangles by kind in place of the
    * drawing. Kept while a newer request for the same body is out.
    */
@@ -315,7 +315,7 @@ export interface DialogController {
  */
 export function previewInputs(open: OpenDialog | undefined) {
   const regions = open?.preview.regions;
-  // The region preview shows before (and instead of) any drawing (ADR-0095 §5).
+  // The region preview shows before (and instead of) any drawing (ADR-0097 §5).
   const drawing = regions ? NO_DRAWING : open?.preview.drawing;
   if (!open || !drawing) return undefined;
   const invalid = open.checked.first !== undefined || Object.keys(open.typing).length > 0;
@@ -400,7 +400,7 @@ export function createDialogController(options: DialogControllerOptions): Dialog
   let previewTimer: ReturnType<typeof setTimeout> | undefined;
   /** The draft and document of the last preview asked for. */
   let previewed: { draft: string; doc: unknown } | undefined;
-  /** The last region request (ADR-0095 §5) and the mesh it was about; its answers are numbered. */
+  /** The last region request (ADR-0097 §5) and the mesh it was about; its answers are numbered. */
   let regionsAsked: { key: string; mesh: BodyMesh | undefined } | undefined;
   let regionsSequence = 0;
   let regionsTimer: ReturnType<typeof setTimeout> | undefined;
@@ -527,7 +527,7 @@ export function createDialogController(options: DialogControllerOptions): Dialog
 
   /**
    * Asks the kernel for the spec's region preview when its request changed
-   * (ADR-0095 §5), and gives the dialog's preview without regions when the
+   * (ADR-0097 §5), and gives the dialog's preview without regions when the
    * spec wants none or they are about another body. Editing waits for the
    * first preview's base: the body before the feature is only there.
    */

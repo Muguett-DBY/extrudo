@@ -89,7 +89,7 @@ export function documentFeatures(): FeatureRegistry<FeatureDefinition> {
   // Import (a STEP solid or a mesh body) and Canvas (a picture on a plane),
   // ADR-0066.
   registry.register(importFeature).register(canvasFeature);
-  // Mesh to Solid: an imported mesh becomes a B-rep body (P4-13, ADR-0095).
+  // Mesh to Solid: an imported mesh becomes a B-rep body (P4-13, ADR-0097).
   registry.register(meshToSolidFeature);
   // Script (P5-02, ADR-0070): code that adds features, run by the kernel.
   registry.register(scriptFeature as FeatureDefinition);

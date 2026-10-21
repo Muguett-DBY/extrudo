@@ -684,7 +684,7 @@ describe('Recomputer', () => {
     expect(preview?.bodies['box:0' as BodyId]).not.toBe(model.getState().bodies['box:0' as BodyId]);
   });
 
-  it("keeps Mesh to Solid's report on its status and its preview, and gives a mesh body's regions (ADR-0095)", {
+  it("keeps Mesh to Solid's report on its status and its preview, and gives a mesh body's regions (ADR-0097)", {
     timeout: 60_000,
   }, async () => {
     const data = cubeStl.slice(cubeStl.indexOf(',') + 1);
