@@ -7351,12 +7351,12 @@ private:
       const int handle = rebuild(tolerance, seg, rebuildFailed);
       if (handle) return handle;
       if (deadline->expired()) return fail(gaveUp);
-      // With regions left out, the unfit refusal is the one the user can act on.
-      if (unfitRegions > 0) return fail(unfitFailed.c_str());
       // A tolerance to suggest: the rebuild (segmentation included) at 2 and
       // 5 x the tolerance, within what is left of the budget. The result
       // there is dropped (the user chose this tolerance); the report and the
-      // stage times stay this tolerance's.
+      // stage times stay this tolerance's. With regions left out, the unfit
+      // refusal is the one the user can act on: it names the regions, and
+      // the tolerance that converted when there is one.
       const std::vector<double> report = meshReport_;
       const auto times = rebuildTimes_;
       const std::string why = rebuildRefusal_;
@@ -7381,6 +7381,13 @@ private:
       meshReport_ = report;
       rebuildTimes_ = times;
       rebuildRefusal_ = why;
+      if (unfitRegions > 0) {
+        if (works > 0) {
+          unfitFailed = unfitFailed.substr(0, unfitFailed.find(" torus. ") + 8) + "Raise the tolerance to " +
+                        millimetres(works) + " mm, or use Faceted.";
+        }
+        return fail(unfitFailed.c_str());
+      }
       if (works > 0) {
         const std::string message = "Mesh to Solid couldn't rebuild this mesh as an exact solid within " +
                                     millimetres(tolerance) + " mm. Raise the tolerance to " + millimetres(works) +
