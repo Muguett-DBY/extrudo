@@ -597,9 +597,8 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
       /^Mesh to Solid couldn't close the body: 1 region \(\d+ % of the surface\) fits no plane, cylinder, sphere, cone or torus\./,
     );
     expect(match).not.toBeNull();
-    // A sphere through the two rings would nearly fit the side, but nodes on
-    // two circles make no sphere (slice C): the suggestion is the cylinder's
-    // deviation, ~0.006 mm.
+    // The sphere through two rings a diameter apart also nearly fits the side,
+    // so the suggestion is the sphere's deviation, not the cylinder's.
     const suggested = Number(match?.[1]);
     expect(suggested).toBeGreaterThanOrEqual(0.002);
     expect(suggested).toBeLessThanOrEqual(0.02);
@@ -958,7 +957,7 @@ describe('Kernel.meshRegions', { timeout: 300_000 }, () => {
 
   it('suggests a tolerance for the noisy 32-gon at 0.001 mm', () => {
     const regions = regionsOf(noisyCylinder(), 0.001);
-    // No sphere through the two rings (slice C): the cylinder's ~0.006.
+    // The sphere through the two rings also nearly fits, so ~0.003, not 0.006.
     expect(regions.suggestedTolerance).toBeGreaterThanOrEqual(0.002);
     expect(regions.suggestedTolerance).toBeLessThanOrEqual(0.02);
   });

@@ -6809,35 +6809,6 @@ private:
         if (g.outward.Modulus() < 1e-300) g.outward = regions[members[0]].normal.XYZ();
         return g;
       };
-      // Nodes on one or two parallel circles (a band of facets: a slot's
-      // end, slice C's micro-sd keyring) lie on many spheres and tori: no
-      // sphere or torus then. The circles are square to the direction the
-      // facet normals vary least along (a band's axis).
-      auto onRings = [&](MeshFit fit, const Gathered& g) {
-        if (!fit.ok) return fit;
-        double cov[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
-        for (int t : g.triangles)
-          for (int i = 0; i < 3; ++i)
-            for (int j = 0; j < 3; ++j) cov[i][j] += areas[t] * normals[t].Coord(i + 1) * normals[t].Coord(j + 1);
-        double values[3];
-        gp_XYZ vectors[3];
-        symmetricEigen(cov, values, vectors);
-        if (vectors[0].Modulus() < 1e-12) return fit;
-        const gp_XYZ a = vectors[0].Normalized();
-        double low = 1e300, high = -1e300;
-        for (int n : g.nodes) {
-          const double h = (meshNode(n) - fit.origin.XYZ()).Dot(a);
-          low = std::min(low, h);
-          high = std::max(high, h);
-        }
-        bool rings = true;
-        for (size_t k = 0; k < g.nodes.size() && rings; ++k) {
-          const double h = (meshNode(g.nodes[k]) - fit.origin.XYZ()).Dot(a);
-          rings = h - low <= tolerance || high - h <= tolerance;
-        }
-        if (rings) fit.ok = false;
-        return fit;
-      };
       // One kind's fit (0 plane, 1 cylinder, 2 cone, 3 sphere, 4 torus).
       auto fitKind = [&](int kind, const Gathered& g) {
         switch (kind) {
@@ -6882,9 +6853,9 @@ private:
           case 2:
             return fitMeshCone(g.nodes, g.triangles, normals, areas);
           case 3:
-            return onRings(fitMeshSphere(g.nodes), g);
+            return fitMeshSphere(g.nodes);
           default:
-            return onRings(fitMeshTorus(g.nodes, g.triangles, normals, areas, tolerance), g);
+            return fitMeshTorus(g.nodes, g.triangles, normals, areas, tolerance);
         }
       };
       // The surface of a fit within the tolerance, with its chord error.
