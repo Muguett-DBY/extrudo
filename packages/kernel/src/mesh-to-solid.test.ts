@@ -12,9 +12,12 @@ import { loadOcct } from './occt/load';
 
 let kernel: Kernel;
 let manifold: Awaited<ReturnType<typeof loadManifold>>;
+/** The raw facade, for the non-manifold refusals `Kernel.meshFrom` never lets through. */
+let occt: Awaited<ReturnType<typeof loadOcct>>;
 
 beforeAll(async () => {
-  kernel = new Kernel(await loadOcct());
+  occt = await loadOcct();
+  kernel = new Kernel(occt);
   manifold = await loadManifold();
   kernel.enableMeshes(manifold);
 });
@@ -47,7 +50,7 @@ function cube(): ShapeHandle {
 }
 
 /** cube.stl's mesh plus an identical copy offset by `offset` (indices don't overlap). */
-function cubeAndCopy(offset: readonly [number, number, number]): ShapeHandle {
+function cubeAndCopyMesh(offset: readonly [number, number, number]): TriangleMesh {
   const { mesh } = readStl(bytesOf(cubeStl));
   const n = mesh.positions.length / 3;
   const positions = new Float64Array(n * 6);
@@ -59,7 +62,57 @@ function cubeAndCopy(offset: readonly [number, number, number]): ShapeHandle {
   indices.set(mesh.indices, 0);
   for (let i = 0; i < mesh.indices.length; i++)
     indices[mesh.indices.length + i] = (mesh.indices[i] as number) + n;
-  return kernel.meshFrom({ positions, indices });
+  return { positions, indices };
+}
+
+function cubeAndCopy(offset: readonly [number, number, number]): ShapeHandle {
+  return kernel.meshFrom(cubeAndCopyMesh(offset));
+}
+
+/** `mesh` with nodes at the same (rounded) position merged into one (as a mesh body's weld). */
+function weldByPosition(mesh: TriangleMesh): TriangleMesh {
+  const n = mesh.positions.length / 3;
+  const remap = new Uint32Array(n);
+  const unique: number[] = [];
+  const first = new Map<string, number>();
+  for (let i = 0; i < n; i++) {
+    const x = Math.round((mesh.positions[3 * i] as number) * 1e6);
+    const y = Math.round((mesh.positions[3 * i + 1] as number) * 1e6);
+    const z = Math.round((mesh.positions[3 * i + 2] as number) * 1e6);
+    const key = `${x},${y},${z}`;
+    const known = first.get(key);
+    if (known === undefined) {
+      first.set(key, unique.length / 3);
+      remap[i] = unique.length / 3;
+      unique.push(x / 1e6, y / 1e6, z / 1e6);
+    } else {
+      remap[i] = known;
+    }
+  }
+  return {
+    positions: Float64Array.from(unique),
+    indices: mesh.indices.map((v) => remap[v] as number),
+  };
+}
+
+/** Stages `positions`/`indices` into a facade's buffers (as Kernel.#stageMesh does). */
+function stageMesh(
+  facade: InstanceType<typeof occt.ExtrudoFacade>,
+  positions: ArrayLike<number>,
+  indices: Uint32Array,
+): void {
+  const nodes = positions.length / 3;
+  const triangles = indices.length / 3;
+  expect(facade.meshNodes(nodes)).toBeGreaterThan(0);
+  // Read the pointer and write at once: memory growth moves the heap.
+  const xyz = new Float64Array(occt.wasmMemory.buffer, facade.meshNodesPtr(), 3 * nodes);
+  for (let i = 0; i < nodes; i++) {
+    xyz[3 * i] = positions[3 * i] as number;
+    xyz[3 * i + 1] = positions[3 * i + 1] as number;
+    xyz[3 * i + 2] = positions[3 * i + 2] as number;
+  }
+  expect(facade.meshTriangles(triangles)).toBeGreaterThan(0);
+  new Uint32Array(occt.wasmMemory.buffer, facade.meshTrianglesPtr(), 3 * triangles).set(indices);
 }
 
 /** The size of cube.stl (one 20 mm cube). */
@@ -213,21 +266,26 @@ describe('Kernel.meshToSolid, faceted', { timeout: 300_000 }, () => {
     }
   });
 
+  // Kernel.meshFrom repairs a non-manifold edge and splits a pinched vertex
+  // before the mesh becomes a body, so these refusals are reachable only
+  // through the facade directly.
+  it('refuses an edge shared by more than two triangles, naming the reason', () => {
+    const { mesh } = readStl(bytesOf(cubeStl));
+    const indices = new Uint32Array(mesh.indices.length + 3);
+    indices.set(mesh.indices, 0);
+    indices.set(mesh.indices.subarray(0, 3), mesh.indices.length);
+    const facade = new occt.ExtrudoFacade();
+    stageMesh(facade, mesh.positions, indices);
+    expect(facade.meshToSolid(0, 0.01)).toBe(0);
+    expect(facade.lastError()).toContain('3 edges are shared by more than two triangles');
+  });
+
   it('refuses shells that only touch at a vertex, naming the reason', () => {
-    const mesh = cubeAndCopy(cubeExtent());
-    try {
-      let error: unknown;
-      try {
-        const { shape } = kernel.meshToSolid(mesh, { method: 'faceted', tolerance: 0.01 });
-        kernel.release(shape);
-      } catch (e) {
-        error = e;
-      }
-      expect(error).toBeInstanceOf(KernelError);
-      expect((error as Error).message).toContain('vertex joins shells that only touch at a point');
-    } finally {
-      kernel.release(mesh);
-    }
+    const { positions, indices } = weldByPosition(cubeAndCopyMesh(cubeExtent()));
+    const facade = new occt.ExtrudoFacade();
+    stageMesh(facade, positions, indices);
+    expect(facade.meshToSolid(0, 0.01)).toBe(0);
+    expect(facade.lastError()).toContain('vertex joins shells that only touch at a point');
   });
 });
 
