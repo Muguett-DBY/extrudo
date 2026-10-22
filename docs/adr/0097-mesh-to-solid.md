@@ -610,9 +610,10 @@ costs single-digit ms on these files (every refusal is now under 25 ms).
 Over `FACETED_FACE_CAP` the facade refuses at once with "Faceted would give
 about N faces; …" (the word "about" is new: the estimate can be off by a few
 faces). The old after-unify count stays a backstop; its message is unchanged
-(no "about"). The estimate matched the exact count for 16 of 18 non-capped
-files measured; `own/trashcan-repair-foot.stl` was the outlier (387 estimated
-vs 275 exact, +41 %; `UnifySameDomain` merges more than the edge rule sees).
+(no "about"). The estimate matched the exact count for 12 of the 18
+non-capped files measured and was within 5 % for 17;
+`own/trashcan-repair-foot.stl` was the outlier (387 estimated vs 275 exact,
++41 %; `UnifySameDomain` merges more than the edge rule sees).
 
 **Six meshes the importer accepted as closed were refused** with "Mesh to
 Solid couldn't make a closed solid from this mesh …". The stage was the
