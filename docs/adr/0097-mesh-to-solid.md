@@ -532,6 +532,130 @@ brand tokens (`docs/05-brand.md`), with a legend line in the dialog.
   `meshToSolid` as the status has it. A refused conversion has no report on
   its status (the error says it); the dialog's regions carry the counts.
 
+#### Amendment, 2026-10-22: hardening slice A (memory safety, rebuild budget, rebuilds that failed)
+
+The owner ran the kernel over 41 real STLs on 2026-10-21 (36 import as closed
+bodies; prismatic converted 6 at 0.01 mm). Three problems are fixed here;
+measured with the harness's new `f`/`F` cases (`spikes/stl-to-solid/README.md`)
+and `packages/kernel/src/mesh-to-solid-files.test.ts`.
+
+- **The trap.** `splitComponent` moves border regions to the nearer piece,
+  then refitted only the pieces whose region count had changed. A piece can
+  lose one region and gain another and keep its count: its region list then
+  still named the region it lost (now on two surfaces) and missed the one it
+  gained (on none). `rebuildPrismatic` indexed `adjacent[surfaceOf[r]]` with
+  -1, a read 12 bytes before the vector of vectors (AddressSanitizer, `SAN=1`);
+  in the app's O3 build that read garbage pointers and trapped with `memory
+  access out of bounds` or `unreachable`, or corrupted the heap for every
+  later call (`table index is out of bounds`, garbage error text). The
+  harness's O2 build read the garbage without trapping, so the bug was
+  reproduced through the kernel and the harness fed the kernel's mesh order
+  (`MESH_OUT`). Over the test files, 1 to 59 regions per file were lost at
+  0.01 to 0.2 mm (desk-organizer, puzzle-insert-circle, hot-wheels-connector,
+  micro-sd-keyring-inner, vented-funnel, trashcan-spacer at 0.1 and 0.2 …).
+  **Fix:** a piece that lost or gained any region is refitted (or keeps its
+  surface with its new region list). **Guard:** the rebuild refuses
+  ("couldn't rebuild … within") when a region is on no surface, instead of
+  indexing with -1. The fixture test checks that `meshRegions` maps every
+  triangle of trashcan-spacer at 0.1 and 0.2 mm (it mapped 1 and 9 to -1).
+- **The budget.** The rebuild (everything after `segmentMesh`) gets
+  `PRISMATIC_REBUILD_BUDGET_MS = 30000` of wall-clock time: a
+  `Message_ProgressIndicator` (`MeshDeadline`, `UserBreak()` past the
+  deadline) is passed as a `Message_ProgressRange` into
+  `BOPAlgo_MakerVolume::Perform`, `ShapeFix_Solid`/`ShapeFix_Shape::Perform`
+  and `BRepExtrema_DistShapeShape`, and the rebuild checks the deadline
+  between its own loops (cells, nodes). Past it, `meshToSolid` refuses with
+  "Mesh to Solid gave up after 30 s: this mesh has too many surfaces to
+  rebuild exactly. Use Faceted, or simplify the mesh in your slicer." The
+  report is filled before, as for every refusal. `prismaticBudgetMs_` lowers
+  it for the harness only (`BUDGET`).
+- **Why it was slow, and two fixes.** Stage times (`TIMES=1`) showed the
+  cell classification as often the larger half: every sample point was
+  classified against every cell whose box held it, and a torus's or
+  sphere's cell is slow to classify. A cell whose votes agree (16 or more,
+  90 % one way) is now **decided** and later samples skip it.
+  numbers-base-top (471 planes) at 0.01 mm: classification 12.4 s → 0.2 s,
+  the whole rebuild 16.5 s → 1.6–2.7 s on the Ubuntu machine (10 s on the
+  owner's laptop before). **The faces' extent changed slightly:** a face's
+  margin is 10 × tolerance + twice the largest chord error of *it and its
+  neighbours*, no longer of the whole mesh (one coarse torus grew every
+  face, so MakerVolume intersected more pairs). desk-organizer at 0.01 mm
+  (374 surfaces, 389 cells): MakerVolume 20 s, classification 19 s, unify
+  3 s, then "invalid after healing" at 44 s with no budget; with it, a
+  refusal after 30 s. The rebuild of the slice-3/4 matrix (`run.sh
+  prismatic`, all cases) gives the same faces, kinds, validity and volumes
+  as before, mostly faster (sphere r10 156 → 16 ms, all-edges-filleted box
+  1.45 → 0.43 s, 302-surface staircase 3.7 → 2.5 s).
+- **Rebuilds that failed although every region fit**, by the check that
+  refused (now named by `TIMES=1`):
+  - *hole-filler-35mm*, a node 0.053 mm off the solid: the torus snap
+    (within 10 × tolerance of tangent to a cylinder) moved R by 0.054 mm,
+    but the torus meets that cylinder at a crease. **A snap only takes when
+    the surface still holds its own nodes within the tolerance**; else the
+    surface keeps its fit.
+  - *trashcan-repair-foot*, MakerVolume made no cell: one r 9.80 cylinder
+    came out as four surfaces (between chamfer facets), the snaps moved two
+    of them 0.008 mm apart, and near-coincident cylinders leave no closed
+    cell. **Surfaces that are one surface are merged** before the snaps: a
+    surface joins a larger one of its kind with a parallel normal or axis
+    (and a radius within the tolerance) when every node of it is within
+    the tolerance of that one, or of one fit over both (free, or about
+    either piece's axis).
+  - *wyze-garage-bracket* (volume 451 against 7,873 mm³: cells missing) and
+    *micro-sd-keyring-inner* (volume 7 against 945 mm³) still fail at
+    0.01 mm. wyze: a cylinder tangent to one plane kept its fit's tilted
+    axis although a square end plane was there; the single-tangent snap now
+    takes that plane's normal as the axis, which keeps 1,532 mm³ instead of
+    451 but doesn't close the body (MakerVolume warns `NotSplittableEdge` and
+    `FaceBuilderUnusedEdges` on the nearly tangent top plane). micro-sd: the
+    segmentation fits two slot ends (two r 0.6 arcs joined by a 0.15 mm
+    flat) with a sphere r 1.385 whose nodes are only the end rings, and an
+    r 0.853 cylinder over flat and arc ends; slice C's.
+  - Tried and **rejected**: a cylinder–cylinder tangency snap (a fillet
+    tangent to a larger parallel cylinder, moved along its tangent plane):
+    it broke micro-sd-keyring-outer at 0.01 mm (41 faces, volume 1.0000 →
+    29 faces, 1.0066) and drill-block at 0.05 mm (converted → refused) and
+    fixed none of these files; a refit of a snapped cylinder's circle about
+    its new axis (no measurable change); a check that a curved fit holds the
+    facet centroids within the tolerance plus twice the chord error (it
+    tells a two-ring cylinder from a sphere, but refused manifold's
+    geodesic sphere, whose triangles sit deeper than twice the edge-based
+    chord error).
+  - The chord-error case (a 0.01 mm check on a coarser mesh) didn't occur
+    among these files: every refusal that remains fails a cell or validity
+    check, not the node distances.
+
+The ten files whose rebuild failed with every region fitting, and
+drill-block (the reverse case), before (head 4188a505, the owner's runs)
+and after (this amendment, the kernel over `STL_DIR`):
+
+Prismatic, kernel over the files (Ubuntu machine, others' jobs running);
+"rebuild" is "couldn't rebuild … within", "trap" a WASM trap or the heap
+it corrupted, faces planes/cylinders/cones/spheres/tori, volume against the
+mesh's:
+
+| file | 0.01 mm before → after | 0.05 mm before → after | 0.1 mm before → after |
+|---|---|---|---|
+| own/battery-holder | rebuild → rebuild (1.0 s) | rebuild → rebuild (1.0 s) | rebuild → budget (30 s) |
+| own/hole-filler-35mm | rebuild → **6 (3/2/0/0/1), 1.0013** (0.4 s) | rebuild → **same** (16 s) | rebuild → **same** (14 s) |
+| own/trashcan-repair-foot | rebuild → **16 (12/4/0/0/0), 0.9989** (0.1 s) | unfit → unfit 1 (34 %) | unfit → unfit 1 (38 %) |
+| door-stopper-top | rebuild (24 s) → rebuild (6.3 s) | rebuild → rebuild (4.2 s) | rebuild → rebuild (15 s) |
+| gardena-end | rebuild (2.2 s) → rebuild (3.0 s) | rebuild → rebuild (0.2 s) | rebuild → rebuild (0.2 s) |
+| micro-sd-keyring-inner | rebuild → rebuild (2.2 s) | trap → **97 (91/6/0/0/0), 1.0006** (0.8 s) | 84 faces (4.5 s) → **84 (78/6/0/0/0), 1.0007** (1.2 s) |
+| mms-flat-stand | rebuild → **44 (37/6/1/0/0), 1.0000** (0.3 s) | trap → **same** (0.4 s) | rebuild → rebuild (0.3 s) |
+| sock-clips-6x | rebuild (43 s) → budget (30 s) | trap → rebuild (1.0 s) | rebuild → budget (30 s) |
+| spaghetti-measure | rebuild → rebuild (0.9 s) | trap → rebuild (0.3 s) | rebuild → rebuild (1.2 s) |
+| wyze-garage-bracket | rebuild → rebuild (0.5 s) | trap → **84 (55/27/2/0/0), 1.0002** (9.1 s) | rebuild → **88 (58/28/2/0/0), 0.9987** (5.1 s) |
+| own/drill-block | unfit 3 → unfit 3 (0 %) | 168 faces (9.6 s) → **168 (137/30/0/1/0), 1.0003** (3.4 s) | rebuild → rebuild (2.4 s) |
+
+Over all 41 files, prismatic converts 9 at 0.01 mm (6 before), 11 at 0.05 and
+9 at 0.1, with no trap in one process per tolerance; hole-filler's 14–16 s
+at 0.05 and 0.1 mm is a fourth cell (three kept) that no sample falls in: it
+stays undecided, and every sample is classified against it. **The budget overruns inside MakerVolume**: it
+asks the indicator between its own steps only, and one step of
+hot-wheels-connector at 0.1 mm ran to 56 s before the refusal; stopping
+inside a step would need the rebuild on its own thread.
+
 ### 6. Where it is
 
 A tile "Mesh to Solid" at the end of Solid › Modify (with a tooltip clip,
