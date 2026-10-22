@@ -20,7 +20,7 @@ plan.
 
 ```sh
 bash spikes/stl-to-solid/run.sh prismatic      # all cases, about 5 minutes: em++ link + node
-bash spikes/stl-to-solid/run.sh prismatic 6    # one case: 1-9, 11, c (curved), t (tori, split clusters), r (regions) or x (extra shapes)
+bash spikes/stl-to-solid/run.sh prismatic 6    # one case: 1-9, 11, c (curved), t (tori, split clusters), r (regions), u (unfit blends) or x (extra shapes)
 STL_DIR=~/Development/extrudo-stl-solid-test FILE=third-party/wyze-garage-bracket.stl bash spikes/stl-to-solid/run.sh prismatic g  # faceted on one corpus file (STL_DIR mounted at /stl)
 FACES=1 bash spikes/stl-to-solid/run.sh prismatic 6   # with every face's plane or axis
 PIECES=1 bash spikes/stl-to-solid/run.sh prismatic t  # with every surface the segmentation found (regions() cases)
@@ -59,7 +59,16 @@ PIECES=1 …  # how many surfaces each region is on, every surface as fitted and
 GAPS=1 …    # with PIECES: MakerVolume's warnings, the snaps and reverts, inside samples in no cell by surface
 BUDGET=ms … # a lower rebuild budget than PRISMATIC_REBUILD_BUDGET_MS, to see it hit
 SEGMENT=1 … # with PIECES: the segmentation only
+UNFIT=1 …   # every unfit surface: regions, triangles, nodes, area and share, box, thinnest triangle, each kind's fit deviation, its neighbours
+UNFIT=2 …   # with UNFIT: also the median region area and the 20 largest regions of each unfit surface
 ```
+
+`GAPS=1` also prints every MakerVolume cell (kept or dropped, volume, inside
+and outside votes, centre), every 20th outside vote's point and surface, and
+each curved face's u/v bounds. Case `u` (hardening slice C) is a box 20 × 20
+× 10 with one vertical edge cut by a twisted chamfer (2 → 1 mm, a ruled
+saddle no primitive fits: 1.4 % of the surface, left out of the rebuild) and
+the same at three times the size (4.8 %: refused).
 
 `STL_DIR` is mounted read-only at `/stl`; `FILE` is relative to it, `TOL`
 defaults to 0.01. `f` stages the file through `stlFile()` (`RWStl`, nodes

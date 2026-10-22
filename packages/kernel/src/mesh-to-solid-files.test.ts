@@ -4,8 +4,11 @@
 // trap fails: a refusal is an answer, a WASM RuntimeError is a bug.
 import { readStl } from '@extrudo/io';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import drillBlockStl from '../../../fixtures/imports/mesh-to-solid/drill-block.stl?url&inline';
 import holeFillerStl from '../../../fixtures/imports/mesh-to-solid/hole-filler-35mm.stl?url&inline';
 import puzzleBaseStl from '../../../fixtures/imports/mesh-to-solid/puzzle-base-circle.stl?url&inline';
+import flightCoverStl from '../../../fixtures/imports/mesh-to-solid/remove-before-flight-cover.stl?url&inline';
+import trackStl from '../../../fixtures/imports/mesh-to-solid/track-straight-100mm.stl?url&inline';
 import repairFootStl from '../../../fixtures/imports/mesh-to-solid/trashcan-repair-foot.stl?url&inline';
 import spacerStl from '../../../fixtures/imports/mesh-to-solid/trashcan-spacer.stl?url&inline';
 import { Kernel, KernelError, type ShapeHandle } from './kernel';
@@ -78,10 +81,59 @@ function refusal(error: unknown): string {
   throw error;
 }
 
-/** What prismatic at 0.01 mm makes of a fixture: faces by kind, or the refusal. */
+/**
+ * What prismatic makes of a fixture (at 0.01 mm unless `tolerance` says):
+ * faces by kind and the unfit regions left out of the rebuild (slice C), or
+ * the refusal.
+ */
 type Outcome =
-  | { planes: number; cylinders: number; cones: number; spheres: number; tori: number }
-  | { refusal: string };
+  | {
+      planes: number;
+      cylinders: number;
+      cones: number;
+      spheres: number;
+      tori: number;
+      leftOut?: number;
+      tolerance?: number;
+    }
+  | { refusal: string; tolerance?: number };
+
+// Slice C's fixtures. drill-block's lettering walls (3 unfit regions) are
+// left out; track-straight's socket-rim chamfer is left out at 0.05 mm, and
+// at 0.01 mm the rebuild without it fails, so the unfit refusal names the
+// tolerance the retry converted at; at 0.1 mm the rebuild fails and 0.2 mm
+// converts; remove-before-flight-cover's rebuild fails with its 5 regions
+// left out and no retry converts.
+const DRILL_BLOCK: Outcome = {
+  planes: 77,
+  cylinders: 12,
+  cones: 0,
+  spheres: 0,
+  tori: 4,
+  leftOut: 3,
+};
+const TRACK_001: Outcome = {
+  refusal:
+    "Mesh to Solid couldn't close the body: 2 regions (1 % of the surface) fit no plane, cylinder, sphere, cone or torus. Raise the tolerance to 0.05 mm, or use Faceted.",
+};
+const TRACK_005: Outcome = {
+  planes: 89,
+  cylinders: 12,
+  cones: 3,
+  spheres: 0,
+  tori: 3,
+  leftOut: 1,
+  tolerance: 0.05,
+};
+const TRACK_01: Outcome = {
+  refusal:
+    "Mesh to Solid couldn't rebuild this mesh as an exact solid within 0.1 mm. Raise the tolerance to 0.2 mm, or use Faceted.",
+  tolerance: 0.1,
+};
+const FLIGHT_COVER: Outcome = {
+  refusal:
+    "Mesh to Solid couldn't close the body: 5 regions (1 % of the surface) fit no plane, cylinder, sphere, cone or torus. Raise the tolerance to 0.064 mm, or use Faceted.",
+};
 
 const fixtures: [string, string, Outcome][] = [
   [
@@ -103,33 +155,46 @@ const fixtures: [string, string, Outcome][] = [
     'trashcan-spacer.stl',
     spacerStl,
     {
-      // Slice C's: a freeform surface the segmentation leaves unfit.
+      // Slice C: a fillet network whose short fillets are 0.016-0.026 mm off
+      // round (twisted facets); those leftovers drop the split (ADR-0097).
       refusal:
         "Mesh to Solid couldn't close the body: 1 region (82 % of the surface) fits no plane, cylinder, sphere, cone or torus. Use Faceted, or simplify the mesh in your slicer.",
     },
   ],
+  // Slice C: unfit regions under 2 % of the surface are left out of the rebuild.
+  ['drill-block.stl', drillBlockStl, DRILL_BLOCK],
+  ['track-straight-100mm.stl', trackStl, TRACK_001],
+  ['track-straight-100mm.stl', trackStl, TRACK_005],
+  ['track-straight-100mm.stl', trackStl, TRACK_01],
+  ['remove-before-flight-cover.stl', flightCoverStl, FLIGHT_COVER],
 ];
 
 describe('Mesh to Solid, prismatic on the fixtures', { timeout: 120_000 }, () => {
   for (const [name, url, outcome] of fixtures) {
-    it(`converts ${name} at 0.01 mm${'refusal' in outcome ? ' (refused)' : ''}`, () => {
+    const tolerance = outcome.tolerance ?? 0.01;
+    it(`converts ${name} at ${tolerance} mm${'refusal' in outcome ? ' (refused)' : ''}`, () => {
       const stl = readStl(bytesOf(url));
       const volume = meshVolume(stl.mesh.positions, stl.mesh.indices);
       const mesh = kernel.meshFrom(stl.mesh);
       try {
         if ('refusal' in outcome) {
-          expect(() => kernel.meshToSolid(mesh, { method: 'prismatic', tolerance: 0.01 })).toThrow(
+          expect(() => kernel.meshToSolid(mesh, { method: 'prismatic', tolerance })).toThrow(
             new KernelError(outcome.refusal),
           );
           return;
         }
-        const { shape, report } = kernel.meshToSolid(mesh, {
-          method: 'prismatic',
-          tolerance: 0.01,
-        });
+        const { shape, report } = kernel.meshToSolid(mesh, { method: 'prismatic', tolerance });
         try {
           const { planes, cylinders, cones, spheres, tori } = report;
-          expect({ planes, cylinders, cones, spheres, tori }).toEqual(outcome);
+          expect({ planes, cylinders, cones, spheres, tori }).toEqual({
+            planes: outcome.planes,
+            cylinders: outcome.cylinders,
+            cones: outcome.cones,
+            spheres: outcome.spheres,
+            tori: outcome.tori,
+          });
+          expect(report.unfit.regions).toBe(outcome.leftOut ?? 0);
+          if (outcome.leftOut) expect(report.unfit.fraction).toBeLessThanOrEqual(0.02);
           expect(kernel.isValid(shape)).toBe(true);
           expect(Math.abs(kernel.properties(shape).volume / volume - 1)).toBeLessThan(0.005);
         } finally {
@@ -220,8 +285,11 @@ describe.skipIf(!stlDir)('Mesh to Solid over STL_DIR', { timeout: 3_600_000 }, (
               const { shape, report } = kernel.meshToSolid(mesh, { method, tolerance });
               try {
                 const ratio = kernel.properties(shape).volume / volume;
+                const leftOut = report.unfit.regions
+                  ? `, ${report.unfit.regions} unfit left out`
+                  : '';
                 cells.push(
-                  `✓ ${report.faces} faces (${report.planes}/${report.cylinders}/${report.cones}/${report.spheres}/${report.tori}), valid ${kernel.isValid(shape)}, vol ${ratio.toFixed(4)} (${Math.round(performance.now() - t0)} ms)`,
+                  `✓ ${report.faces} faces (${report.planes}/${report.cylinders}/${report.cones}/${report.spheres}/${report.tori})${leftOut}, valid ${kernel.isValid(shape)}, vol ${ratio.toFixed(4)} (${Math.round(performance.now() - t0)} ms)`,
                 );
               } finally {
                 kernel.release(shape);

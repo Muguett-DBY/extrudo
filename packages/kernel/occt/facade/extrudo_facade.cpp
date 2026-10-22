@@ -5783,6 +5783,8 @@ private:
   static constexpr int PRISMATIC_SURFACE_CAP = 500;
   /** Prismatic's rebuild (everything after segmentMesh) gives up after this much wall-clock time (ADR-0097's 2026-10-22 amendment). */
   static constexpr double PRISMATIC_REBUILD_BUDGET_MS = 30000;
+  /** Unfit regions covering at most this share of the surface area are left out of the rebuild instead of refusing (slice C). */
+  static constexpr double PRISMATIC_UNFIT_ALLOWED = 0.02;
   /** The budget the next rebuild gets: PRISMATIC_REBUILD_BUDGET_MS, lowered only by the spike harness. */
   double prismaticBudgetMs_ = PRISMATIC_REBUILD_BUDGET_MS;
   /** The last rebuild's oversized faces, one per surface, when the spike harness asks (GAPS=1). */
@@ -7313,16 +7315,18 @@ private:
       const double unfitFraction = seg.unfitFraction, suggested = seg.suggested;
       const std::string rebuildFailed = "Mesh to Solid couldn't rebuild this mesh as an exact solid within " +
                                         millimetres(tolerance) + " mm. Raise the tolerance, or use Faceted.";
+      std::string unfitFailed;
       if (unfitRegions > 0) {
         const std::string regionsText =
             std::to_string(unfitRegions) + (unfitRegions == 1 ? " region (" : " regions (") +
             std::to_string(static_cast<int>(std::lround(unfitFraction * 100))) + " % of the surface) " +
             (unfitRegions == 1 ? "fits" : "fit") + " no plane, cylinder, sphere, cone or torus. ";
-        const std::string message =
-            "Mesh to Solid couldn't close the body: " + regionsText +
-            (suggested > 0 ? "Raise the tolerance to " + millimetres(suggested) + " mm, or use Faceted."
-                           : std::string("Use Faceted, or simplify the mesh in your slicer."));
-        return fail(message.c_str());
+        unfitFailed = "Mesh to Solid couldn't close the body: " + regionsText +
+                      (suggested > 0 ? "Raise the tolerance to " + millimetres(suggested) + " mm, or use Faceted."
+                                     : std::string("Use Faceted, or simplify the mesh in your slicer."));
+        // Small unfit regions (a sliver, a blend, text) are left out of the
+        // rebuild; more refuses (ADR-0097's 2026-10-22 amendment, slice C).
+        if (unfitFraction > PRISMATIC_UNFIT_ALLOWED) return fail(unfitFailed.c_str());
       }
       if (planes + cylinders + cones + spheres + tori > PRISMATIC_SURFACE_CAP) {
         const std::string message = "This mesh has " + std::to_string(planes + cylinders + cones + spheres + tori) +
@@ -7336,14 +7340,65 @@ private:
           "Mesh to Solid gave up after 30 s: this mesh has too many surfaces to rebuild exactly. Use Faceted, or "
           "simplify the mesh in your slicer.";
       Handle(MeshDeadline) deadline = new MeshDeadline(nowMs() + prismaticBudgetMs_);
-      try {
-        const int handle = rebuildPrismatic(tolerance, seg.surfaces, seg.regions, seg.regionOf, seg.regionNeighbours,
-                                            seg.normals, seg.areas, seg.meshArea, seg.meshVolume, rebuildFailed, deadline);
-        if (!handle && deadline->expired()) return fail(gaveUp);
-        return handle;
-      } catch (...) {
-        return fail(deadline->expired() ? gaveUp : rebuildFailed.c_str());
+      auto rebuild = [&](double t, MeshSegmentation& s, const std::string& failed) {
+        try {
+          return rebuildPrismatic(t, s.surfaces, s.regions, s.regionOf, s.regionNeighbours, s.normals, s.areas,
+                                  s.meshArea, s.meshVolume, failed, deadline);
+        } catch (...) {
+          if (rebuildRefusal_.empty()) {
+            failFromException("an exception");
+            rebuildRefusal_ = lastError_ + (rebuildTimes_.empty() ? "" : " after " + rebuildTimes_.back().first);
+          }
+          return fail(failed.c_str());
+        }
+      };
+      const int handle = rebuild(tolerance, seg, rebuildFailed);
+      if (handle) return handle;
+      if (deadline->expired()) return fail(gaveUp);
+      // A tolerance to suggest: the rebuild (segmentation included) at 2 and
+      // 5 x the tolerance, within what is left of the budget. The result
+      // there is dropped (the user chose this tolerance); the report and the
+      // stage times stay this tolerance's. With regions left out, the unfit
+      // refusal is the one the user can act on: it names the regions, and
+      // the tolerance that converted when there is one.
+      const std::vector<double> report = meshReport_;
+      const auto times = rebuildTimes_;
+      const std::string why = rebuildRefusal_;
+      double works = -1;
+      for (double factor : {2.0, 5.0}) {
+        if (deadline->expired()) break;
+        try {
+          MeshSegmentation wider;
+          if (!segmentMesh(factor * tolerance, wider)) break;
+          if (wider.unfitFraction > PRISMATIC_UNFIT_ALLOWED ||
+              wider.planes + wider.cylinders + wider.cones + wider.spheres + wider.tori > PRISMATIC_SURFACE_CAP)
+            continue;
+          const int h = rebuild(factor * tolerance, wider, rebuildFailed);
+          if (h) {
+            release(h);
+            works = factor * tolerance;
+            break;
+          }
+        } catch (...) {
+        }
       }
+      meshReport_ = report;
+      rebuildTimes_ = times;
+      rebuildRefusal_ = why;
+      if (unfitRegions > 0) {
+        if (works > 0) {
+          unfitFailed = unfitFailed.substr(0, unfitFailed.find(" torus. ") + 8) + "Raise the tolerance to " +
+                        millimetres(works) + " mm, or use Faceted.";
+        }
+        return fail(unfitFailed.c_str());
+      }
+      if (works > 0) {
+        const std::string message = "Mesh to Solid couldn't rebuild this mesh as an exact solid within " +
+                                    millimetres(tolerance) + " mm. Raise the tolerance to " + millimetres(works) +
+                                    " mm, or use Faceted.";
+        return fail(message.c_str());
+      }
+      return fail(rebuildFailed.c_str());
     } catch (...) {
       return failFromException("Mesh to Solid failed");
     }
@@ -7397,6 +7452,7 @@ private:
       for (int b : order) {
         MeshSurface& small = surfaces[b];
         for (int a : roots) {
+          if (small.kind < 0) break;
           MeshSurface& large = surfaces[a];
           if (large.kind != small.kind) continue;
           const double along = large.direction.XYZ().Dot(small.direction.XYZ());
@@ -7683,6 +7739,7 @@ private:
     // cylinder it really meets at a crease would otherwise move off its own
     // facets (ADR-0097's 2026-10-22 amendment). Such a surface keeps its fit.
     for (int i = 0; i < surfaceCount; ++i) {
+      if (surfaces[i].kind < 0) continue;
       double off = 0;
       for (int r : surfaces[i].regions)
         for (int n : regions[r].nodes) off = std::max(off, distanceToSurface(surfaces[i], meshNode(n)));
@@ -7698,11 +7755,57 @@ private:
     // neighbours', not the whole mesh's: one coarse torus would grow every
     // face, and MakerVolume would intersect more of them (ADR-0097's
     // 2026-10-22 amendment).
-    std::vector<double> margins(surfaceCount);
+    // An unfit region left out of the rebuild (at most
+    // PRISMATIC_UNFIT_ALLOWED of the surface) has no face: its neighbours
+    // grow across the gap it leaves, so that they meet there. Each of the
+    // region's nodes is measured to the nearest node of every neighbour; the
+    // second nearest neighbour grows by its distance (a node on one border
+    // of a chamfer is the chamfer's width from the other border's face, a
+    // wall's foot the wall's height from its top).
+    std::vector<double> margins(surfaceCount), gaps(surfaceCount, 0);
+    auto nodesOf = [&](const MeshSurface& s) {
+      std::vector<int> nodes;
+      for (int r : s.regions) nodes.insert(nodes.end(), regions[r].nodes.begin(), regions[r].nodes.end());
+      std::sort(nodes.begin(), nodes.end());
+      nodes.erase(std::unique(nodes.begin(), nodes.end()), nodes.end());
+      return nodes;
+    };
+    for (int i = 0; i < surfaceCount; ++i) {
+      if (surfaces[i].kind >= 0) continue;
+      const std::vector<int> mine = nodesOf(surfaces[i]);
+      std::vector<int> around;
+      std::vector<std::vector<int>> theirs;
+      size_t total = 0;
+      for (int other : adjacent[i]) {
+        if (surfaces[other].kind < 0) continue;
+        around.push_back(other);
+        theirs.push_back(nodesOf(surfaces[other]));
+        total += theirs.back().size();
+      }
+      if (around.size() < 2) continue;
+      const size_t stride = std::max<size_t>(1, mine.size() * total / 8000000);
+      for (int u : mine) {
+        int first = -1, second = -1;
+        double d1 = 1e300, d2 = 1e300;
+        for (size_t j = 0; j < around.size(); ++j) {
+          double nearest = 1e300;
+          for (size_t k = 0; k < theirs[j].size(); k += stride)
+            nearest = std::min(nearest, (meshNode(u) - meshNode(theirs[j][k])).SquareModulus());
+          if (nearest < d1) {
+            second = first, d2 = d1;
+            first = static_cast<int>(j), d1 = nearest;
+          } else if (nearest < d2) {
+            second = static_cast<int>(j), d2 = nearest;
+          }
+        }
+        if (second >= 0) gaps[around[second]] = std::max(gaps[around[second]], std::sqrt(d2));
+      }
+      check();
+    }
     for (int i = 0; i < surfaceCount; ++i) {
       double sag = surfaces[i].sag;
       for (int other : adjacent[i]) sag = std::max(sag, surfaces[other].sag);
-      margins[i] = 10 * tolerance + 2 * sag;
+      margins[i] = 10 * tolerance + 2 * sag + gaps[i];
     }
     // An angle's range over a surface's nodes (radians in [0, 2π)): from the
     // end of the largest gap between them round to its start, grown by
@@ -7734,6 +7837,7 @@ private:
     };
     NCollection_List<TopoDS_Shape> faces;
     for (const MeshSurface& s : surfaces) {
+      if (s.kind < 0) continue;
       const double margin = margins[&s - surfaces.data()];
       const gp_Ax3 frame(s.origin, s.direction);
       const gp_XYZ ux = frame.XDirection().XYZ(), uy = frame.YDirection().XYZ(), uz = s.direction.XYZ();
@@ -7817,8 +7921,11 @@ private:
     }
     stage("snaps and faces");
     rebuildFaces_.clear();
-    if (keepRebuildFaces_)
-      for (const TopoDS_Shape& face : faces) rebuildFaces_.push_back(face);
+    if (keepRebuildFaces_) {
+      // One per surface, a null shape for an unfit one left out.
+      auto face = faces.begin();
+      for (const MeshSurface& s : surfaces) rebuildFaces_.push_back(s.kind < 0 ? TopoDS_Shape() : *face++);
+    }
     check();
     BOPAlgo_MakerVolume maker;
     maker.SetArguments(faces);
@@ -7861,8 +7968,10 @@ private:
     {
       const int target = 3000;
       const int stride = std::max(1, triangleCount / target);
-      for (int t = 0; t < triangleCount; t += stride) samples.push_back(t);
+      for (int t = 0; t < triangleCount; t += stride)
+        if (surfaces[surfaceOf[regionOf[t]]].kind >= 0) samples.push_back(t);
       for (const MeshRegion& region : regions) {
+        if (surfaces[surfaceOf[&region - regions.data()]].kind < 0) continue;
         // The region's largest triangle, so that small regions count too.
         int best = region.triangles[0];
         for (int t : region.triangles)
@@ -7904,6 +8013,10 @@ private:
           classifiers[i]->Perform(p, 1e-7);
           if (classifiers[i]->State() == TopAbs_IN) {
             (side == 0 ? inside : outside)[i]++;
+            if (keepRebuildFaces_ && side == 1 && outside[i] % 20 == 1)
+              rebuildWarnings_ += "\n     out vote cell " + std::to_string(i) + " at " + std::to_string(p.X()) + "," +
+                                  std::to_string(p.Y()) + "," + std::to_string(p.Z()) + " surface " +
+                                  std::to_string(surfaceOf[regionOf[t]]);
             last[side] = i;
             const int votes = inside[i] + outside[i];
             if (!decided[i] && votes >= 16 && std::max(inside[i], outside[i]) >= 0.9 * votes) {
@@ -7932,6 +8045,15 @@ private:
         keep = classifiers[i]->State() == TopAbs_IN && insideMesh(centre.XYZ());
       }
       if (keep) kept.push_back(cells[i]);
+      if (keepRebuildFaces_) {
+        GProp_GProps props;
+        BRepGProp::VolumeProperties(cells[i], props);
+        const gp_Pnt c = props.CentreOfMass();
+        rebuildWarnings_ += "\n     cell " + std::to_string(i) + (keep ? " kept" : " dropped") + " volume " +
+                            std::to_string(props.Mass()) + " in " + std::to_string(inside[i]) + " out " +
+                            std::to_string(outside[i]) + " centre " + std::to_string(c.X()) + "," + std::to_string(c.Y()) +
+                            "," + std::to_string(c.Z());
+      }
     }
     classifiers.clear();
     {
@@ -7983,11 +8105,22 @@ private:
     stage("merged and unified");
     check();
     if (!BRepCheck_Analyzer(result).IsValid()) {
-      ShapeFix_Shape healer(result);
-      healer.Perform(deadline->Start());
-      result = healer.Shape();
+      // Unify can break a valid solid (a sliver face it can't bound); heal
+      // it, else keep the cells' solid as it was, split faces and all.
+      bool healed = false;
+      try {
+        ShapeFix_Shape healer(result);
+        healer.Perform(deadline->Start());
+        result = healer.Shape();
+        healed = BRepCheck_Analyzer(result).IsValid();
+      } catch (const Standard_Failure&) {
+      }
       check();
-      if (!BRepCheck_Analyzer(result).IsValid()) return refuse("invalid after healing");
+      if (!healed) {
+        if (!BRepCheck_Analyzer(solid).IsValid()) return refuse("invalid after healing");
+        result = solid;
+        stage("unify undone");
+      }
     }
     stage("validity");
 
@@ -8044,7 +8177,14 @@ private:
     const int nodeCount = static_cast<int>(meshNodes_.size() / 3);
     const int nodeStride = std::max(1, nodeCount / 2000);
     const double reach = tolerance * 1.01 + 1e-7;
+    // The nodes of unfit regions left out have no face to be near.
+    std::vector<char> leftOut(nodeCount, 0);
+    for (const MeshSurface& s : surfaces)
+      if (s.kind < 0)
+        for (int r : s.regions)
+          for (int n : regions[r].nodes) leftOut[n] = 1;
     for (int n = 0; n < nodeCount; n += nodeStride) {
+      if (leftOut[n]) continue;
       check();
       const gp_Pnt p(meshNode(n));
       bool near = false;

@@ -658,6 +658,151 @@ asks the indicator between its own steps only, and one step of
 hot-wheels-connector at 0.1 mm ran to 56 s before the refusal; stopping
 inside a step would need the rebuild on its own thread.
 
+#### Amendment, 2026-10-22: hardening slice C (small unfit regions, wrong clusters, a tolerance to suggest)
+
+At 0.01 mm the unfit refusal fired on 19 of the owner's 36 real meshes, 10 of
+them with unfit regions covering 0–6 % of the surface on parts that are
+otherwise plain prismatic work. Measured with the harness's new `UNFIT=1`
+print (spike README) and the kernel over `STL_DIR`.
+
+- **What the small unfit regions are** (0.01 mm, per file): *drill-block*
+  (3 regions, 0.3 %): 1 mm tall walls of embossed lettering, extruded
+  freeform curves in 2-triangle facets; *track-straight-100mm* (2, 0.5 %):
+  the 0.66 mm chamfer round the rim of the keyhole socket, a cone round the
+  circle blending into flat chamfers along the neck; *remove-before-flight-cover*
+  (5, 0.5 %): four 0.25 mm strips 15 mm long (a narrow round on the lettering
+  slots) and one 27-region blend; *shower-holder* (3, 0.9 %): a 0.5 mm round
+  along a faceted freeform outline, top and bottom, and the corner where
+  fillets of r 0.8 and r 2 meet (no sphere: its best sphere is 0.15 mm off);
+  *object-permanence-base* (7, 0.5 %): four rounded corners (best fit 1.3 mm
+  off), two r 2 fillets along non-circular paths (a torus 0.3 mm off) and
+  one crease sliver of 4 triangles; *hot-wheels-connector* (1, 0.5 %): a
+  0.5 mm tall freeform wall with sliver triangles 0.0003 mm thin;
+  *vented-funnel* (1, 2.08 %): a fillet along a non-circular rim (a torus
+  0.16 mm off); *mirna-doodle-1* (11, 6 %), *puzzle-insert-circle* (1, 6 %)
+  and *spool-screw-v4.1* (2, 6 %): freeform outlines, a freeform cap and the
+  screw's helical thread. None is a segmentation fault of the kinds the
+  brief names: no sliver whose nodes all lie on one neighbour (the one
+  crease sliver has its nodes on two), no corner where fillets of one
+  radius meet. They are left out by the rule below.
+- **The unfit allowance.** Unfit regions covering at most
+  `PRISMATIC_UNFIT_ALLOWED = 0.02` of the surface area in total no longer
+  refuse. They stay kind −1 surfaces with **no face**: the merge of same
+  surfaces, the snap check, the faces, the cell samples and the node check
+  skip them (their nodes have no face to be near), the volume check keeps
+  its allowance. Their neighbours' faces would end a margin past their own
+  nodes and leave a hole where the region was, so each neighbour **grows by
+  the gap the region leaves**: every node of the region is measured to the
+  nearest node of each neighbour, and the second nearest neighbour's margin
+  grows by that distance (a node on one border of a chamfer is the
+  chamfer's width from the other border's face; a wall's foot is the wall's
+  height from its top). The region's geometry is gone from the result: a
+  chamfer or round comes back sharp, embossed text flat. The report's
+  `unfit` keeps the regions, triangles and fraction left out (the region
+  preview's red and `data-regions` show them, as before). When the rebuild
+  with regions left out fails, the user gets the **unfit refusal** (regions,
+  share, a tolerance), not the rebuild one; over 2 % it refuses as before.
+  The web side needed no change: nothing there keys on `unfit.regions > 0`
+  (the dialog's line and legend only show the count; the status is the
+  kernel's).
+- **A tolerance to suggest when the rebuild fails.** A rebuild that fails at
+  T (not past the budget) is retried, segmentation included, at 2 T and 5 T
+  inside the same `MeshDeadline`; a retry whose unfit share is over 2 % or
+  whose surfaces are over the cap is skipped. The first that converts is
+  named — "Mesh to Solid couldn't rebuild this mesh as an exact solid within
+  0.01 mm. Raise the tolerance to 0.05 mm, or use Faceted." (`millimetres()`)
+  — and its result released; the report and the stage times stay T's. With
+  regions left out, the unfit refusal names that tolerance instead of the
+  fit-based one ("… fit no plane, cylinder, sphere, cone or torus. Raise
+  the tolerance to 0.05 mm, or use Faceted."); with no retry converting it
+  keeps its own.
+- **Unify undone.** `ShapeUpgrade_UnifySameDomain` broke a valid, closed
+  cells' solid on track-straight (healing then threw "Bnd_Box is void").
+  When healing fails or throws, the cells' solid before unify is kept if it
+  is valid (its faces stay split where other faces' margins crossed them):
+  track-straight at 0.05 mm converts that way (107 faces).
+- **Trashcan-spacer** (the 82 % region): a 180 × 60 × 50 block with r 6
+  fillets. The split takes its flat faces as planes and its long fillets as
+  planes too (one facet strip of a 180 mm fillet is 145 mm², large against
+  the cluster's 14 mm² median), and leaves six pieces of 18–32 regions: the
+  vertical and short fillets, whose slicer facets are twisted (alternate
+  triangles tilt by ±0.0013 rad) so that their best cylinder is 0.016–0.026
+  mm off. Those leftovers drop the split (the ellipsoid's rule), so the
+  whole cluster is one unfit region. At 0.03 mm every region fits (10
+  planes, 16 cylinders, 4 spheres, 4 tori) and the rebuild fails on the
+  volume (+5.4 %: one cell, the U channel not cut). The fixture's outcome at
+  0.01 mm is unchanged; what is really there is a fillet network 0.02 mm off
+  round. The other six: *makita-vacuum-holder* (97 %) and *whiteboard-tray-v5*
+  (59 %): one smooth cluster over the whole part (best fits 25–33 mm off),
+  freeform; *phone-stand-foldable* (48 %): one 450-region cluster of the
+  flat body and its sliver triangles (0.0003 mm thin; best plane 3.2 mm off,
+  the body is slightly bent) plus 28 small blends; *scrap-plate* (45 %): one
+  85-region cluster spanning the plate (3.2 mm off any primitive: freeform
+  or a swept profile); *kuglbahn-pillar-base* (42 %): a 625-region freeform
+  side (9 mm off) and six blends; *peg-perego-button* (39 %): a 262-region
+  freeform shell (6 mm off).
+- **Tried and rejected** (each measured over the files): (1) the unfit
+  regions' planar regions as faceted plane faces instead of no face: drill-block
+  failed ("node off the solid"), others slower; (2) growing a left-out
+  region's neighbours by its bounding-box diagonal: object-permanence went to
+  6,845 cells (MakerVolume 15 s) and failed; by the farthest node from each
+  neighbour: hot-wheels grew a 13 mm margin on a 0.07 mm² plane; (3) keeping
+  a split whose leftovers cover at most a quarter of the component (as unfit
+  pieces of their own): freeform walls became many small cylinders,
+  object-permanence and spool-screw went over the 500-surface cap and
+  drill-block failed; (4) a large seed that is thin (area under a tenth of
+  its extent squared) seeding a patch instead of a plane: the spacer's long
+  fillets became cylinders but its leftovers stayed, and object-permanence
+  and shower-holder went from 1 % to 65–73 % unfit; (5) no sphere or torus
+  on nodes that lie on two parallel circles (the slot ends of
+  micro-sd-keyring-inner, which fitted a sphere r 1.385 and then a torus):
+  micro-sd's volume went from 7 to 857 of 945 mm³ but still failed, and
+  drill-block at 0.05 mm, which converts with such a sphere over its
+  lettering walls, failed; (6) a cone fit below 1° (the spacer's fillets
+  might have had a draft): the apex fit is ill-conditioned, 4–11 mm off.
+- **Slice A's hand-offs.** micro-sd-keyring-inner and wyze-garage-bracket
+  still fail at 0.01 mm (micro-sd: two r 0.6 arcs and a 0.15 mm flat fit as
+  one r 0.853 cylinder within the tolerance, and the slot ends as a sphere;
+  wyze: the nearly tangent top plane); both refusals now name 0.05 mm, where
+  both convert.
+- **What still fails** among the files below is the rebuild of the fitted
+  part, not the left-out regions: remove-before-flight-cover is invalid after
+  healing (neighbouring tangent cylinders 0.006 mm apart, `GAPS=1`), at 0.01
+  as at 0.05 mm; shower-holder and hot-wheels-connector spend 30–60 s in
+  MakerVolume (the budget overruns inside its steps, slice A); object-permanence
+  is invalid after healing. track-straight at 0.01 mm keeps its socket void
+  in the main cell (+4.5 % volume) although every face is there; at 0.05 mm
+  it converts.
+
+Prismatic, the kernel over the files (Ubuntu machine), before (head
+0c0f1cf7: slice A's table and the brief; "baseline" marks the owner's
+2026-10-21 runs where slice A has no figure) and after; faces
+planes/cylinders/cones/spheres/tori, "left out" the unfit regions left out,
+volume against the mesh's:
+
+| file | 0.01 mm before → after | 0.05 mm before → after | 0.1 mm before → after |
+|---|---|---|---|
+| own/drill-block | unfit 3 (0 %) → **93 (77/12/0/0/4), 3 left out, 1.0014** (4.3 s) | 168 → 168 (137/30/0/1/0), 1.0003 (3.2 s) | rebuild → rebuild (6.2 s) |
+| own/track-straight-100mm | unfit 2 (1 %) → unfit 2 (1 %), "Raise the tolerance to 0.05 mm" (2.5 s) | unfit (baseline) → **107 (89/12/3/0/3), 1 left out, 1.0002** (1.5 s) | rebuild (baseline) → rebuild, "… to 0.2 mm" (2.3 s) |
+| own/remove-before-flight-cover | unfit 5 (1 %), 0.064 → same, after a failed rebuild (16 s) | unfit 4 (0 %) → same (18 s) | rebuild (baseline) → rebuild, "… to 0.2 mm" (16 s) |
+| own/shower-holder | unfit 3 (1 %) → budget (66 s) | rebuild (baseline) → budget (30 s) | rebuild (baseline) → rebuild, "… to 0.5 mm" (26 s) |
+| own/object-permanence-base | unfit 7 (1 %) → unfit 7 (1 %), after a failed rebuild (11 s) | unfit 3 (83 %) → same | unfit 2 (83 %) → same |
+| third-party/hot-wheels-connector | unfit 2 (1 %) → unfit 2 (1 %), after a failed rebuild (30 s) | trap (baseline) → budget (30 s) | trap (baseline) → budget (51 s) |
+| third-party/vented-funnel | unfit 1 (2 %) → same (2.08 %, over the allowance) | – → budget (30 s) | – → budget (30 s) |
+| own/mirna-doodle-1 | unfit 11 (6 %) → same | unfit 6 (5 %) → same, "… to 0.475 mm" | unfit 2 (3 %) → same, "… to 0.191 mm" |
+| own/puzzle-insert-circle | unfit 1 (6 %) → same | trap (baseline) → budget (31 s) | rebuild (baseline) → budget (30 s) |
+| own/spool-screw-v4.1 | unfit 2 (6 %) → same | cap 1,098 → same | cap 1,181 → same |
+| own/trashcan-spacer | unfit 1 (82 %) → same | rebuild → rebuild (3.9 s) | rebuild → rebuild (16 s) |
+| third-party/micro-sd-keyring-inner | rebuild → rebuild, "… to 0.05 mm" (4.8 s) | 97 → 97 (91/6/0/0/0), 1.0006 | 84 → 84 (78/6/0/0/0), 1.0007 |
+| third-party/wyze-garage-bracket | rebuild → rebuild, "… to 0.05 mm" (13 s) | 84 → 84 (55/27/2/0/0), 1.0002 (8.8 s) | 88 → 88 (58/28/2/0/0), 0.9987 (4.6 s) |
+
+Over the 41 files (36 import as closed bodies), prismatic converts 10 at 0.01
+mm (9 before: drill-block is new), 12 at 0.05 (11: track-straight) and 9 at
+0.1 (9), each in one process per tolerance with no trap. The nine files that
+converted at 0.01 mm give the same faces, validity and volumes. A refusal
+that retries costs up to the rest of the 30 s budget (remove-before-flight
+16 s, wyze 13 s) where it was refused in under a second or two before.
+
 ### 6. Where it is
 
 A tile "Mesh to Solid" at the end of Solid › Modify (with a tooltip clip,

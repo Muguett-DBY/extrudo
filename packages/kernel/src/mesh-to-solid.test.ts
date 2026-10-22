@@ -418,6 +418,84 @@ function noisyCylinder(): ShapeHandle {
   return kernel.meshFrom({ positions, indices: Uint32Array.from(gl.triVerts) });
 }
 
+/**
+ * A box 20 x 20 x 10 whose vertical edge at x = 20, y = 20 is cut by a twisted
+ * chamfer: `w0` wide on the y = 20 face all the way up, `w0` to `w1` on the
+ * x = 20 face, in `steps` rows. The chamfer is a ruled saddle no plane,
+ * cylinder, cone, sphere or torus fits (ADR-0097's slice C), built as a
+ * welded mesh with outward triangles.
+ */
+function twistedChamferMesh(w0: number, w1: number, steps = 24): TriangleMesh {
+  const [L, W, H] = [20, 20, 10];
+  const positions: number[] = [];
+  const indices: number[] = [];
+  const index = new Map<string, number>();
+  const node = (x: number, y: number, z: number) => {
+    const key = `${x},${y},${z}`;
+    let i = index.get(key);
+    if (i === undefined) {
+      i = positions.length / 3;
+      positions.push(x, y, z);
+      index.set(key, i);
+    }
+    return i;
+  };
+  const centre = [L / 2, W / 2, H / 2];
+  const triangle = (a: number, b: number, c: number) => {
+    const p = (i: number, k: number) => positions[3 * i + k] as number;
+    const u = [0, 1, 2].map((k) => p(b, k) - p(a, k));
+    const v = [0, 1, 2].map((k) => p(c, k) - p(a, k));
+    const n = [
+      (u[1] as number) * (v[2] as number) - (u[2] as number) * (v[1] as number),
+      (u[2] as number) * (v[0] as number) - (u[0] as number) * (v[2] as number),
+      (u[0] as number) * (v[1] as number) - (u[1] as number) * (v[0] as number),
+    ];
+    const out = [0, 1, 2].reduce(
+      (sum, k) =>
+        sum + (n[k] as number) * ((p(a, k) + p(b, k) + p(c, k)) / 3 - (centre[k] as number)),
+      0,
+    );
+    indices.push(...(out >= 0 ? [a, b, c] : [a, c, b]));
+  };
+  const fan = (ring: number[]) => {
+    for (let k = 1; k + 1 < ring.length; k++)
+      triangle(ring[0] as number, ring[k] as number, ring[k + 1] as number);
+  };
+  const z = (k: number) => (H * k) / steps;
+  const a = (k: number) => node(L, W - (w0 + ((w1 - w0) * k) / steps), z(k));
+  const b = (k: number) => node(L - w0, W, z(k));
+  for (let k = 0; k < steps; k++) {
+    triangle(a(k), b(k), b(k + 1));
+    triangle(a(k), b(k + 1), a(k + 1));
+  }
+  const rows = Array.from({ length: steps + 1 }, (_, k) => k);
+  fan([node(L, 0, 0), ...rows.map(a), node(L, 0, H)]);
+  fan([node(0, W, 0), ...rows.map(b), node(0, W, H)]);
+  fan([node(0, 0, H), node(L, 0, H), a(steps), b(steps), node(0, W, H)]);
+  fan([node(0, 0, 0), node(L, 0, 0), a(0), b(0), node(0, W, 0)]);
+  fan([node(0, 0, 0), node(0, W, 0), node(0, W, H), node(0, 0, H)]);
+  fan([node(0, 0, 0), node(L, 0, 0), node(L, 0, H), node(0, 0, H)]);
+  return { positions: Float64Array.from(positions), indices: Uint32Array.from(indices) };
+}
+
+/** The signed volume of a triangle mesh. */
+function volumeOfMesh({ positions, indices }: TriangleMesh): number {
+  const at = (i: number) => positions[i] as number;
+  let v = 0;
+  for (let t = 0; t < indices.length; t += 3) {
+    const [a, b, c] = [0, 1, 2].map((k) => 3 * (indices[t + k] as number)) as [
+      number,
+      number,
+      number,
+    ];
+    v +=
+      at(a) * (at(b + 1) * at(c + 2) - at(b + 2) * at(c + 1)) -
+      at(a + 1) * (at(b) * at(c + 2) - at(b + 2) * at(c)) +
+      at(a + 2) * (at(b) * at(c + 1) - at(b + 1) * at(c));
+  }
+  return v / 6;
+}
+
 describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
   it('1: turns cube.stl into six exact planes', () => {
     const { shape, report } = prismatic(cube());
@@ -557,6 +635,34 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
     } finally {
       kernel.release(shape);
     }
+  });
+
+  it('22: leaves a small unfit blend out of the rebuild (slice C): the box comes back sharp', () => {
+    const mesh = twistedChamferMesh(2, 1);
+    const { shape, report } = prismatic(kernel.meshFrom(mesh));
+    try {
+      expect(kinds(shape)).toEqual(Array(6).fill('plane'));
+      expect(kernel.isValid(shape)).toBe(true);
+      // The report keeps what was left out: one region, its triangles and share.
+      expect(report.unfit.regions).toBe(1);
+      expect(report.unfit.triangles).toBeGreaterThan(0);
+      expect(report.unfit.fraction).toBeGreaterThan(0);
+      expect(report.unfit.fraction).toBeLessThanOrEqual(0.02);
+      // The chamfer's volume comes back with the sharp edge: 4000 against the mesh's ~3985.
+      expect(kernel.properties(shape).volume).toBeCloseTo(4000, 3);
+      expect(Math.abs(kernel.properties(shape).volume / volumeOfMesh(mesh) - 1)).toBeLessThan(
+        0.005,
+      );
+    } finally {
+      kernel.release(shape);
+    }
+  });
+
+  it('23: refuses the same blend over 2 % of the surface with the unfit message', () => {
+    const { message } = refusal(kernel.meshFrom(twistedChamferMesh(6, 3)));
+    expect(message).toMatch(
+      /^Mesh to Solid couldn't close the body: 1 region \([3-9] % of the surface\) fits no plane, cylinder, sphere, cone or torus\./,
+    );
   });
 
   it('11: converts a 20k-triangle plate and a 500k-triangle sphere in under 3 s and 10 s', () => {
