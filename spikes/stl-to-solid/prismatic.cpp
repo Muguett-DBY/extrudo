@@ -416,6 +416,12 @@ static void file(ExtrudoFacade& f, const std::string& path, double tolerance) {
             for (int o : seg.regionNeighbours[r])
               if (surfaceOf[r] < surfaceOf[o]) pairs.insert({surfaceOf[r], surfaceOf[o]});
           std::cout << "     MakerVolume warnings: " << f.rebuildWarnings_ << std::endl;
+          for (size_t i = 0; i < f.rebuildFaces_.size(); ++i) {
+            if (f.rebuildFaces_[i].IsNull() || seg.surfaces[i].kind <= 0) continue;
+            double u0, u1, v0, v1;
+            BRepTools::UVBounds(TopoDS::Face(f.rebuildFaces_[i]), u0, u1, v0, v1);
+            std::cout << "     face " << i << " kind " << seg.surfaces[i].kind << " u " << u0 << " .. " << u1 << " v " << v0 << " .. " << v1 << std::endl;
+          }
           for (const auto& [a, b] : pairs) {
             if (f.rebuildFaces_[a].IsNull() || f.rebuildFaces_[b].IsNull()) continue;
             BRepExtrema_DistShapeShape d(f.rebuildFaces_[a], f.rebuildFaces_[b]);
@@ -491,7 +497,7 @@ int main(int argc, char** argv) {
   ExtrudoFacade f;
   // BUDGET=ms lowers the rebuild's budget (PRISMATIC_REBUILD_BUDGET_MS), to see it hit.
   if (getenv("BUDGET") && *getenv("BUDGET")) f.prismaticBudgetMs_ = std::atof(getenv("BUDGET"));
-  f.unfitAsFacets_ = getenv("FACETS") && *getenv("FACETS");
+  if (getenv("DEBUGFLAGS") && *getenv("DEBUGFLAGS")) f.debugFlags_ = std::atoi(getenv("DEBUGFLAGS"));
   const std::string only = argc > 1 ? argv[1] : "";
   const double envTol = getenv("TOL") && *getenv("TOL") ? std::atof(getenv("TOL")) : 0.01;
   if (only == "f") {

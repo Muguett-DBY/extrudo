@@ -5781,7 +5781,8 @@ private:
   static constexpr double PRISMATIC_UNFIT_ALLOWED = 0.02;
   /** The budget the next rebuild gets: PRISMATIC_REBUILD_BUDGET_MS, lowered only by the spike harness. */
   double prismaticBudgetMs_ = PRISMATIC_REBUILD_BUDGET_MS;
-  bool unfitAsFacets_ = false;
+  /** Spike-harness experiments only (DEBUGFLAGS): 1 no gap growth, 2 no same-surface merge. */
+  int debugFlags_ = 0;
   /** The last rebuild's oversized faces, one per surface, when the spike harness asks (GAPS=1). */
   bool keepRebuildFaces_ = false;
   std::vector<TopoDS_Shape> rebuildFaces_;
@@ -7440,7 +7441,7 @@ private:
       for (int b : order) {
         MeshSurface& small = surfaces[b];
         for (int a : roots) {
-          if (small.kind < 0) break;
+          if (small.kind < 0 || (debugFlags_ & 2)) break;
           MeshSurface& large = surfaces[a];
           if (large.kind != small.kind) continue;
           const double along = large.direction.XYZ().Dot(small.direction.XYZ());
@@ -7793,7 +7794,7 @@ private:
     for (int i = 0; i < surfaceCount; ++i) {
       double sag = surfaces[i].sag;
       for (int other : adjacent[i]) sag = std::max(sag, surfaces[other].sag);
-      margins[i] = 10 * tolerance + 2 * sag + (unfitAsFacets_ ? 0 : gaps[i]);
+      margins[i] = 10 * tolerance + 2 * sag + ((debugFlags_ & 1) ? 0 : gaps[i]);
     }
     // An angle's range over a surface's nodes (radians in [0, 2π)): from the
     // end of the largest gap between them round to its start, grown by
@@ -8001,6 +8002,10 @@ private:
           classifiers[i]->Perform(p, 1e-7);
           if (classifiers[i]->State() == TopAbs_IN) {
             (side == 0 ? inside : outside)[i]++;
+            if (keepRebuildFaces_ && side == 1 && outside[i] % 20 == 1)
+              rebuildWarnings_ += "\n     out vote cell " + std::to_string(i) + " at " + std::to_string(p.X()) + "," +
+                                  std::to_string(p.Y()) + "," + std::to_string(p.Z()) + " surface " +
+                                  std::to_string(surfaceOf[regionOf[t]]);
             last[side] = i;
             const int votes = inside[i] + outside[i];
             if (!decided[i] && votes >= 16 && std::max(inside[i], outside[i]) >= 0.9 * votes) {
@@ -8029,6 +8034,15 @@ private:
         keep = classifiers[i]->State() == TopAbs_IN && insideMesh(centre.XYZ());
       }
       if (keep) kept.push_back(cells[i]);
+      if (keepRebuildFaces_) {
+        GProp_GProps props;
+        BRepGProp::VolumeProperties(cells[i], props);
+        const gp_Pnt c = props.CentreOfMass();
+        rebuildWarnings_ += "\n     cell " + std::to_string(i) + (keep ? " kept" : " dropped") + " volume " +
+                            std::to_string(props.Mass()) + " in " + std::to_string(inside[i]) + " out " +
+                            std::to_string(outside[i]) + " centre " + std::to_string(c.X()) + "," + std::to_string(c.Y()) +
+                            "," + std::to_string(c.Z());
+      }
     }
     classifiers.clear();
     {
