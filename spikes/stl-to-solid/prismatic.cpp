@@ -325,6 +325,63 @@ static void file(ExtrudoFacade& f, const std::string& path, double tolerance) {
     std::memcpy(reinterpret_cast<void*>(f.meshTrianglesPtr()), m.triangles.data(), m.triangles.size() * sizeof(uint32_t));
   };
   stage();
+  if (getenv("UNFIT") && *getenv("UNFIT")) {
+    // Every unfit surface: triangles, area, box, the kinds of its neighbours, each kind's fit deviation, the thinnest triangle.
+    ExtrudoFacade::MeshSegmentation seg;
+    if (f.segmentMesh(tolerance, seg)) {
+      std::vector<int> surfaceOf(seg.regions.size(), -1);
+      for (size_t i = 0; i < seg.surfaces.size(); ++i)
+        for (int r : seg.surfaces[i].regions) surfaceOf[r] = int(i);
+      for (size_t i = 0; i < seg.surfaces.size(); ++i) {
+        const auto& s = seg.surfaces[i];
+        if (s.kind >= 0) continue;
+        std::vector<int> nodes, triangles;
+        double lo[3] = {1e300, 1e300, 1e300}, hi[3] = {-1e300, -1e300, -1e300}, thinnest = 1e300, longest = 0;
+        std::map<int, int> neighbours;
+        for (int r : s.regions) {
+          nodes.insert(nodes.end(), seg.regions[r].nodes.begin(), seg.regions[r].nodes.end());
+          triangles.insert(triangles.end(), seg.regions[r].triangles.begin(), seg.regions[r].triangles.end());
+          for (int o : seg.regionNeighbours[r])
+            if (surfaceOf[o] != int(i)) neighbours[surfaceOf[o]]++;
+        }
+        std::sort(nodes.begin(), nodes.end());
+        nodes.erase(std::unique(nodes.begin(), nodes.end()), nodes.end());
+        for (int n : nodes) {
+          const gp_XYZ p = f.meshNode(n);
+          for (int k = 0; k < 3; ++k) lo[k] = std::min(lo[k], p.Coord(k + 1)), hi[k] = std::max(hi[k], p.Coord(k + 1));
+        }
+        for (int t : triangles) {
+          const gp_XYZ a = f.meshNode(int(f.meshTriangles_[3 * t])), b = f.meshNode(int(f.meshTriangles_[3 * t + 1])),
+                       c = f.meshNode(int(f.meshTriangles_[3 * t + 2]));
+          const double e = std::max({(b - a).Modulus(), (c - b).Modulus(), (a - c).Modulus()});
+          longest = std::max(longest, e);
+          if (e > 0) thinnest = std::min(thinnest, 2 * seg.areas[t] / e);
+        }
+        gp_XYZ outward(0, 0, 0);
+        for (int t : triangles) outward += seg.areas[t] * seg.normals[t];
+        if (outward.Modulus() < 1e-300) outward = gp_XYZ(0, 0, 1);
+        const ExtrudoFacade::MeshFit fits[5] = {f.fitMeshPlane(nodes, outward), f.fitMeshCylinder(nodes, triangles, seg.normals, seg.areas),
+                                                f.fitMeshCone(nodes, triangles, seg.normals, seg.areas), f.fitMeshSphere(nodes),
+                                                f.fitMeshTorus(nodes, triangles, seg.normals, seg.areas, tolerance)};
+        std::cout << std::setprecision(5) << "   unfit surface " << i << ": " << s.regions.size() << " regions, " << triangles.size()
+                  << " triangles, " << nodes.size() << " nodes, area " << s.area << " (" << 100 * s.area / seg.meshArea << " %), box ["
+                  << lo[0] << "," << lo[1] << "," << lo[2] << " .. " << hi[0] << "," << hi[1] << "," << hi[2] << "], thinnest triangle "
+                  << thinnest << ", longest edge " << longest << ", dev " << s.deviation << "\n     fits pl/cy/co/sp/to:";
+        for (const auto& fit : fits) {
+          if (fit.ok) std::cout << " " << fit.deviation;
+          else std::cout << " -";
+        }
+        std::cout << " (sp r " << fits[3].radius << ", cy r " << fits[1].radius << ", to R " << fits[4].majorRadius << " r " << fits[4].radius
+                  << ")\n     neighbours:";
+        for (const auto& [o, borders] : neighbours) {
+          const auto& n = seg.surfaces[o];
+          std::cout << " " << o << "(kind " << n.kind << ", r " << n.radius << ", area " << n.area << ")";
+        }
+        std::cout << std::setprecision(6) << std::endl;
+      }
+    }
+    stage();
+  }
   if (getenv("PIECES") && *getenv("PIECES")) {
     // How many surfaces each region is in: exactly one, or the segmentation lost or doubled it.
     ExtrudoFacade::MeshSegmentation seg;
@@ -359,6 +416,7 @@ static void file(ExtrudoFacade& f, const std::string& path, double tolerance) {
               if (surfaceOf[r] < surfaceOf[o]) pairs.insert({surfaceOf[r], surfaceOf[o]});
           std::cout << "     MakerVolume warnings: " << f.rebuildWarnings_ << std::endl;
           for (const auto& [a, b] : pairs) {
+            if (f.rebuildFaces_[a].IsNull() || f.rebuildFaces_[b].IsNull()) continue;
             BRepExtrema_DistShapeShape d(f.rebuildFaces_[a], f.rebuildFaces_[b]);
             if (!d.IsDone() || d.Value() > 1e-7)
               std::cout << "     gap between surface " << a << " (kind " << seg.surfaces[a].kind << ") and " << b << " (kind "
