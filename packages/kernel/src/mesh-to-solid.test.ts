@@ -430,7 +430,8 @@ function twistedChamferMesh(w0: number, w1: number, steps = 24): TriangleMesh {
       (u[0] as number) * (v[1] as number) - (u[1] as number) * (v[0] as number),
     ];
     const out = [0, 1, 2].reduce(
-      (sum, k) => sum + (n[k] as number) * ((p(a, k) + p(b, k) + p(c, k)) / 3 - (centre[k] as number)),
+      (sum, k) =>
+        sum + (n[k] as number) * ((p(a, k) + p(b, k) + p(c, k)) / 3 - (centre[k] as number)),
       0,
     );
     indices.push(...(out >= 0 ? [a, b, c] : [a, c, b]));
@@ -461,7 +462,11 @@ function volumeOfMesh({ positions, indices }: TriangleMesh): number {
   const at = (i: number) => positions[i] as number;
   let v = 0;
   for (let t = 0; t < indices.length; t += 3) {
-    const [a, b, c] = [0, 1, 2].map((k) => 3 * (indices[t + k] as number)) as [number, number, number];
+    const [a, b, c] = [0, 1, 2].map((k) => 3 * (indices[t + k] as number)) as [
+      number,
+      number,
+      number,
+    ];
     v +=
       at(a) * (at(b + 1) * at(c + 2) - at(b + 2) * at(c + 1)) -
       at(a + 1) * (at(b) * at(c + 2) - at(b + 2) * at(c)) +
@@ -624,7 +629,9 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
       expect(report.unfit.fraction).toBeLessThanOrEqual(0.02);
       // The chamfer's volume comes back with the sharp edge: 4000 against the mesh's ~3985.
       expect(kernel.properties(shape).volume).toBeCloseTo(4000, 3);
-      expect(Math.abs(kernel.properties(shape).volume / volumeOfMesh(mesh) - 1)).toBeLessThan(0.005);
+      expect(Math.abs(kernel.properties(shape).volume / volumeOfMesh(mesh) - 1)).toBeLessThan(
+        0.005,
+      );
     } finally {
       kernel.release(shape);
     }
