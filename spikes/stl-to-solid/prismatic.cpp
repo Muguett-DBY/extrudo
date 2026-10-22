@@ -20,12 +20,15 @@
 #include <StlAPI_Writer.hxx>
 #include <BRepBuilderAPI_Copy.hxx>
 #include <chrono>
+#include <array>
+#include <cmath>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <set>
 #include <iomanip>
 #include <iostream>
+#include <map>
 
 static double now() {
   return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
@@ -148,6 +151,67 @@ static std::string kinds(const TopoDS_Shape& s) {
 }
 
 static int failures = 0;
+
+/** Case g diagnostics (FACETED_DEBUG): degenerate/duplicate triangles, coincident nodes, open and non-manifold edges. */
+static void analyzeMesh(const Mesh& m) {
+  const int n = int(m.nodes.size() / 3), t = int(m.triangles.size() / 3);
+  auto P = [&](uint32_t i) { return std::array<double, 3>{m.nodes[3 * i], m.nodes[3 * i + 1], m.nodes[3 * i + 2]}; };
+  int degenerate = 0, duplicate = 0;
+  std::map<std::pair<uint32_t, uint32_t>, int> edges;
+  std::map<std::array<uint32_t, 3>, int> tris;
+  for (int i = 0; i < t; ++i) {
+    uint32_t a = m.triangles[3 * i], b = m.triangles[3 * i + 1], c = m.triangles[3 * i + 2];
+    auto A = P(a), B = P(b), C = P(c);
+    double ux = B[0] - A[0], uy = B[1] - A[1], uz = B[2] - A[2];
+    double vx = C[0] - A[0], vy = C[1] - A[1], vz = C[2] - A[2];
+    double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    if (a == b || b == c || a == c || std::sqrt(nx * nx + ny * ny + nz * nz) * 0.5 <= 1e-12) ++degenerate;
+    const uint32_t lo = std::min({a, b, c}), hi = std::max({a, b, c});
+    std::array<uint32_t, 3> key{lo, a + b + c - lo - hi, hi};
+    if (++tris[key] > 1) ++duplicate;
+    for (auto e : {std::pair<uint32_t, uint32_t>{a, b}, {b, c}, {c, a}}) edges[{std::min(e.first, e.second), std::max(e.first, e.second)}]++;
+  }
+  int edges1 = 0, nonManifold = 0;
+  for (auto& [e, count] : edges) {
+    if (count == 1) ++edges1;
+    if (count > 2) ++nonManifold;
+  }
+  int coincidentNodes = 0;
+  std::map<std::array<long long, 3>, int> grid;
+  for (int i = 0; i < n; ++i) {
+    auto p = P(uint32_t(i));
+    std::array<long long, 3> k{llround(p[0] * 1e6), llround(p[1] * 1e6), llround(p[2] * 1e6)};
+    if (++grid[k] > 1) ++coincidentNodes;
+  }
+  std::cout << "   mesh: nodes " << n << ", triangles " << t << ", degenerate " << degenerate << ", duplicate " << duplicate
+            << ", coincident nodes " << coincidentNodes << ", edges used once " << edges1 << ", >2 " << nonManifold << "\n";
+}
+
+/** Case g: runs faceted (meshToSolid(0)) on a file staged through stlFile(); prints the time, the report and, on refusal, the error. */
+static int runFaceted(ExtrudoFacade& f, const char* name, const Mesh& m, double tolerance) {
+  const char* flag = std::getenv("FACETED_DEBUG");
+  if (flag != nullptr && *flag != '\0') analyzeMesh(m);
+  const double t0 = now();
+  f.meshNodes(int(m.nodes.size() / 3));
+  // Float32, as Kernel.meshFrom keeps a mesh body's nodes (and STL stores them).
+  double* nodes = reinterpret_cast<double*>(f.meshNodesPtr());
+  for (size_t i = 0; i < m.nodes.size(); ++i) nodes[i] = static_cast<float>(m.nodes[i]);
+  f.meshTriangles(int(m.triangles.size() / 3));
+  std::memcpy(reinterpret_cast<void*>(f.meshTrianglesPtr()), m.triangles.data(), m.triangles.size() * sizeof(uint32_t));
+  const int h = f.meshToSolid(0, tolerance);
+  const double ms = now() - t0;
+  std::cout << "== faceted " << name << " (" << m.triangles.size() / 3 << " triangles, tol " << tolerance << "): " << ms << " ms\n";
+  const auto& r = f.meshReport_;
+  if (r.size() == 10) std::cout << "   report: faces " << r[0] << ", planes " << r[1] << "\n";
+  if (!h) {
+    std::cout << "   refused: " << f.lastError() << "\n";
+    return 0;
+  }
+  const TopoDS_Shape& s = *f.find(h);
+  std::cout << "   faces " << f.count(h, 0) << ":" << kinds(s) << ", valid " << BRepCheck_Analyzer(s).IsValid()
+            << ", volume " << ExtrudoFacade::volumeOf(s) << "\n";
+  return h;
+}
 
 /** Runs prismatic on `m`; prints the result; returns the handle (0 on refusal). */
 static int run(ExtrudoFacade& f, const char* name, const Mesh& m, double tolerance, double expectVolume = 0) {
@@ -386,6 +450,16 @@ int main(int argc, char** argv) {
     return 0;
   }
   auto want = [&](const char* id) { return only.empty() || only == id; };
+  if (want("g")) {
+    // Faceted on one corpus file: STL_DIR=... FILE=x.stl bash run.sh prismatic g
+    const char* file = getenv("FILE");
+    if (!file || !*file) {
+      std::cout << "== faceted: set FILE (with STL_DIR mounted at /stl), e.g. FILE=third-party/wyze-garage-bracket.stl\n";
+    } else {
+      int h = runFaceted(f, file, stlFile((std::string("/stl/") + file).c_str()), 0.01);
+      if (h) f.release(h);
+    }
+  }
   if (want("1")) {
     int h = run(f, "1 cube.stl", stlFile("/repo/fixtures/imports/cube.stl"), 0.01, 8000);
     if (h) f.release(h);

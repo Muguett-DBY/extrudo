@@ -11,7 +11,7 @@ if [ "${1:-}" = prismatic ]; then
   mkdir -p "$S/$B"
   # The facade with its private members public, so the harness can look inside.
   sed 's/^ *private:/ public:/' "${FACADE:-$R/packages/kernel/occt/facade/extrudo_facade.cpp}" > "$S/$B/facade_public.cpp"
-  # STL_DIR: a folder mounted read-only at /stl for cases f (FILE) and F (all of it), at TOL.
+  # STL_DIR: a folder mounted read-only at /stl for cases f (FILE), F (all of it) and g (faceted, FILE), at TOL.
   STL=()
   [ -n "${STL_DIR:-}" ] && STL=(-v "$STL_DIR:/stl:ro")
   # SAN=1: AddressSanitizer; SAN=ub: UndefinedBehaviorSanitizer; SAN=heap: SAFE_HEAP + assertions.
@@ -22,7 +22,7 @@ if [ "${1:-}" = prismatic ]; then
     ub) FLAGS="-O1 -g2 -fsanitize=undefined -sALLOW_MEMORY_GROWTH -sMAXIMUM_MEMORY=4GB"; OUT=prismatic-ubsan ;;
     heap) FLAGS="-O1 -g2 -sSAFE_HEAP=1 -sASSERTIONS=2 -DEXTRUDO_FACADE_CHECKS -sALLOW_MEMORY_GROWTH -sMAXIMUM_MEMORY=4GB"; OUT=prismatic-heap ;;
   esac
-  docker run --rm --user 0 -e FACES="${FACES:-}" -e PIECES="${PIECES:-}" -e TIMES="${TIMES:-}" -e SEGMENT="${SEGMENT:-}" -e BUDGET="${BUDGET:-}" -e GAPS="${GAPS:-}" -e FILE="${FILE:-}" -e TOL="${TOL:-}" \
+  docker run --rm --user 0 -e FACES="${FACES:-}" -e PIECES="${PIECES:-}" -e TIMES="${TIMES:-}" -e SEGMENT="${SEGMENT:-}" -e BUDGET="${BUDGET:-}" -e GAPS="${GAPS:-}" -e FILE="${FILE:-}" -e TOL="${TOL:-}" -e FACETED_DEBUG="${FACETED_DEBUG:-}" \
     -e NOBUILD="${NOBUILD:-}" -e B="$B" -e FLAGS="$FLAGS" -e OUT="$OUT" -v "$S:/w" -v "$R/fixtures:/repo/fixtures:ro" "${STL[@]}" -w /w --entrypoint sh "$IMAGE" -c '
     set -e
     LINK=$(ls /opencascade.js/build/occt-libraries/*.a | tr "\n" " ")
