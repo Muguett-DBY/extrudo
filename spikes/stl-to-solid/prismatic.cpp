@@ -6,6 +6,7 @@
 #include "facade_public.cpp"  // in build/ (or BUILD), on the include path
 
 #include <BRepAlgoAPI_Cut.hxx>
+#include <BRepOffsetAPI_ThruSections.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
 #include <BRepFilletAPI_MakeFillet.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
@@ -490,6 +491,7 @@ int main(int argc, char** argv) {
   ExtrudoFacade f;
   // BUDGET=ms lowers the rebuild's budget (PRISMATIC_REBUILD_BUDGET_MS), to see it hit.
   if (getenv("BUDGET") && *getenv("BUDGET")) f.prismaticBudgetMs_ = std::atof(getenv("BUDGET"));
+  f.unfitAsFacets_ = getenv("FACETS") && *getenv("FACETS");
   const std::string only = argc > 1 ? argv[1] : "";
   const double envTol = getenv("TOL") && *getenv("TOL") ? std::atof(getenv("TOL")) : 0.01;
   if (only == "f") {
@@ -631,6 +633,28 @@ int main(int argc, char** argv) {
     regions(f, "staircase, 302 surfaces", stairMesh, 0.01);
     h = run(f, "r staircase, 302 surfaces (the conversion)", stairMesh, 0.01);
     if (h) f.release(h);
+  }
+  if (want("u")) {
+    // Slice C: a box 20 x 20 x 10 with one vertical edge cut by a twisted
+    // chamfer (w0 wide on one face along the whole edge, w0 to w1 on the
+    // other: a ruled saddle no primitive fits).
+    for (double scale : {1.0, 3.0}) {
+      const double w0 = 2 * scale, w1 = 1 * scale, L = 20, W = 20, H = 10;
+      auto section = [&](double z, double w) {
+        BRepBuilderAPI_MakePolygon p;
+        for (gp_Pnt q : {gp_Pnt(0, 0, z), gp_Pnt(L, 0, z), gp_Pnt(L, W - w, z), gp_Pnt(L - w0, W, z), gp_Pnt(0, W, z)}) p.Add(q);
+        p.Close();
+        return p.Wire();
+      };
+      BRepOffsetAPI_ThruSections loft(true, true);
+      loft.AddWire(section(0, w0));
+      loft.AddWire(section(H, w1));
+      loft.Build();
+      const TopoDS_Shape block = loft.Shape();
+      const std::string name = scale == 1 ? "u1 box with a twisted chamfer 2/1" : "u2 box with a twisted chamfer 6/3";
+      int h = run(f, name.c_str(), meshOf(block, 0.002, 0.1), 0.01, ExtrudoFacade::volumeOf(block));
+      if (h) f.release(h);
+    }
   }
   if (want("x")) {
     // Extra shapes beyond the slice's matrix.

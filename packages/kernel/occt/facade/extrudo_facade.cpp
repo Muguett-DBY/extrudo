@@ -5781,6 +5781,7 @@ private:
   static constexpr double PRISMATIC_UNFIT_ALLOWED = 0.02;
   /** The budget the next rebuild gets: PRISMATIC_REBUILD_BUDGET_MS, lowered only by the spike harness. */
   double prismaticBudgetMs_ = PRISMATIC_REBUILD_BUDGET_MS;
+  bool unfitAsFacets_ = false;
   /** The last rebuild's oversized faces, one per surface, when the spike harness asks (GAPS=1). */
   bool keepRebuildFaces_ = false;
   std::vector<TopoDS_Shape> rebuildFaces_;
@@ -7792,7 +7793,7 @@ private:
     for (int i = 0; i < surfaceCount; ++i) {
       double sag = surfaces[i].sag;
       for (int other : adjacent[i]) sag = std::max(sag, surfaces[other].sag);
-      margins[i] = 10 * tolerance + 2 * sag + gaps[i];
+      margins[i] = 10 * tolerance + 2 * sag + (unfitAsFacets_ ? 0 : gaps[i]);
     }
     // An angle's range over a surface's nodes (radians in [0, 2π)): from the
     // end of the largest gap between them round to its start, grown by
@@ -8079,11 +8080,22 @@ private:
     stage("merged and unified");
     check();
     if (!BRepCheck_Analyzer(result).IsValid()) {
-      ShapeFix_Shape healer(result);
-      healer.Perform(deadline->Start());
-      result = healer.Shape();
+      // Unify can break a valid solid (a sliver face it can't bound); heal
+      // it, else keep the cells' solid as it was, split faces and all.
+      bool healed = false;
+      try {
+        ShapeFix_Shape healer(result);
+        healer.Perform(deadline->Start());
+        result = healer.Shape();
+        healed = BRepCheck_Analyzer(result).IsValid();
+      } catch (const Standard_Failure&) {
+      }
       check();
-      if (!BRepCheck_Analyzer(result).IsValid()) return refuse("invalid after healing");
+      if (!healed) {
+        if (!BRepCheck_Analyzer(solid).IsValid()) return refuse("invalid after healing");
+        result = solid;
+        stage("unify undone");
+      }
     }
     stage("validity");
 
