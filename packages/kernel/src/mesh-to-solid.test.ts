@@ -46,6 +46,37 @@ function cube(): ShapeHandle {
   return kernel.meshFrom(readStl(bytesOf(cubeStl)).mesh);
 }
 
+/** cube.stl's mesh plus an identical copy offset by `offset` (indices don't overlap). */
+function cubeAndCopy(offset: readonly [number, number, number]): ShapeHandle {
+  const { mesh } = readStl(bytesOf(cubeStl));
+  const n = mesh.positions.length / 3;
+  const positions = new Float64Array(n * 6);
+  positions.set(mesh.positions, 0);
+  for (let i = 0; i < n; i++)
+    for (let k = 0; k < 3; k++)
+      positions[3 * (n + i) + k] = (mesh.positions[3 * i + k] as number) + (offset[k] as number);
+  const indices = new Uint32Array(mesh.indices.length * 2);
+  indices.set(mesh.indices, 0);
+  for (let i = 0; i < mesh.indices.length; i++)
+    indices[mesh.indices.length + i] = (mesh.indices[i] as number) + n;
+  return kernel.meshFrom({ positions, indices });
+}
+
+/** The size of cube.stl (one 20 mm cube). */
+function cubeExtent(): [number, number, number] {
+  const { mesh } = readStl(bytesOf(cubeStl));
+  const xs: number[] = [];
+  const ys: number[] = [];
+  const zs: number[] = [];
+  for (let i = 0; i < mesh.positions.length; i += 3) {
+    xs.push(mesh.positions[i] as number);
+    ys.push(mesh.positions[i + 1] as number);
+    zs.push(mesh.positions[i + 2] as number);
+  }
+  const extent = (values: number[]): number => Math.max(...values) - Math.min(...values);
+  return [extent(xs), extent(ys), extent(zs)];
+}
+
 /** The surface kind of every face. */
 function kinds(shape: ShapeHandle): string[] {
   return Array.from(
@@ -129,15 +160,19 @@ describe('Kernel.meshToSolid, faceted', { timeout: 300_000 }, () => {
     const mesh = meshOf(manifold.Manifold.sphere(10, 128));
     try {
       let error: unknown;
+      const start = performance.now();
       try {
         const { shape } = kernel.meshToSolid(mesh, { method: 'faceted', tolerance: 0.01 });
         kernel.release(shape);
       } catch (e) {
         error = e;
       }
+      const ms = performance.now() - start;
       expect(error).toBeInstanceOf(KernelError);
       expect((error as Error).message).toMatch(/^Faceted would give /);
       expect((error as Error).message).toContain('Extrudo converts up to 2,000');
+      // The face count comes before the build (ADR-0097 §3, 2026-10-22).
+      expect(ms).toBeLessThan(1000);
     } finally {
       kernel.release(mesh);
     }
@@ -151,6 +186,47 @@ describe('Kernel.meshToSolid, faceted', { timeout: 300_000 }, () => {
       );
     } finally {
       kernel.release(box);
+    }
+  });
+
+  it('converts a mesh of two disjoint closed shells into a compound of two solids', () => {
+    const mesh = cubeAndCopy([30, 0, 0]);
+    try {
+      const { shape, report } = kernel.meshToSolid(mesh, { method: 'faceted', tolerance: 0.01 });
+      try {
+        expect(kernel.isValid(shape)).toBe(true);
+        expect(kernel.count(shape, 'face')).toBe(12);
+        expect(kernel.properties(shape).volume).toBeCloseTo(16000, 6);
+        expect(report).toMatchObject({ faces: 12, planes: 12 });
+        const solids = kernel.solids(shape);
+        try {
+          expect(solids).toHaveLength(2);
+          for (const solid of solids) expect(kernel.properties(solid).volume).toBeCloseTo(8000, 6);
+        } finally {
+          kernel.release(...solids);
+        }
+      } finally {
+        kernel.release(shape);
+      }
+    } finally {
+      kernel.release(mesh);
+    }
+  });
+
+  it('refuses shells that only touch at a vertex, naming the reason', () => {
+    const mesh = cubeAndCopy(cubeExtent());
+    try {
+      let error: unknown;
+      try {
+        const { shape } = kernel.meshToSolid(mesh, { method: 'faceted', tolerance: 0.01 });
+        kernel.release(shape);
+      } catch (e) {
+        error = e;
+      }
+      expect(error).toBeInstanceOf(KernelError);
+      expect((error as Error).message).toContain('vertex joins shells that only touch at a point');
+    } finally {
+      kernel.release(mesh);
     }
   });
 });

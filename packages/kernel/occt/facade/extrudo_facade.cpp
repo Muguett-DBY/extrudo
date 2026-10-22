@@ -49,6 +49,7 @@
 #include <BRepBuilderAPI_Transform.hxx>
 #include <BRepBuilderAPI_GTransform.hxx>
 #include <BRepCheck_Analyzer.hxx>
+#include <BRepCheck_Result.hxx>
 #include <BRepClass3d_SolidClassifier.hxx>
 #include <BRepExtrema_DistShapeShape.hxx>
 #include <BRepFilletAPI_MakeChamfer.hxx>
@@ -5510,64 +5511,253 @@ private:
   /** Faceted refuses a result with more faces than this (ADR-0097 §3). */
   static constexpr int FACETED_FACE_CAP = 2000;
 
+  /**
+   * What faceted would produce, from the triangle buffers alone (ADR-0097 §3,
+   * 2026-10-22): adjacent triangles (sharing an edge) whose unit normals agree
+   * within 1e-3 rad and whose planes agree within 1e-3 mm are one face — the
+   * tolerances ShapeUpgrade_UnifySameDomain gets — with a union-find over the
+   * triangles; the number of groups is the estimate. A zero-area triangle joins
+   * a neighbour. Also counts the mesh's non-manifold edges (shared by more than
+   * two triangles), open edges (used by one) and pinched vertices (a vertex
+   * whose triangles belong to more than one edge-connected shell), the reasons
+   * a closed solid is refused. Returns false when a triangle refers to a node
+   * the mesh doesn't have.
+   */
+  bool facetedMeshCounts(int& estimate, int& nonManifoldEdges, int& openEdges, int& nonManifoldVertices) {
+    const int nodes = static_cast<int>(meshNodes_.size() / 3);
+    const int triangles = static_cast<int>(meshTriangles_.size() / 3);
+    estimate = nonManifoldEdges = openEdges = nonManifoldVertices = 0;
+    if (triangles == 0) return true;
+    const uint32_t nodeCount = static_cast<uint32_t>(nodes);
+    struct EdgeUse {
+      uint64_t key;
+      int triangle;
+    };
+    std::vector<EdgeUse> uses;
+    uses.reserve(static_cast<size_t>(triangles) * 3);
+    for (int t = 0; t < triangles; ++t) {
+      const uint32_t a = meshTriangles_[3 * t], b = meshTriangles_[3 * t + 1], c = meshTriangles_[3 * t + 2];
+      if (a >= nodeCount || b >= nodeCount || c >= nodeCount) return false;
+      const uint32_t v[3] = {a, b, c};
+      for (int k = 0; k < 3; ++k) {
+        const uint32_t x = v[k], y = v[(k + 1) % 3];
+        uses.push_back({(static_cast<uint64_t>(std::min(x, y)) << 32) | std::max(x, y), t});
+      }
+    }
+    std::sort(uses.begin(), uses.end(), [](const EdgeUse& l, const EdgeUse& r) { return l.key < r.key; });
+    // Per-triangle unit normal and first corner, for the coplanar test.
+    std::vector<std::array<double, 3>> normal(triangles), corner(triangles);
+    std::vector<char> degenerate(triangles, 0);
+    for (int t = 0; t < triangles; ++t) {
+      const int p0 = 3 * meshTriangles_[3 * t], p1 = 3 * meshTriangles_[3 * t + 1], p2 = 3 * meshTriangles_[3 * t + 2];
+      const double ax = meshNodes_[p0], ay = meshNodes_[p0 + 1], az = meshNodes_[p0 + 2];
+      const double ux = meshNodes_[p1] - ax, uy = meshNodes_[p1 + 1] - ay, uz = meshNodes_[p1 + 2] - az;
+      const double vx = meshNodes_[p2] - ax, vy = meshNodes_[p2 + 1] - ay, vz = meshNodes_[p2 + 2] - az;
+      const double nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+      const double len = std::sqrt(nx * nx + ny * ny + nz * nz);
+      corner[t] = {ax, ay, az};
+      if (len <= 1e-12) {
+        degenerate[t] = 1;
+        normal[t] = {0, 0, 0};
+      } else {
+        normal[t] = {nx / len, ny / len, nz / len};
+      }
+      // The shared edge's two nodes decide which vertex of a neighbour may be off the plane.
+    }
+    auto find = [](std::vector<int>& p, int x) {
+      while (p[x] != x) {
+        p[x] = p[p[x]];
+        x = p[x];
+      }
+      return x;
+    };
+    std::vector<int> group(triangles), shell(triangles);
+    for (int t = 0; t < triangles; ++t) group[t] = shell[t] = t;
+    auto join = [&](std::vector<int>& p, int a, int b) {
+      const int ra = find(p, a), rb = find(p, b);
+      if (ra != rb) p[ra] = rb;
+    };
+    const double cosTolerance = std::cos(1e-3);
+    size_t i = 0;
+    while (i < uses.size()) {
+      size_t j = i + 1;
+      while (j < uses.size() && uses[j].key == uses[i].key) ++j;
+      const int count = static_cast<int>(j - i);
+      if (count == 1) ++openEdges;
+      else if (count > 2) ++nonManifoldEdges;
+      const int first = uses[i].triangle;
+      const uint32_t lo = static_cast<uint32_t>(uses[i].key >> 32), hi = static_cast<uint32_t>(uses[i].key & 0xffffffffu);
+      for (size_t k = i + 1; k < j; ++k) {
+        const int other = uses[k].triangle;
+        join(shell, first, other);
+        if (degenerate[first] || degenerate[other]) {
+          join(group, first, other);
+          continue;
+        }
+        const double dot = normal[first][0] * normal[other][0] + normal[first][1] * normal[other][1] +
+                           normal[first][2] * normal[other][2];
+        if (dot < cosTolerance) continue;
+        const uint32_t oa = meshTriangles_[3 * other], ob = meshTriangles_[3 * other + 1], oc = meshTriangles_[3 * other + 2];
+        const uint32_t third = (oa != lo && oa != hi) ? oa : ((ob != lo && ob != hi) ? ob : oc);
+        const int q = 3 * third;
+        const double off = normal[first][0] * (meshNodes_[q] - corner[first][0]) +
+                           normal[first][1] * (meshNodes_[q + 1] - corner[first][1]) +
+                           normal[first][2] * (meshNodes_[q + 2] - corner[first][2]);
+        if (std::fabs(off) <= 1e-3) join(group, first, other);
+      }
+      i = j;
+    }
+    for (int t = 0; t < triangles; ++t)
+      if (find(group, t) == t) ++estimate;
+    // A vertex is pinched when its triangles belong to more than one edge-connected shell.
+    std::vector<int> nodeShell(nodes, -1);
+    std::vector<char> pinched(nodes, 0);
+    for (int t = 0; t < triangles; ++t) {
+      const int root = find(shell, t);
+      for (int k = 0; k < 3; ++k) {
+        const uint32_t v = meshTriangles_[3 * t + k];
+        if (nodeShell[v] < 0) nodeShell[v] = root;
+        else if (nodeShell[v] != root) pinched[v] = 1;
+      }
+    }
+    for (int v = 0; v < nodes; ++v)
+      if (pinched[v]) ++nonManifoldVertices;
+    return true;
+  }
+
   /** meshToSolid's faceted method (ADR-0097 §3), over the staged buffers. */
   int facetedFromMesh() {
     static const char* const notClosed =
         "Mesh to Solid couldn't make a closed solid from this mesh: repair it in your slicer or a mesh tool and try again.";
+    // FACETED_DEBUG=1 tells which refusal fired (ADR-0097 §3, 2026-10-22).
+    auto debug = [] {
+      const char* flag = std::getenv("FACETED_DEBUG");
+      return flag != nullptr && *flag != '\0';
+    };
+    auto notClosedAt = [&](const char* where) {
+      if (debug()) std::fprintf(stderr, "[faceted] notClosed at %s\n", where);
+      return fail(notClosed);
+    };
     try {
       const int nodes = static_cast<int>(meshNodes_.size() / 3);
       const int triangles = static_cast<int>(meshTriangles_.size() / 3);
       if (nodes == 0 || triangles == 0) return fail("Mesh to Solid failed: the mesh is empty.");
+      // The face count first, so an over-cap mesh is refused before anything is built.
+      int estimate = 0, nonManifoldEdges = 0, openEdges = 0, nonManifoldVertices = 0;
+      if (!facetedMeshCounts(estimate, nonManifoldEdges, openEdges, nonManifoldVertices))
+        return fail("Mesh to Solid failed: the mesh refers to a node it doesn't have.");
+      if (debug()) std::fprintf(stderr, "[faceted] estimate %d faces from %d triangles\n", estimate, triangles);
+      if (estimate > FACETED_FACE_CAP) {
+        const std::string message = "Faceted would give about " + std::to_string(estimate) +
+                                    " faces; Extrudo converts up to 2,000. Use Prismatic, or simplify the mesh in your slicer.";
+        return fail(message.c_str());
+      }
+      // A refusal names the reason (ADR-0097 §3, 2026-10-22): what happened, then what to do.
+      auto refuseReason = [&](const std::string& clause) {
+        return fail(("Mesh to Solid couldn't make a closed solid from this mesh: " + clause +
+                     " Repair it in your slicer or a mesh tool and try again.")
+                        .c_str());
+      };
+      if (nonManifoldEdges > 0)
+        return refuseReason(std::to_string(nonManifoldEdges) +
+                            (nonManifoldEdges == 1 ? " edge is shared by more than two triangles." : " edges are shared by more than two triangles."));
+      if (openEdges > 0)
+        return refuseReason(std::to_string(openEdges) +
+                            (openEdges == 1 ? " edge has only one triangle." : " edges have only one triangle."));
+      if (nonManifoldVertices > 0)
+        return refuseReason(std::to_string(nonManifoldVertices) +
+                            (nonManifoldVertices == 1 ? " vertex joins shells that only touch at a point." : " vertices join shells that only touch at a point."));
       Handle(Poly_Triangulation) mesh = new Poly_Triangulation(nodes, triangles, false);
       for (int i = 0; i < nodes; ++i) {
         mesh->SetNode(i + 1, gp_Pnt(meshNodes_[3 * i], meshNodes_[3 * i + 1], meshNodes_[3 * i + 2]));
       }
       for (int i = 0; i < triangles; ++i) {
         const uint32_t a = meshTriangles_[3 * i], b = meshTriangles_[3 * i + 1], c = meshTriangles_[3 * i + 2];
-        const uint32_t n = static_cast<uint32_t>(nodes);
-        if (a >= n || b >= n || c >= n) {
-          return fail("Mesh to Solid failed: the mesh refers to a node it doesn't have.");
-        }
         mesh->SetTriangle(i + 1, Poly_Triangle(a + 1, b + 1, c + 1));
       }
       BRepBuilderAPI_MakeShapeOnMesh maker(mesh);
       maker.Build();
       if (!maker.IsDone()) return fail("Mesh to Solid failed: OCCT couldn't build faces on this mesh.");
-      // The faces share their edges, so a shell is just a container for them.
+      std::vector<TopoDS_Shape> allFaces;
+      for (TopExp_Explorer face(maker.Shape(), TopAbs_FACE); face.More(); face.Next()) allFaces.push_back(face.Current());
+      const int faceCount = static_cast<int>(allFaces.size());
+      if (faceCount == 0) return fail("Mesh to Solid failed: OCCT couldn't build faces on this mesh.");
+      // Faces sharing an edge are one shell; a multi-part STL (disjoint closed
+      // shells) becomes one solid per shell and a compound result (ADR-0097 §3).
+      std::vector<int> parent(faceCount);
+      for (int f = 0; f < faceCount; ++f) parent[f] = f;
+      auto faceFind = [&](int x) {
+        while (parent[x] != x) {
+          parent[x] = parent[parent[x]];
+          x = parent[x];
+        }
+        return x;
+      };
+      NCollection_DataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher> edgeOwner;
+      for (int f = 0; f < faceCount; ++f) {
+        for (TopExp_Explorer edge(allFaces[f], TopAbs_EDGE); edge.More(); edge.Next()) {
+          const TopoDS_Shape& e = edge.Current();
+          if (edgeOwner.IsBound(e)) {
+            const int ra = faceFind(f), rb = faceFind(edgeOwner.Find(e));
+            if (ra != rb) parent[ra] = rb;
+          } else {
+            edgeOwner.Bind(e, f);
+          }
+        }
+      }
+      std::map<int, std::vector<int>> components;
+      for (int f = 0; f < faceCount; ++f) components[faceFind(f)].push_back(f);
       BRep_Builder builder;
-      TopoDS_Shell shell;
-      builder.MakeShell(shell);
-      for (TopExp_Explorer face(maker.Shape(), TopAbs_FACE); face.More(); face.Next()) builder.Add(shell, face.Current());
-      shell.Closed(BRep_Tool::IsClosed(shell));
-      BRepBuilderAPI_MakeSolid makeSolid(shell);
-      if (!makeSolid.IsDone()) return fail(notClosed);
-      ShapeFix_Solid fixSolid(makeSolid.Solid());
-      fixSolid.Perform();
-      TopoDS_Shape solid = fixSolid.Solid();
-      if (solid.IsNull()) return fail(notClosed);
-      if (volumeOf(solid) < 0) solid.Reverse();
-      if (!BRepCheck_Analyzer(solid).IsValid()) return fail(notClosed);
-      ShapeUpgrade_UnifySameDomain unify(solid, true, true, true);
-      unify.SetLinearTolerance(1e-3);
-      unify.SetAngularTolerance(1e-3);
-      unify.Build();
-      TopoDS_Shape result = unify.Shape();
-      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
-      TopExp::MapShapes(result, TopAbs_FACE, faces);
-      if (faces.Extent() > FACETED_FACE_CAP) {
-        const std::string message = "Faceted would give " + std::to_string(faces.Extent()) +
+      std::vector<TopoDS_Shape> pieces;
+      int totalFaces = 0;
+      for (auto& [root, faceIdx] : components) {
+        TopoDS_Shell shell;
+        builder.MakeShell(shell);
+        for (int f : faceIdx) builder.Add(shell, allFaces[f]);
+        shell.Closed(BRep_Tool::IsClosed(shell));
+        BRepBuilderAPI_MakeSolid makeSolid(shell);
+        if (!makeSolid.IsDone()) return notClosedAt("makeSolid");
+        ShapeFix_Solid fixSolid(makeSolid.Solid());
+        fixSolid.Perform();
+        TopoDS_Shape solid = fixSolid.Solid();
+        if (solid.IsNull()) return notClosedAt("null solid");
+        if (volumeOf(solid) < 0) solid.Reverse();
+        if (!BRepCheck_Analyzer(solid).IsValid()) return notClosedAt("invalid before unify");
+        ShapeUpgrade_UnifySameDomain unify(solid, true, true, true);
+        unify.SetLinearTolerance(1e-3);
+        unify.SetAngularTolerance(1e-3);
+        unify.Build();
+        TopoDS_Shape piece = unify.Shape();
+        NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> pieceFaces;
+        TopExp::MapShapes(piece, TopAbs_FACE, pieceFaces);
+        totalFaces += pieceFaces.Extent();
+        pieces.push_back(piece);
+      }
+      // The exact count stays a backstop: the estimate can be off by a few faces.
+      if (totalFaces > FACETED_FACE_CAP) {
+        const std::string message = "Faceted would give " + std::to_string(totalFaces) +
                                     " faces; Extrudo converts up to 2,000. Use Prismatic, or simplify the mesh in your slicer.";
         return fail(message.c_str());
       }
-      if (!BRepCheck_Analyzer(result).IsValid()) {
-        ShapeFix_Shape healer(result);
+      for (TopoDS_Shape& piece : pieces) {
+        if (BRepCheck_Analyzer(piece).IsValid()) continue;
+        ShapeFix_Shape healer(piece);
         healer.Perform();
-        result = healer.Shape();
-        BRepLib::BuildCurves3d(result);
-        if (!BRepCheck_Analyzer(result).IsValid()) return fail(notClosed);
-        faces.Clear();
-        TopExp::MapShapes(result, TopAbs_FACE, faces);
+        piece = healer.Shape();
+        BRepLib::BuildCurves3d(piece);
+        if (!BRepCheck_Analyzer(piece).IsValid()) return notClosedAt("invalid after heal");
       }
+      TopoDS_Shape result;
+      if (pieces.size() == 1) {
+        result = pieces[0];
+      } else {
+        TopoDS_Compound compound;
+        builder.MakeCompound(compound);
+        for (const TopoDS_Shape& piece : pieces) builder.Add(compound, piece);
+        result = compound;
+      }
+      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+      TopExp::MapShapes(result, TopAbs_FACE, faces);
       int planes = 0;
       for (int i = 1; i <= faces.Extent(); ++i) {
         if (BRepAdaptor_Surface(TopoDS::Face(faces(i))).GetType() == GeomAbs_Plane) ++planes;

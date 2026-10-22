@@ -21,6 +21,7 @@ plan.
 ```sh
 bash spikes/stl-to-solid/run.sh prismatic      # all cases, about 5 minutes: em++ link + node
 bash spikes/stl-to-solid/run.sh prismatic 6    # one case: 1-9, 11, c (curved), t (tori, split clusters), r (regions) or x (extra shapes)
+STL_DIR=~/Development/extrudo-stl-solid-test FILE=third-party/wyze-garage-bracket.stl bash spikes/stl-to-solid/run.sh prismatic g  # faceted on one corpus file (STL_DIR mounted at /stl)
 FACES=1 bash spikes/stl-to-solid/run.sh prismatic 6   # with every face's plane or axis
 PIECES=1 bash spikes/stl-to-solid/run.sh prismatic t  # with every surface the segmentation found (regions() cases)
 ```
