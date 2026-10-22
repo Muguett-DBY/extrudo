@@ -133,6 +133,8 @@
 #include <Message_Messenger.hxx>
 #include <Message_PrinterOStream.hxx>
 #include <Message_ProgressIndicator.hxx>
+#include <Message_Report.hxx>
+#include <TopoDS_AlertWithShape.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_BSplineSurface.hxx>
 #include <Geom_Circle.hxx>
@@ -5587,6 +5589,12 @@ private:
   static constexpr double PRISMATIC_REBUILD_BUDGET_MS = 30000;
   /** The budget the next rebuild gets: PRISMATIC_REBUILD_BUDGET_MS, lowered only by the spike harness. */
   double prismaticBudgetMs_ = PRISMATIC_REBUILD_BUDGET_MS;
+  /** The last rebuild's oversized faces, one per surface, when the spike harness asks (GAPS=1). */
+  bool keepRebuildFaces_ = false;
+  std::vector<TopoDS_Shape> rebuildFaces_;
+  std::string rebuildWarnings_;
+  /** Why the last rebuild refused, for the spike harness (TIMES=1). */
+  std::string rebuildRefusal_;
   /** The last rebuild's stage timings in ms (the spike harness prints them under TIMES=1). */
   std::vector<std::pair<std::string, double>> rebuildTimes_;
 
@@ -5826,7 +5834,13 @@ private:
     const double trace = values[0] + values[1] + values[2];
     // Normals that all point one way are a plane, not a cylinder.
     if (!(values[1] > 1e-6 * trace) || vectors[0].Modulus() < 1e-12) return fit;
-    const gp_Dir axis(vectors[0]);
+    return fitMeshCylinderAlong(nodes, gp_Dir(vectors[0]));
+  }
+
+  /** The cylinder through `nodes` about a given axis direction: fitMeshCylinder's circle fit. */
+  MeshFit fitMeshCylinderAlong(const std::vector<int>& nodes, const gp_Dir& axis) const {
+    MeshFit fit;
+    if (nodes.size() < 6) return fit;
     const gp_Ax3 frame(gp_Pnt(0, 0, 0), axis);
     const gp_XYZ ux = frame.XDirection().XYZ(), uy = frame.YDirection().XYZ();
     const size_t count = nodes.size();
@@ -6687,6 +6701,19 @@ private:
         }
         return s;
       };
+      // A curved fit holds the facets too, not only their corners: each
+      // facet's centroid within the tolerance plus twice the chord error. A
+      // vertical cylinder's STL has nodes on its two end rings only, which
+      // are all on a sphere as well (ADR-0097's 2026-10-22 amendment).
+      auto facetsOn = [&](const MeshSurface& s, const Gathered& g) {
+        if (s.kind <= 0) return true;
+        const double reach = tolerance + 2 * s.sag;
+        for (int t : g.triangles) {
+          const gp_XYZ centroid = (meshNode(corner(t, 0)) + meshNode(corner(t, 1)) + meshNode(corner(t, 2))) / 3;
+          if (distanceToSurface(s, centroid) > reach) return false;
+        }
+        return true;
+      };
       // The first of plane, cylinder, cone, sphere and torus that holds
       // every node of `members` within the tolerance, else unfit with the
       // smallest deviation. The cone before the sphere: a frustum with only
@@ -6698,7 +6725,11 @@ private:
         for (int kind = 0; kind <= 4; ++kind) {
           const MeshFit fit = fitKind(kind, g);
           if (!fit.ok) continue;
-          if (fit.deviation <= tolerance) return surfaceOfFit(kind, fit, members, g);
+          if (fit.deviation <= tolerance) {
+            MeshSurface s = surfaceOfFit(kind, fit, members, g);
+            if (facetsOn(s, g)) return s;
+            continue;
+          }
           deviation = std::min(deviation, fit.deviation);
         }
         MeshSurface s;
@@ -6711,7 +6742,10 @@ private:
       auto fitOfKind = [&](int kind, const std::vector<int>& members) {
         const Gathered g = gather(members);
         const MeshFit fit = fitKind(kind, g);
-        if (fit.ok && fit.deviation <= tolerance) return surfaceOfFit(kind, fit, members, g);
+        if (fit.ok && fit.deviation <= tolerance) {
+          MeshSurface s = surfaceOfFit(kind, fit, members, g);
+          if (facetsOn(s, g)) return s;
+        }
         MeshSurface s;
         s.kind = -1;
         return s;
@@ -7093,6 +7127,8 @@ private:
    * result checked against the mesh. Fills meshReport_ before a refusal too.
    */
   int prismaticFromMesh(double tolerance) {
+    rebuildTimes_.clear();
+    rebuildRefusal_.clear();
     try {
       MeshSegmentation seg;
       if (!segmentMesh(tolerance, seg)) return 0;
@@ -7151,8 +7187,15 @@ private:
                        const std::vector<gp_XYZ>& normals, const std::vector<double>& areas, double meshArea,
                        double meshVolume, const std::string& rebuildFailed, const Handle(MeshDeadline)& deadline) {
     rebuildTimes_.clear();
+    rebuildRefusal_.clear();
+    rebuildWarnings_.clear();
+    // Which check refused (the spike harness prints it under TIMES=1).
+    auto refuse = [&](const std::string& why) {
+      rebuildRefusal_ = why;
+      return fail(rebuildFailed.c_str());
+    };
     double stageStart = nowMs();
-    auto stage = [&](const char* name) {
+    auto stage = [&](const std::string& name) {
       const double t = nowMs();
       rebuildTimes_.push_back({name, t - stageStart});
       stageStart = t;
@@ -7162,6 +7205,79 @@ private:
     auto check = [&] {
       if (deadline->expired()) throw OutOfTime();
     };
+    const double sinOne = std::sin(M_PI / 180), cosOne = std::cos(M_PI / 180);
+    // Surfaces that are one surface (a cylinder the segmentation found in
+    // pieces between other faces, two coplanar faces) become one: two faces
+    // a few thousandths apart on one surface leave MakerVolume slivers or no
+    // cell at all (ADR-0097's 2026-10-22 amendment). A surface joins a larger
+    // one of its kind with a parallel normal or axis (and a radius within
+    // the tolerance) when every node of it is within the tolerance of that one.
+    {
+      std::vector<int> order(surfaces.size());
+      for (size_t i = 0; i < order.size(); ++i) order[i] = static_cast<int>(i);
+      std::stable_sort(order.begin(), order.end(), [&](int a, int b) { return surfaces[a].area > surfaces[b].area; });
+      std::vector<int> roots;
+      std::vector<char> merged(surfaces.size(), 0);
+      for (int b : order) {
+        MeshSurface& small = surfaces[b];
+        for (int a : roots) {
+          MeshSurface& large = surfaces[a];
+          if (large.kind != small.kind) continue;
+          const double along = large.direction.XYZ().Dot(small.direction.XYZ());
+          if (large.kind == 0 ? along < cosOne : large.kind != 3 && std::fabs(along) < cosOne) continue;
+          if (large.kind > 0 && std::fabs(large.radius - small.radius) > tolerance) continue;
+          if (large.kind == 4 && std::fabs(large.majorRadius - small.majorRadius) > tolerance) continue;
+          if (large.kind == 2 && std::fabs(large.semiAngle - small.semiAngle) > sinOne) continue;
+          bool on = true;
+          for (size_t k = 0; k < small.regions.size() && on; ++k)
+            for (size_t j = 0; j < regions[small.regions[k]].nodes.size() && on; ++j)
+              on = distanceToSurface(large, meshNode(regions[small.regions[k]].nodes[j])) <= tolerance;
+          if (!on) {
+            // Else one fit over both that holds every node of both.
+            std::vector<int> nodes, triangles;
+            for (const MeshSurface* piece : {&large, &small}) {
+              for (int r : piece->regions) {
+                nodes.insert(nodes.end(), regions[r].nodes.begin(), regions[r].nodes.end());
+                triangles.insert(triangles.end(), regions[r].triangles.begin(), regions[r].triangles.end());
+              }
+            }
+            std::sort(nodes.begin(), nodes.end());
+            nodes.erase(std::unique(nodes.begin(), nodes.end()), nodes.end());
+            MeshFit fit = large.kind == 0   ? fitMeshPlane(nodes, large.direction.XYZ())
+                          : large.kind == 1 ? fitMeshCylinder(nodes, triangles, normals, areas)
+                          : large.kind == 2 ? fitMeshCone(nodes, triangles, normals, areas)
+                          : large.kind == 3 ? fitMeshSphere(nodes)
+                                            : fitMeshTorus(nodes, triangles, normals, areas, tolerance);
+            // A cylinder's pieces: about either one's axis too (a short arc's facets tilt a free axis).
+            for (const MeshSurface* piece : {&large, &small}) {
+              if (large.kind != 1 || (fit.ok && fit.deviation <= tolerance)) break;
+              fit = fitMeshCylinderAlong(nodes, piece->direction);
+            }
+            if (!fit.ok || !(fit.deviation <= tolerance)) continue;
+            MeshSurface joint = large;
+            joint.origin = fit.origin;
+            if (large.kind != 3) joint.direction = fit.direction;
+            joint.radius = fit.radius;
+            joint.majorRadius = fit.majorRadius;
+            joint.semiAngle = fit.semiAngle;
+            for (size_t k = 0; k < nodes.size() && on; ++k) on = distanceToSurface(joint, meshNode(nodes[k])) <= tolerance;
+            if (!on) continue;
+            large = joint;
+          }
+          large.regions.insert(large.regions.end(), small.regions.begin(), small.regions.end());
+          large.area += small.area;
+          large.sag = std::max(large.sag, small.sag);
+          merged[b] = 1;
+          break;
+        }
+        if (!merged[b]) roots.push_back(b);
+      }
+      std::vector<MeshSurface> kept;
+      for (size_t i = 0; i < surfaces.size(); ++i)
+        if (!merged[i]) kept.push_back(std::move(surfaces[i]));
+      surfaces = std::move(kept);
+    }
+    stage("same surfaces merged");
     const int surfaceCount = static_cast<int>(surfaces.size());
     std::vector<int> surfaceOf(regions.size(), -1);
     for (int s = 0; s < surfaceCount; ++s)
@@ -7169,7 +7285,7 @@ private:
     // Every region is on exactly one surface (segmentMesh's promise); one on
     // none would index adjacent[-1] (the trap of ADR-0097's 2026-10-22 amendment).
     for (int s : surfaceOf)
-      if (s < 0) return fail(rebuildFailed.c_str());
+      if (s < 0) return refuse("a region on no surface");
     std::vector<std::vector<int>> adjacent(surfaceCount);
     for (size_t r = 0; r < regions.size(); ++r) {
       for (int other : regionNeighbours[r]) {
@@ -7177,6 +7293,9 @@ private:
         if (a != b && std::find(adjacent[a].begin(), adjacent[a].end(), b) == adjacent[a].end()) adjacent[a].push_back(b);
       }
     }
+
+    // The surfaces as fitted, for the snaps' check below.
+    const std::vector<MeshSurface> fitted(surfaces);
 
     // Neighbouring cylinders, spheres and tori (their tube) whose radii agree
     // within the tolerance are one rolling ball's fillets: they take their
@@ -7214,9 +7333,12 @@ private:
     // position exactly, square ones (an end cap, a hole's plate) its axis.
     // Booleans are weak on nearly tangent surfaces; exactly tangent ones they
     // handle.
-    const double sinOne = std::sin(M_PI / 180), cosOne = std::cos(M_PI / 180);
+    // The plane normals that fix each cylinder's axis position (one: it
+    // still slides along that plane; two: fixed), for the cylinder snap below.
+    std::vector<std::vector<gp_XYZ>> fixedBy(surfaceCount);
     for (MeshSurface& c : surfaces) {
       if (c.kind != 1) continue;
+      std::vector<gp_XYZ>& fixes = fixedBy[&c - surfaces.data()];
       gp_XYZ axis = c.direction.XYZ(), o = c.origin.XYZ();
       std::vector<MeshTangent> tangents;
       std::vector<gp_XYZ> squares;
@@ -7247,6 +7369,7 @@ private:
               axis = dir;
               o = gp_XYZ(x[0], x[1], x[2]);
               snapped = true;
+              fixes = {a.n, b.n};
             }
           } else if (dot < -cosOne) {
             // Two opposite walls: the cylinder fills the gap between them.
@@ -7256,19 +7379,90 @@ private:
               axis = (axis - axis.Dot(a.n) * a.n).Normalized();
               o = o - ((o - a.p).Dot(a.n) - a.side * c.radius) * a.n;
               snapped = true;
+              fixes = {a.n};
             }
           }
         }
       }
+      // A snap that turns the axis refits the circle about the new one (a
+      // fit's tilted axis has its own centre and radius, ADR-0097's
+      // 2026-10-22 amendment); kept when it holds the nodes.
+      auto refitAlong = [&](const gp_XYZ& along) {
+        std::vector<int> nodes;
+        for (int r : c.regions) nodes.insert(nodes.end(), regions[r].nodes.begin(), regions[r].nodes.end());
+        std::sort(nodes.begin(), nodes.end());
+        nodes.erase(std::unique(nodes.begin(), nodes.end()), nodes.end());
+        const MeshFit fit = fitMeshCylinderAlong(nodes, gp_Dir(along));
+        if (!fit.ok || !(fit.deviation <= tolerance)) return;
+        c.radius = fit.radius;
+        o = fit.origin.XYZ();
+      };
       if (!snapped && !tangents.empty()) {
+        // One tangent plane: the axis in it, along a square plane's normal
+        // when there is one (an end cap), else the fitted axis's projection.
         const MeshTangent& a = tangents[0];
-        axis = (axis - axis.Dot(a.n) * a.n).Normalized();
+        gp_XYZ along = axis;
+        for (const gp_XYZ& n : squares) {
+          if (std::fabs(n.Dot(a.n)) < sinOne) {
+            along = n.Dot(axis) < 0 ? n.Reversed() : n;
+            break;
+          }
+        }
+        axis = (along - along.Dot(a.n) * a.n).Normalized();
+        refitAlong(axis);
         o = o - ((o - a.p).Dot(a.n) - a.side * c.radius) * a.n;
         snapped = true;
+        fixes = {a.n};
       }
-      if (!snapped && !squares.empty()) axis = axis.Dot(squares[0]) < 0 ? squares[0].Reversed() : squares[0];
+      if (!snapped && !squares.empty()) {
+        axis = axis.Dot(squares[0]) < 0 ? squares[0].Reversed() : squares[0];
+        refitAlong(axis);
+      }
       c.direction = gp_Dir(axis);
       c.origin = gp_Pnt(o);
+    }
+
+    // A cylinder next to a larger parallel one it is tangent to (a fillet
+    // between a boss and a wall, a slot's end round a hole) within the
+    // tolerance takes its axis and moves to be exactly tangent: along the
+    // plane it is tangent to when there is one, else straight away from the
+    // larger axis; one fixed by two planes stays (ADR-0097's 2026-10-22
+    // amendment).
+    for (int i = 0; i < surfaceCount; ++i) {
+      MeshSurface& small = surfaces[i];
+      if (small.kind != 1 || fixedBy[i].size() >= 2) continue;
+      for (int other : adjacent[i]) {
+        const MeshSurface& large = surfaces[other];
+        if (large.kind != 1 || large.radius <= small.radius) continue;
+        gp_XYZ axis = large.direction.XYZ();
+        if (std::fabs(axis.Dot(small.direction.XYZ())) < cosOne) continue;
+        if (axis.Dot(small.direction.XYZ()) < 0) axis.Reverse();
+        const gp_XYZ lo = large.origin.XYZ();
+        gp_XYZ w = small.origin.XYZ() - lo;
+        const double h = w.Dot(axis);
+        w -= h * axis;
+        const double d = w.Modulus(), outer = large.radius + small.radius, inner = large.radius - small.radius;
+        const double target = std::fabs(d - outer) <= tolerance ? outer : std::fabs(d - inner) <= tolerance ? inner : -1;
+        if (target < 0 || d < 1e-9) continue;
+        gp_XYZ moved;
+        if (fixedBy[i].size() == 1) {
+          const gp_XYZ n = fixedBy[i][0];
+          if (std::fabs(axis.Dot(n)) > 1e-9) continue;
+          const gp_XYZ u = axis.Crossed(n);
+          const double a = w.Dot(n), b = w.Dot(u);
+          if (target * target < a * a) continue;
+          const double slide = std::sqrt(target * target - a * a);
+          moved = a * n + (b >= 0 ? slide : -slide) * u;
+        } else {
+          moved = w * (target / d);
+        }
+        if (keepRebuildFaces_)
+          rebuildWarnings_ += "\n     cylinder " + std::to_string(i) + " tangent to " + std::to_string(other) + ", moved " +
+                              std::to_string((lo + h * axis + moved - small.origin.XYZ()).Modulus());
+        small.direction = gp_Dir(axis);
+        small.origin = gp_Pnt(lo + h * axis + moved);
+        break;
+      }
     }
 
     // A sphere next to cylinders it shares its radius with (a dome): take
@@ -7375,12 +7569,32 @@ private:
       torus.origin = gp_Pnt(c);
     }
 
+    // A snap only takes when the surface still holds its own nodes within
+    // the tolerance: a torus within 10 x the tolerance of tangent to a
+    // cylinder it really meets at a crease would otherwise move off its own
+    // facets (ADR-0097's 2026-10-22 amendment). Such a surface keeps its fit.
+    for (int i = 0; i < surfaceCount; ++i) {
+      double off = 0;
+      for (int r : surfaces[i].regions)
+        for (int n : regions[r].nodes) off = std::max(off, distanceToSurface(surfaces[i], meshNode(n)));
+      if (off > tolerance) {
+        if (keepRebuildFaces_) rebuildWarnings_ += "\n     surface " + std::to_string(i) + " back to its fit, snapped off by " + std::to_string(off);
+        surfaces[i] = fitted[i];
+      }
+    }
+
     // 3. One oversized face per surface: grown by 10 x the tolerance, plus
-    // twice the largest chord error (a coarse circle's true curve leaves
-    // its polygon's box by up to that).
-    double maxSag = 0;
-    for (const MeshSurface& s : surfaces) maxSag = std::max(maxSag, s.sag);
-    const double margin = 10 * tolerance + 2 * maxSag;
+    // twice the largest chord error of it and its neighbours (a coarse
+    // circle's true curve leaves its polygon's box by up to that). Its
+    // neighbours', not the whole mesh's: one coarse torus would grow every
+    // face, and MakerVolume would intersect more of them (ADR-0097's
+    // 2026-10-22 amendment).
+    std::vector<double> margins(surfaceCount);
+    for (int i = 0; i < surfaceCount; ++i) {
+      double sag = surfaces[i].sag;
+      for (int other : adjacent[i]) sag = std::max(sag, surfaces[other].sag);
+      margins[i] = 10 * tolerance + 2 * sag;
+    }
     // An angle's range over a surface's nodes (radians in [0, 2π)): from the
     // end of the largest gap between them round to its start, grown by
     // `grow`; the full turn when that gap is under twice `grow` plus twice
@@ -7411,6 +7625,7 @@ private:
     };
     NCollection_List<TopoDS_Shape> faces;
     for (const MeshSurface& s : surfaces) {
+      const double margin = margins[&s - surfaces.data()];
       const gp_Ax3 frame(s.origin, s.direction);
       const gp_XYZ ux = frame.XDirection().XYZ(), uy = frame.YDirection().XYZ(), uz = s.direction.XYZ();
       double lo[2] = {1e300, 1e300}, hi[2] = {-1e300, -1e300};
@@ -7492,6 +7707,9 @@ private:
       }
     }
     stage("snaps and faces");
+    rebuildFaces_.clear();
+    if (keepRebuildFaces_)
+      for (const TopoDS_Shape& face : faces) rebuildFaces_.push_back(face);
     check();
     BOPAlgo_MakerVolume maker;
     maker.SetArguments(faces);
@@ -7502,11 +7720,28 @@ private:
     maker.SetRunParallel(false);
     maker.Perform(deadline->Start());
     stage("MakerVolume");
+    if (keepRebuildFaces_) {
+      std::ostringstream warnings;
+      warnings << rebuildWarnings_ << "\n     ";
+      maker.DumpWarnings(warnings);
+      for (const Handle(Message_Alert)& alert : maker.GetReport()->GetAlerts(Message_Warning)) {
+        Handle(TopoDS_AlertWithShape) withShape = Handle(TopoDS_AlertWithShape)::DownCast(alert);
+        if (withShape.IsNull()) continue;
+        Bnd_Box box;
+        BRepBndLib::Add(withShape->GetShape(), box);
+        double x0, y0, z0, x1, y1, z1;
+        if (!box.IsVoid()) {
+          box.Get(x0, y0, z0, x1, y1, z1);
+          warnings << " [" << x0 << "," << y0 << "," << z0 << " .. " << x1 << "," << y1 << "," << z1 << "]";
+        }
+      }
+      rebuildWarnings_ = warnings.str();
+    }
     check();
-    if (maker.HasErrors()) return fail(rebuildFailed.c_str());
+    if (maker.HasErrors()) return refuse("MakerVolume failed");
     std::vector<TopoDS_Shape> cells;
     for (TopExp_Explorer e(maker.Shape(), TopAbs_SOLID); e.More(); e.Next()) cells.push_back(e.Current());
-    if (cells.empty()) return fail(rebuildFailed.c_str());
+    if (cells.empty()) return refuse("MakerVolume made no cell");
 
     // Which cells are inside the mesh: points just inside and just outside
     // a sample of triangles (centroids moved along the normal by 3 x the
@@ -7534,9 +7769,16 @@ private:
       classifiers.emplace_back(new BRepClass3d_SolidClassifier(cells[i]));
     }
     std::vector<int> inside(cells.size(), 0), outside(cells.size(), 0);
+    // A cell whose votes agree (16 or more, 90 % one way) is decided: later
+    // samples skip it, since a point is in one cell at most (a torus's or a
+    // sphere's cell is slow to classify; ADR-0097's 2026-10-22 amendment).
+    std::vector<char> decided(cells.size(), 0);
+    size_t undecided = cells.size();
     // Neighbouring samples tend to fall in the same cell: try the last one first.
     size_t last[2] = {0, 0};
+    std::map<int, int> lostBySurface;  // the spike harness's GAPS=1: inside samples in no cell, by surface
     for (int t : samples) {
+      if (undecided == 0 && !keepRebuildFaces_) break;
       if (areas[t] <= 0) continue;
       check();
       const MeshSurface& s = surfaces[surfaceOf[regionOf[t]]];
@@ -7546,17 +7788,29 @@ private:
       centroid /= 3;
       for (int side = 0; side < 2; ++side) {
         const gp_Pnt p(centroid + (side == 0 ? -step : step) * normals[t]);
-        for (size_t k = 0; k < cells.size(); ++k) {
+        bool found = false;
+        for (size_t k = 0; k < cells.size() && !found; ++k) {
           const size_t i = k == 0 ? last[side] : k <= last[side] ? k - 1 : k;
-          if (cellBoxes[i].IsOut(p)) continue;
+          if ((decided[i] && !keepRebuildFaces_) || cellBoxes[i].IsOut(p)) continue;
           classifiers[i]->Perform(p, 1e-7);
           if (classifiers[i]->State() == TopAbs_IN) {
             (side == 0 ? inside : outside)[i]++;
             last[side] = i;
-            break;
+            const int votes = inside[i] + outside[i];
+            if (!decided[i] && votes >= 16 && std::max(inside[i], outside[i]) >= 0.9 * votes) {
+              decided[i] = 1;
+              --undecided;
+            }
+            found = true;
           }
         }
+        if (keepRebuildFaces_ && side == 0 && !found) lostBySurface[surfaceOf[regionOf[t]]]++;
       }
+    }
+    if (keepRebuildFaces_) {
+      std::ostringstream lost;
+      for (const auto& [surface, count] : lostBySurface) lost << " " << surface << ":" << count;
+      rebuildWarnings_ += "\n     inside samples in no cell, by surface:" + lost.str();
     }
     std::vector<TopoDS_Shape> kept;
     for (size_t i = 0; i < cells.size(); ++i) {
@@ -7571,9 +7825,15 @@ private:
       if (keep) kept.push_back(cells[i]);
     }
     classifiers.clear();
-    stage("cells classified");
+    {
+      int lost = 0, in = 0, out = 0;
+      for (size_t i = 0; i < cells.size(); ++i) in += inside[i], out += outside[i];
+      lost = 2 * static_cast<int>(samples.size()) - in - out;  // or skipped once every cell was decided
+      stage("cells classified (" + std::to_string(cells.size()) + " cells, " + std::to_string(kept.size()) + " kept; samples " +
+            std::to_string(in) + " in, " + std::to_string(out) + " out, " + std::to_string(lost) + " in no cell)");
+    }
     check();
-    if (kept.empty()) return fail(rebuildFailed.c_str());
+    if (kept.empty()) return refuse("no cell inside the mesh");
 
     // Merge the kept cells: a face two of them share is inside the body.
     auto bounding = [](const TopoDS_Shape& face) {
@@ -7598,7 +7858,7 @@ private:
     }
     shell.Closed(BRep_Tool::IsClosed(shell));
     BRepBuilderAPI_MakeSolid makeSolid(shell);
-    if (!makeSolid.IsDone()) return fail(rebuildFailed.c_str());
+    if (!makeSolid.IsDone()) return refuse("MakeSolid failed");
     TopoDS_Shape solid = makeSolid.Solid();
     if (!BRepCheck_Analyzer(solid).IsValid()) {
       ShapeFix_Solid fixSolid(TopoDS::Solid(solid));
@@ -7618,7 +7878,7 @@ private:
       healer.Perform(deadline->Start());
       result = healer.Shape();
       check();
-      if (!BRepCheck_Analyzer(result).IsValid()) return fail(rebuildFailed.c_str());
+      if (!BRepCheck_Analyzer(result).IsValid()) return refuse("invalid after healing");
     }
     stage("validity");
 
@@ -7630,7 +7890,9 @@ private:
     double sagSum = 0;
     for (const MeshSurface& s : surfaces) sagSum += s.area * s.sag;
     const double allowed = std::max(0.01 * std::fabs(meshVolume), 2 * sagSum + tolerance * meshArea);
-    if (std::fabs(volumeOf(result) - meshVolume) > allowed) return fail(rebuildFailed.c_str());
+    if (std::fabs(volumeOf(result) - meshVolume) > allowed)
+      return refuse("volume off: " + std::to_string(volumeOf(result)) + " against " + std::to_string(meshVolume) +
+                    ", allowed " + std::to_string(allowed));
     NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> resultFaces;
     TopExp::MapShapes(result, TopAbs_FACE, resultFaces);
     std::vector<MeshCheckedFace> checked;
@@ -7646,7 +7908,7 @@ private:
                : type == GeomAbs_Sphere   ? 3
                : type == GeomAbs_Torus    ? 4
                                           : -1;
-      if (c.kind < 0) return fail(rebuildFailed.c_str());
+      if (c.kind < 0) return refuse("a face of another kind");
       if (c.kind == 0) {
         c.plane = surface.Plane();
         ++resultPlanes;
@@ -7710,7 +7972,9 @@ private:
       if (!near) {
         BRepExtrema_DistShapeShape distance(BRepBuilderAPI_MakeVertex(p).Vertex(), result, Extrema_ExtFlag_MINMAX,
                                             Extrema_ExtAlgo_Grad, deadline->Start());
-        if (!distance.IsDone() || distance.Value() > reach) return fail(rebuildFailed.c_str());
+        if (!distance.IsDone() || distance.Value() > reach)
+          return refuse("node " + std::to_string(n) + " off the solid by " +
+                        std::to_string(distance.IsDone() ? distance.Value() : -1.0));
       }
     }
     stage("checked against the mesh");

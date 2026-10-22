@@ -3,7 +3,7 @@
 // pinned OCCT image; case r runs meshRegions (the region preview, slice 4).
 // run.sh copies the facade with its private members made
 // public into build/facade_public.cpp, which this file includes.
-#include "build/facade_public.cpp"
+#include "facade_public.cpp"  // in build/ (or BUILD), on the include path
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
@@ -23,6 +23,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <set>
 #include <iomanip>
 #include <iostream>
 
@@ -270,6 +271,54 @@ static void file(ExtrudoFacade& f, const std::string& path, double tolerance) {
       int none = 0, many = 0;
       for (int c : in) none += c == 0, many += c > 1;
       std::cout << "   coverage: " << seg.regions.size() << " regions, " << none << " in no surface, " << many << " in several" << std::endl;
+      if (!(getenv("SEGMENT") && *getenv("SEGMENT"))) {
+        // Each surface before and after rebuildPrismatic's snaps, with the farthest of its own nodes.
+        std::vector<ExtrudoFacade::MeshSurface> before = seg.surfaces;
+        const std::string why = "refused";
+        f.keepRebuildFaces_ = getenv("GAPS") && *getenv("GAPS");
+        Handle(ExtrudoFacade::MeshDeadline) deadline = new ExtrudoFacade::MeshDeadline(ExtrudoFacade::nowMs() + 30000);
+        int h = 0;
+        try {
+          h = f.rebuildPrismatic(tolerance, seg.surfaces, seg.regions, seg.regionOf, seg.regionNeighbours, seg.normals, seg.areas,
+                                 seg.meshArea, seg.meshVolume, why, deadline);
+        } catch (...) {
+        }
+        if (h) f.release(h);
+        if (getenv("GAPS") && *getenv("GAPS") && f.rebuildFaces_.size() == seg.surfaces.size()) {
+          // Neighbouring surfaces whose oversized faces don't meet: a gap MakerVolume can't close.
+          std::vector<int> surfaceOf(seg.regions.size(), -1);
+          for (size_t i = 0; i < seg.surfaces.size(); ++i)
+            for (int r : seg.surfaces[i].regions) surfaceOf[r] = int(i);
+          std::set<std::pair<int, int>> pairs;
+          for (size_t r = 0; r < seg.regions.size(); ++r)
+            for (int o : seg.regionNeighbours[r])
+              if (surfaceOf[r] < surfaceOf[o]) pairs.insert({surfaceOf[r], surfaceOf[o]});
+          std::cout << "     MakerVolume warnings: " << f.rebuildWarnings_ << std::endl;
+          for (const auto& [a, b] : pairs) {
+            BRepExtrema_DistShapeShape d(f.rebuildFaces_[a], f.rebuildFaces_[b]);
+            if (!d.IsDone() || d.Value() > 1e-7)
+              std::cout << "     gap between surface " << a << " (kind " << seg.surfaces[a].kind << ") and " << b << " (kind "
+                        << seg.surfaces[b].kind << "): " << (d.IsDone() ? d.Value() : -1.0) << std::endl;
+          }
+        }
+        auto farthest = [&](const ExtrudoFacade::MeshSurface& surface) {
+          double d = 0;
+          for (int r : surface.regions)
+            for (int n : seg.regions[r].nodes) d = std::max(d, ExtrudoFacade::distanceToSurface(surface, f.meshNode(n)));
+          return d;
+        };
+        // The surfaces as fitted, then as rebuilt (same surfaces merged, snapped).
+        for (int pass = 0; pass < 2; ++pass)
+        for (size_t i = 0; i < (pass ? seg.surfaces : before).size(); ++i) {
+          const auto &a = (pass ? seg.surfaces : before)[i], &b = a;
+          if (i == 0) std::cout << (pass ? "   rebuilt:" : "   fitted:") << std::endl;
+          std::cout << std::setprecision(9) << "     surface " << i << " kind " << a.kind << " regions " << a.regions.size() << " area " << a.area
+                    << " r " << a.radius << " R " << a.majorRadius << " at " << a.origin.X() << "," << a.origin.Y() << "," << a.origin.Z() << " dir "
+                    << a.direction.X() << "," << a.direction.Y() << "," << a.direction.Z() << " sag " << a.sag << " off " << farthest(a) << std::setprecision(6)
+                    << std::endl;
+        }
+        stage();
+      }
     }
   }
   if (getenv("SEGMENT") && *getenv("SEGMENT")) return;
@@ -293,6 +342,7 @@ static void file(ExtrudoFacade& f, const std::string& path, double tolerance) {
     std::cout << "   times: segmentation and fits " << ms - rebuild;
     for (const auto& [name, stageMs] : f.rebuildTimes_) std::cout << ", " << name << " " << stageMs;
     std::cout << " ms" << std::endl;
+    if (!h && !f.rebuildRefusal_.empty()) std::cout << "   rebuild refused at: " << f.rebuildRefusal_ << std::endl;
   }
   if (!h) {
     std::cout << "   prismatic refused (" << ms << " ms): " << f.lastError() << std::endl;
