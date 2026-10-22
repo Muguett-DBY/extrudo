@@ -53,8 +53,10 @@ import type { SketchText } from './decode/text';
 import { continues, type EdgeShape, edgeShape } from './edge-shape';
 import {
   type CopyContext,
+  combineBodies,
   type MadeCopies,
   mirror,
+  moveBodies,
   pathPattern,
   rectangularPattern,
   splitBody,
@@ -312,26 +314,88 @@ function numberExpression(value: number, unit: string): string {
   return `${Number((value * 10).toPrecision(12))} mm`;
 }
 
-/** Extrudo's bundled fonts this import draws text in (`@extrudo/fonts`), by ID. */
+/** A bundled font this import draws text in (`@extrudo/fonts`). */
+interface TextFont {
+  id: string;
+  family: string;
+  /**
+   * A stand-in for the file's family, with (about) its widths: drawn at the
+   * file's font size, its capitals this share of it (the font's own cap
+   * height over its em). Absent: drawn with Arial's capital height.
+   */
+  cap?: number;
+  /** How close its widths are, for the note. */
+  widths?: 'same' | 'about the same';
+}
+
+/** Extrudo's bundled fonts this import draws text in, by ID. */
 const FONTS = {
   sans: { id: 'inter-regular@1', family: 'Inter' },
   bold: { id: 'inter-bold@1', family: 'Inter Bold' },
   serif: { id: 'noto-serif-regular@1', family: 'Noto Serif' },
   mono: { id: 'jetbrains-mono-regular@1', family: 'JetBrains Mono' },
   stencil: { id: 'allerta-stencil-regular@1', family: 'Allerta Stencil' },
+} satisfies Record<string, TextFont>;
+
+/** DIN Condensed's stand-in: a bold face, like the family itself. */
+const DIN_CONDENSED: TextFont = {
+  id: 'sofia-sans-extra-condensed-bold@1',
+  family: 'Sofia Sans Extra Condensed Bold',
+  cap: 0.655,
+  widths: 'about the same',
+};
+
+/**
+ * The file's families with a bundled stand-in of (about) the same widths, by
+ * lower-case name, regular and bold. Measured on the box widths the file
+ * stores for its texts (the ink's width at the font size): Arimo has Arial's
+ * widths; Archivo Narrow comes within 0.7 % of Arial Narrow; Sofia Sans
+ * Extra Condensed Bold is 2.3 % narrower than DIN Condensed (median, at most
+ * 4.6 %), a bold face itself, whose Cyrillic it also has (ADR-0083).
+ */
+const STAND_INS: Record<string, { regular: TextFont; bold: TextFont }> = {
+  arial: {
+    regular: { id: 'arimo-regular@1', family: 'Arimo', cap: 1409 / 2048, widths: 'same' },
+    bold: { id: 'arimo-bold@1', family: 'Arimo Bold', cap: 1409 / 2048, widths: 'same' },
+  },
+  'arial narrow': {
+    regular: {
+      id: 'archivo-narrow-regular@1',
+      family: 'Archivo Narrow',
+      cap: 0.686,
+      widths: 'about the same',
+    },
+    bold: {
+      id: 'archivo-narrow-bold@1',
+      family: 'Archivo Narrow Bold',
+      cap: 0.686,
+      widths: 'about the same',
+    },
+  },
+  'din condensed': { regular: DIN_CONDENSED, bold: DIN_CONDENSED },
 };
 
 /** Capital height over font size: Arial's, the usual font in .f3d files (and near most sans faces). */
 const CAP_HEIGHT = 0.716;
 
-/** The bundled font nearest an f3d font family: Inter unless it is a serif, mono or stencil face. */
-function fontFor(family: string): { id: string; family: string } {
-  const f = family.toLowerCase();
+/**
+ * The bundled font for an f3d font family: its stand-in when it has one (in
+ * bold when the text is), else Inter unless it is a serif, mono or stencil face.
+ */
+function fontFor(family: string, bold = false): TextFont {
+  const f = family.trim().toLowerCase();
+  const standIn = STAND_INS[f];
+  if (standIn) return bold ? standIn.bold : standIn.regular;
   if (/mono|courier|consol|menlo/.test(f)) return FONTS.mono;
   if (/stencil/.test(f)) return FONTS.stencil;
   if (/times|georgia|garamond|cambria|serif/.test(f) && !/sans/.test(f)) return FONTS.serif;
   if (/bold|black|heavy/.test(f)) return FONTS.bold;
   return FONTS.sans;
+}
+
+/** "drawn in Arimo (same widths)": how a text's font is named in the report. */
+function drawnIn(font: TextFont): string {
+  return `drawn in ${font.family}${font.widths ? ` (${font.widths} widths)` : ''}`;
 }
 
 /** What the new design is stamped with (the app passes a fresh ID and its version). */
@@ -499,6 +563,8 @@ export function f3dToDesign(
   // told here, so later features that name one of them are left to Extrudo's
   // default (every body they meet), and none of them is hidden.
   const unsure = new Set<BodyId>();
+  /** Bodies an imported combine consumed. */
+  const consumed = new Set<BodyId>();
   /** A body that a join of several named (`unsure`), as Extrudo knows it; else undefined. */
   const unsureBody = (record: number) => {
     const known = bodyOf(record);
@@ -656,6 +722,7 @@ export function f3dToDesign(
       } else if (
         feature.type === 'extrude' &&
         feature.profiles.length === 0 &&
+        !feature.sketchGone &&
         feature.faces.length > 0 &&
         feature.start !== 'face' &&
         !feature.parameters.some((p) => p.kind === 'Side1Offset')
@@ -760,6 +827,28 @@ export function f3dToDesign(
           replayable.set(feature.id, { id: made.id, name: feature.name });
           report.imported.push(feature.name);
         }
+      } else if (feature.type === 'combine' || feature.type === 'move') {
+        const context: CopyContext = {
+          made: replayable,
+          sketches,
+          expressionOf,
+          bodies: participants,
+          report,
+        };
+        const reason =
+          feature.type === 'combine'
+            ? combineBodies(d, feature, context)
+            : moveBodies(d, feature, context);
+        if (reason) report.skipped.push(skippedFeature(feature.name, feature.kind, reason));
+        else {
+          // A combine's tools are gone: not hidden, but consumed.
+          if (feature.type === 'combine')
+            for (const tool of feature.tools) {
+              const id = bodyOf(tool)?.id;
+              if (id) consumed.add(id);
+            }
+          report.imported.push(feature.name);
+        }
       } else if (
         feature.type === 'mirror' ||
         feature.type === 'rectangular-pattern' ||
@@ -848,7 +937,7 @@ export function f3dToDesign(
     const known = components.shown(body) ? undefined : bodyOf(body.id);
     if (!known || (order.get(known.id.split(':')[0] as string) ?? 0) < lastOpenJoin) continue;
     // Joined with others here: it may be another body by now.
-    if (unsure.has(known.id)) continue;
+    if (unsure.has(known.id) || consumed.has(known.id)) continue;
     d.state.dispatch(
       updateBody({ id: known.id, changes: { name: `Body${known.index}`, visible: false } }),
     );
@@ -1155,29 +1244,31 @@ function drawSketch(
     const up = [-base[1], base[0]] as const;
     if (t.old) {
       const at = oldTextAnchor(t);
-      const font = fontFor(t.font);
+      const font = fontFor(t.font, t.bold);
       const flip = t.old.mirrored ? -1 : 1;
+      // The file's height is Arial's capitals: a stand-in keeps the font size.
+      const cap = font.cap ? (t.height / CAP_HEIGHT) * font.cap : t.height;
       const h = k.text(
         placement.map(at.u, at.v),
-        placement.map(at.u + flip * up[0] * t.height, at.v + flip * up[1] * t.height),
+        placement.map(at.u + flip * up[0] * cap, at.v + flip * up[1] * cap),
         { text: t.text, font: font.id, align: at.align },
         { upright: false, ...(constraints ? { height: false } : {}) },
       );
       if (constraints) textHeight(k, h, constraints.freeName());
       made.texts.set(t.id, h.id);
       report.notes.push(
-        `${feature.name}: text "${t.text}" in ${t.font} is drawn in ${font.family}${at.guessed ? ', placed by its box corner (its alignment is not read)' : ''}${t.old.mirrored ? ', turned instead of mirrored' : ''}.`,
+        `${feature.name}: text "${t.text}" in ${t.font} is ${drawnIn(font)}${at.guessed ? ', placed by its box corner (its alignment is not read)' : ''}${t.old.mirrored ? ', turned instead of mirrored' : ''}.`,
       );
       continue;
     }
     // The file's height is the font size and its box's bottom edge the
     // baseline; Extrudo's height is the capitals'. Centred in the box: the
-    // font is Extrudo's own, so the width differs, and centring keeps the
-    // text where it was.
+    // box is the ink's width, and centring the drawn text in it lands its
+    // ink closer than starting it at the box's corner (measured, ADR-0083).
     const u = t.at[0] + (base[0] * t.width) / 2;
     const v = t.at[1] + (base[1] * t.width) / 2;
-    const cap = t.height * CAP_HEIGHT;
-    const font = fontFor(t.font);
+    const font = fontFor(t.font, t.bold);
+    const cap = t.height * (font.cap ?? CAP_HEIGHT);
     const h = k.text(
       placement.map(u, v),
       placement.map(u + up[0] * cap, v + up[1] * cap),
@@ -1186,7 +1277,7 @@ function drawSketch(
     );
     if (constraints) textHeight(k, h, constraints.freeName());
     made.texts.set(t.id, h.id);
-    report.notes.push(`${feature.name}: text "${t.text}" in ${t.font} is drawn in ${font.family}.`);
+    report.notes.push(`${feature.name}: text "${t.text}" in ${t.font} is ${drawnIn(font)}.`);
   }
   // Points on their own (hole centres, reference points), except the
   // projected origin every sketch has.
@@ -1384,7 +1475,10 @@ function extrude(
   unread: number,
 ): string | ImportedExtrude {
   if (!f.solid) return 'surface extrudes are not supported';
-  if (f.profiles.length === 0) return 'its profile is a face, not a sketch profile';
+  if (f.profiles.length === 0)
+    return f.sketchGone
+      ? 'the sketch its profile came from is no longer in the file'
+      : 'its profile is a face, not a sketch profile';
   const param = (kind: string) => f.parameters.find((p) => p.kind === kind);
   // Extrudo's extrude starts on its sketch: a start offset, or a start face
   // parallel to the sketch, takes the profiles from a copy of their sketch

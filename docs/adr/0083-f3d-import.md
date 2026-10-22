@@ -1370,3 +1370,125 @@ could not be read. `F3dDesign.unreadParameters` counts the parameter records tha
 when it is above zero, each through-all fallback for a missing distance adds a note saying it
 is a guess. Tests: `decode/parameters.test.ts`; `map.test.ts` "says when a missing distance
 is a guess"; `actions.test.ts` "says how many records could not be read".
+
+## Amendment, 2026-10-21: text in fonts that fit the file's
+
+Text was drawn in Inter with Arial's capital height, centred in the file's box:
+its width and letters differed from the file's, so a text cut did (text was the
+first cause of 11 designs and 11 frozen bodies in the corpus). Now a family with
+a bundled stand-in of (about) its widths is drawn in it (`fontFor`, `STAND_INS`
+in `map.ts`; the fonts in ADR-0058's amendment of the same day):
+
+| File family | Texts (newer / older) | Stand-in | Width ratio, median (range) | Missing characters |
+|---|---|---|---|---|
+| Arial | 11 / 21 | Arimo Regular, Bold | 0.995 (0.983–1.024) regular; 0.997 (0.994–1.006) bold | none |
+| Arial Narrow | 7 / 0 | Archivo Narrow Regular, Bold | 1.000 (0.995–1.003) regular; 1.002 (0.997–1.007) bold | none |
+| DIN Condensed | 5 / 0 | Sofia Sans Extra Condensed Bold | 1.023 (1.005–1.046) | none (Inter lacked the Cyrillic) |
+| DIN Alternate, Lucida Grande, Noteworthy | 0 / 2, 1 / 0, 1 / 0 | none (Inter, as before) | | |
+
+The ratio is the file's box width over the stand-in's ink width at the file's
+font size (a newer text's box is the width of its letters' ink, measured: the
+advance width is about 5 % wider). Inter, drawn as before, came to 0.98
+(0.95–1.12) for Arial, about 0.81 for Arial Narrow and 0.69 for DIN
+Condensed. Other candidates measured and not taken: Liberation Sans Narrow
+(1.004, not OFL), Roboto Condensed (0.98, 0.93–1.04), Barlow Condensed (no
+Cyrillic, 0.92–1.21), Barlow Semi Condensed (over 1.2), Fira Sans, IBM Plex
+Sans and PT Sans condensed faces, Oswald, Noto Sans, Open Sans and Roboto
+width instances. An older text's box is sized by hand (ratios 0.7 to 1.8), so
+those texts were not scored; DIN Alternate has only older texts and keeps
+Inter.
+
+- **Bold.** A newer text record's byte after the baseline angle is 1 for bold
+  (only 0 and 1 in the corpus; bold-flagged texts fit the bold stand-ins within
+  0.7 %, and miss the regular ones by up to 7 %); an older record's weight is
+  500 or 750, and 750 is bold (a text cut drawn in Arimo Bold is within 1 % of
+  the file's B-rep in volume, in Arimo Regular 31 % short). `SketchText.bold`.
+- **Size.** A stand-in is drawn at the file's font size: Extrudo's height (the
+  capitals') is the size times the stand-in's own capital height over its em
+  (`TextFont.cap`). Arimo's capitals are 4 % lower than the file's (0.688 em
+  against Arial's 0.716; on a text cut's B-rep the file's letters were 4.1 %
+  taller and as wide), so drawing at the file's size keeps the widths and gives
+  up 4 % of the height; matching the capitals would make every letter 4 %
+  wider. An older text's height is Arial's capitals, so its size is that / 0.716.
+- **Place.** A newer text stays centred in the file's box: starting it at the
+  box's corner put the ink about 0.4 mm right of the box's ends, centring
+  within about 0.1 mm for most texts.
+- A family without a stand-in is drawn as before (Inter, or the serif, mono or
+  stencil face; capitals 0.716 of the size). The report's note says "drawn in
+  Arimo (same widths)" or "(about the same widths)".
+
+**Numbers** (corpus, within 0.5 % volume and 0.05 mm box, before → after):
+match 157 → 160 (a plate with a house number, two name tags), mismatch 51 →
+48, partial 27 → 27, no design worse; features left out 75 → 75. Body check:
+editable 225 → 229, frozen 129 → 125, unchecked 26 → 26 (same reasons); no
+body went from editable to anything else.
+
+**Not moved.** Four fraction models (two-line older texts, bold): Arimo Bold's
+underscore is 0.038 em thick, the file's about 0.086 em, so the fraction bar
+cuts 18.5 mm³ where the file cuts 43; and the second line sits about half a
+capital height too low (a single-line text in the same alignment sits within
+0.06 mm, so the rule for several lines is still unknown); 1.1 to 2.8 % off.
+A hinge part's text cut is refused ("removes nothing") for its extrude's
+direction, not its font. Two keychains are off by their offset faces (glyph
+faces not named), a cover by its pattern of copied faces; its DIN text is
+about 2 % narrower in Sofia Sans, which moved its volume error from 2.5 % to
+2.9 %. Tests: `map.test.ts` "picks the stand-in with the same widths for the
+families files use most", the two text placement tests, `decode/text.test.ts`,
+`packages/fonts/src/index.test.ts`, and the CLI's "reads a bundled stand-in
+font from the package".
+
+## Amendment, 2026-10-22: 32-bit B-rep streams, Combine, Move, a deleted sketch (#93)
+
+The second file of #93 (a bumper: an oval base with fillets, two lobes, a
+column) imported with its base thinner than in the file. Four causes:
+
+- **32-bit B-rep streams.** Files saved since October 2026 write their
+  streams as `ASM BinaryFile4`: ints, enums and pointers are 4 bytes, the
+  header's counts two u32 (FORMAT.md, "ASM B-rep"). `readAsm` took only
+  BinaryFile8, so no face or edge of such a file could be named (14 fillets
+  and 6 offsets of the bumper left out) and the body check had no file body.
+  It now reads both with one width variable; the hostile-file bounds are
+  unchanged (the 4-byte form only needs fewer bytes per value). The long
+  string lengths (`0x09`, `0x12`) occur in none of the four streams seen, so
+  they stay 8 bytes, unverified. On the bumper 11 of the 14 fillets and 2 of
+  the 6 offsets are now imported (8 → 21 features).
+- **Combine** (`2A94257F…`) maps to `combine`: the target and the tools come
+  from the record's own lists (FORMAT.md). Both combines seen are joins that
+  consumed their tools, and the bytes that would hold a cut, an intersect or
+  "keep tools" are not located: a combine is imported as a join only where
+  those bytes are zero, and is otherwise left out with "its operation could
+  not be read". A tool it consumed is not reported as "hidden, as in the
+  file". Before, the bumper's pad (a separate body the combine joins into
+  the base) stayed hidden, so the base's bottom was 2.5 mm short.
+- **Move** (`64E40C8E…`) maps to `moveBodies` in free mode when its matrix
+  (`84E6245F…`, row-major, cm) only translates; a move that turns is left out
+  ("it turns the bodies"): Extrudo's free mode turns about the bodies' box
+  centre and its rotate mode needs an axis the import does not make. The
+  matrix reading was checked on the corpus's two such moves: both designs'
+  boxes now equal their exports' (20 mm and 70 mm off before).
+- **An extrude whose sketch was deleted.** A profile operand can name a
+  sketch record the file no longer holds. That was a decoding problem and the
+  skip said "its profile is a face"; now the profile reader tells it apart
+  (`SketchGoneError`), no problem is recorded, and the extrude is skipped with
+  "the sketch its profile came from is no longer in the file".
+
+Face deletions (`DeleteFace`, 28 in the bumper) stay unsupported.
+
+**Numbers** (replay corpus, before → after): match 157 → 158 (the corpus's
+move of a frame part, box 70 mm → 0), mismatch 51 → 52, partial 27 → 25,
+features left out 75 → 73. The one design that went from partial to
+mismatch has nothing left out now; its volume error is the same (3.7 %, a text
+cut in a substitute font) and its box error went from 20 mm to 0. The
+corpus's other combine and a move that turns stay left out, with the new
+reasons. Body check: editable 225 → 226 (the moved frame part, frozen
+before), frozen 129 → 128, unchecked 26 → 26 (same reasons); no body worse.
+The bumper: 23 features imported, 39 left out
+(28 face deletions, 3 extrudes of the deleted sketch, 3 fillets and 4 offsets
+whose faces can't be named, a suppressed removal), no decoding problem; its
+body is frozen from the file (the timeline makes it differently without the
+face deletions), and the replay's base under the column runs from −5.5 to
+2 mm as the file's does. The issue's first file (one sketch, one extrude) now
+has its stream read and its body matched (editable). Tests: `asm.test.ts`
+"readAsm, BinaryFile4"; `brep-body.test.ts` "reads the 32-bit stream
+variant"; `decode/combine.test.ts`; `decode/extrude.test.ts`
+"readProfileOperand"; `map-more.test.ts` "features on whole bodies".
