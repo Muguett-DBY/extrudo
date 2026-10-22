@@ -379,6 +379,26 @@ static void file(ExtrudoFacade& f, const std::string& path, double tolerance) {
           std::cout << " " << o << "(kind " << n.kind << ", r " << n.radius << ", area " << n.area << ")";
         }
         std::cout << std::setprecision(6) << std::endl;
+        if (std::string(getenv("UNFIT")) == "2") {
+          // UNFIT=2: its 20 largest planar regions.
+          std::vector<int> order(s.regions);
+          std::sort(order.begin(), order.end(), [&](int a, int b) { return seg.regions[a].area > seg.regions[b].area; });
+          {
+            std::vector<double> sizes;
+            for (int r : s.regions) sizes.push_back(seg.regions[r].area);
+            std::sort(sizes.begin(), sizes.end());
+            const double median = sizes[(sizes.size() - 1) / 2];
+            int large = 0;
+            for (double a : sizes) large += a >= 4 * median;
+            std::cout << "       median region area " << median << ", " << large << " of " << sizes.size() << " at 4 x or more\n";
+          }
+          for (size_t k = 0; k < order.size() && k < 20; ++k) {
+            const auto& r = seg.regions[order[k]];
+            std::cout << "       region " << order[k] << " area " << r.area << " triangles " << r.triangles.size() << " nodes " << r.nodes.size()
+                      << " normal " << r.normal.X() << "," << r.normal.Y() << "," << r.normal.Z() << " at " << r.origin.X() << "," << r.origin.Y()
+                      << "," << r.origin.Z() << "\n";
+          }
+        }
       }
     }
     stage();

@@ -6197,7 +6197,7 @@ private:
     for (int t : triangles) along += areas[t] * normals[t].Dot(axis);
     along /= areaSum;
     const double alpha0 = std::asin(std::min(1.0, std::fabs(along)));
-    if (!(alpha0 > M_PI / 180) || !(alpha0 < 89 * M_PI / 180)) return fit;
+    if (!(alpha0 > (debugFlags_ & 8 ? 0.0003 : M_PI / 180)) || !(alpha0 < 89 * M_PI / 180)) return fit;
     // The apex: the point every tangent plane passes through, least squares.
     double matrix[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}, rhs[3] = {0, 0, 0};
     for (int t : triangles) {
@@ -6811,6 +6811,35 @@ private:
         if (g.outward.Modulus() < 1e-300) g.outward = regions[members[0]].normal.XYZ();
         return g;
       };
+      // Nodes on one or two parallel circles (a band of facets: a slot's
+      // end, slice C's micro-sd keyring) lie on many spheres and tori: no
+      // sphere or torus then. The circles are square to the direction the
+      // facet normals vary least along (a band's axis).
+      auto onRings = [&](MeshFit fit, const Gathered& g) {
+        if (!fit.ok) return fit;
+        double cov[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}};
+        for (int t : g.triangles)
+          for (int i = 0; i < 3; ++i)
+            for (int j = 0; j < 3; ++j) cov[i][j] += areas[t] * normals[t].Coord(i + 1) * normals[t].Coord(j + 1);
+        double values[3];
+        gp_XYZ vectors[3];
+        symmetricEigen(cov, values, vectors);
+        if (vectors[0].Modulus() < 1e-12) return fit;
+        const gp_XYZ a = vectors[0].Normalized();
+        double low = 1e300, high = -1e300;
+        for (int n : g.nodes) {
+          const double h = (meshNode(n) - fit.origin.XYZ()).Dot(a);
+          low = std::min(low, h);
+          high = std::max(high, h);
+        }
+        bool rings = true;
+        for (size_t k = 0; k < g.nodes.size() && rings; ++k) {
+          const double h = (meshNode(g.nodes[k]) - fit.origin.XYZ()).Dot(a);
+          rings = h - low <= tolerance || high - h <= tolerance;
+        }
+        if (rings) fit.ok = false;
+        return fit;
+      };
       // One kind's fit (0 plane, 1 cylinder, 2 cone, 3 sphere, 4 torus).
       auto fitKind = [&](int kind, const Gathered& g) {
         switch (kind) {
@@ -6855,9 +6884,9 @@ private:
           case 2:
             return fitMeshCone(g.nodes, g.triangles, normals, areas);
           case 3:
-            return fitMeshSphere(g.nodes);
+            return onRings(fitMeshSphere(g.nodes), g);
           default:
-            return fitMeshTorus(g.nodes, g.triangles, normals, areas, tolerance);
+            return onRings(fitMeshTorus(g.nodes, g.triangles, normals, areas, tolerance), g);
         }
       };
       // The surface of a fit within the tolerance, with its chord error.
@@ -6939,6 +6968,12 @@ private:
       // when such a piece has 4 regions or more, the split explains too
       // little (a freeform surface fits small primitives here and there) and
       // the component stays whole and unfit.
+      // A region much longer than wide: its area under a tenth of its node box's diagonal squared.
+      auto thin = [&](int r) {
+        Bnd_Box box;
+        for (int n : regions[r].nodes) box.Add(gp_Pnt(meshNode(n)));
+        return !box.IsVoid() && regions[r].area < 0.1 * box.SquareExtent();
+      };
       std::vector<int> pieceOf(regionCount, -2), frontierMark(regionCount, -1);
       int frontierRound = 0;
       constexpr int minimumNodes = 16;
@@ -6956,8 +6991,11 @@ private:
           MeshSurface s;
           s.kind = -1;
           std::vector<int> patch(1, seed);
-          // A large seed is a plane (the flat face between fillets) and grows as one.
-          const bool large = regions[seed].area >= 4 * median;
+          // A large seed is a plane (the flat face between fillets) and grows
+          // as one; a thin one (its area under a tenth of its extent squared:
+          // one facet strip of a long fillet, slice C's trashcan-spacer) is a
+          // patch's seed like any other.
+          const bool large = regions[seed].area >= 4 * median && !thin(seed);
           if (large) s = planeOf(seed);
           // Else the seed patch, and its node count after each region.
           std::vector<int> nodesAfter;
@@ -7112,6 +7150,31 @@ private:
           if (pieceOf[r] == unassigned) left.push_back(r);
           // Outside the component, pieceOf means nothing (the next split's own).
           pieceOf[r] = -2;
+        }
+        if (debugFlags_ & 4) {
+          std::printf("split of %zu regions (area %g): %zu pieces\n", members.size(), whole.area, pieces.size());
+          for (const MeshSurface& p : pieces) std::printf("  piece kind %d regions %zu area %g r %g\n", p.kind, p.regions.size(), p.area, p.radius);
+          for (const std::vector<int>& component : components(left)) {
+            double a = 0;
+            for (int r : component) a += regions[r].area;
+            Bnd_Box box;
+            for (int r : component)
+              for (int n : regions[r].nodes) box.Add(gp_Pnt(meshNode(n)));
+            double x0, y0, z0, x1, y1, z1;
+            box.Get(x0, y0, z0, x1, y1, z1);
+            const Gathered g = gather(component);
+            std::printf("  left %zu regions area %g (first %d) box %g,%g,%g .. %g,%g,%g fits", component.size(), a, component[0], x0, y0, z0,
+                        x1, y1, z1);
+            for (int kind = 0; kind <= 4; ++kind) {
+              const MeshFit fit = fitKind(kind, g);
+              std::printf(" %g(r %g)", fit.ok ? fit.deviation : -1.0, fit.radius);
+            }
+            std::printf("\n");
+            if (component.size() >= 4)
+              for (int r : component)
+                std::printf("    region %d area %g tris %zu normal %g,%g,%g\n", r, regions[r].area, regions[r].triangles.size(),
+                            regions[r].normal.X(), regions[r].normal.Y(), regions[r].normal.Z());
+          }
         }
         for (const std::vector<int>& component : components(left)) {
           if (component.size() >= 4) return std::vector<MeshSurface>(1, whole);
