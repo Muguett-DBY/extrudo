@@ -2882,3 +2882,19 @@ body's de-indexed coloured copy (`regionGeometry`) **in place of** its faces
 and of the drawing, coloured from the tokens (`--x-cat-create` planes,
 `--x-cat-sketch` curved, `--x-error` unfit), never literals. The feature lives
 on branch `claude/stl-import-native-solid-e60e8c` until one pull request.
+
+**Faceted hardening** (2026-10-22 amendment, `facetedFromMesh` in the
+facade): a private `facetedMeshCounts()` runs **before** any build, over the
+triangle buffers, estimating the unified face count (edge-adjacent triangles
+whose unit normals agree within 1e-3 rad and planes within 1e-3 mm are one
+face, with a union-find; a zero-area triangle joins a neighbour). Over
+`FACETED_FACE_CAP` (2,000) it refuses at once with "Faceted would give
+**about** N faces; …" (the "about" marks the estimate; the after-unify count
+stays a backstop and its message has no "about"). The faces are grouped by
+shared edge and **each connected shell becomes its own solid** (one shell
+keeps the plain solid, several give a compound that `splitSolids` splits), so
+a multi-part STL converts instead of failing with `BRepCheck_NotConnected`.
+**Rules:** the estimate precedes the build; a refusal **names the reason**
+(edges shared by more than two triangles / edges used by one / vertices
+joining shells that only touch at a point, in the house style); single-shell
+meshes keep the same face counts, validity and volume.

@@ -98,7 +98,7 @@ Facts from it:
   above a cap.
 - **Refusals, in the house style:** "Mesh to Solid couldn't close the body:
   3 regions (12 % of the surface) fit no plane or cylinder. Raise the tolerance,
-  or use Faceted." / "Faceted would give 9,497 faces; Extrudo converts up to
+  or use Faceted." / "Faceted would give about 9,497 faces; Extrudo converts up to
   2,000. Use Prismatic, or simplify the mesh in your slicer."
 - **Preview:** the dialog's live preview colours the mesh by recognised region
   kind (plane / cylinder / none) **before** the solid is built, like Fusion's
