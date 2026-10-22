@@ -3,7 +3,7 @@
 // pinned OCCT image; case r runs meshRegions (the region preview, slice 4).
 // run.sh copies the facade with its private members made
 // public into build/facade_public.cpp, which this file includes.
-#include "build/facade_public.cpp"
+#include "facade_public.cpp"  // in build/ (or BUILD), on the include path
 
 #include <BRepAlgoAPI_Cut.hxx>
 #include <BRepAlgoAPI_Fuse.hxx>
@@ -21,6 +21,9 @@
 #include <BRepBuilderAPI_Copy.hxx>
 #include <chrono>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
+#include <set>
 #include <iomanip>
 #include <iostream>
 
@@ -54,6 +57,20 @@ static Mesh meshOf(const TopoDS_Shape& shape, double deflection, double angle) {
 }
 
 static Mesh stlFile(const char* path) {
+  const std::string name(path);
+  if (name.size() > 5 && name.compare(name.size() - 5, 5, ".mesh") == 0) {
+    // A mesh as Kernel.meshFrom keeps it (manifold's order): uint32 nodes, uint32 triangles, float32 xyz, uint32 corners.
+    std::ifstream in(path, std::ios::binary);
+    uint32_t counts[2] = {0, 0};
+    in.read(reinterpret_cast<char*>(counts), 8);
+    std::vector<float> xyz(3 * size_t(counts[0]));
+    in.read(reinterpret_cast<char*>(xyz.data()), std::streamsize(xyz.size() * 4));
+    Mesh m;
+    m.nodes.assign(xyz.begin(), xyz.end());
+    m.triangles.resize(3 * size_t(counts[1]));
+    in.read(reinterpret_cast<char*>(m.triangles.data()), std::streamsize(m.triangles.size() * 4));
+    return m;
+  }
   Handle(Poly_Triangulation) tri = RWStl::ReadFile(path);
   Mesh m;
   for (int i = 1; i <= tri->NbNodes(); ++i) {
@@ -232,11 +249,142 @@ static void regions(ExtrudoFacade& f, const char* name, const Mesh& m, double to
   f.clearMeshRegions();
 }
 
+/** Case f/F: one file from /stl (STL_DIR) through meshRegions, then meshToSolid prismatic, at `tolerance`. */
+static void file(ExtrudoFacade& f, const std::string& path, double tolerance) {
+  const Mesh m = stlFile(path.c_str());
+  std::cout << "== file " << path.substr(5) << " (" << m.triangles.size() / 3 << " triangles, tol " << tolerance << ")" << std::endl;
+  auto stage = [&] {
+    f.meshNodes(int(m.nodes.size() / 3));
+    double* nodes = reinterpret_cast<double*>(f.meshNodesPtr());
+    for (size_t i = 0; i < m.nodes.size(); ++i) nodes[i] = static_cast<float>(m.nodes[i]);
+    f.meshTriangles(int(m.triangles.size() / 3));
+    std::memcpy(reinterpret_cast<void*>(f.meshTrianglesPtr()), m.triangles.data(), m.triangles.size() * sizeof(uint32_t));
+  };
+  stage();
+  if (getenv("PIECES") && *getenv("PIECES")) {
+    // How many surfaces each region is in: exactly one, or the segmentation lost or doubled it.
+    ExtrudoFacade::MeshSegmentation seg;
+    if (f.segmentMesh(tolerance, seg)) {
+      std::vector<int> in(seg.regions.size(), 0);
+      for (const auto& surface : seg.surfaces)
+        for (int r : surface.regions) in[r]++;
+      int none = 0, many = 0;
+      for (int c : in) none += c == 0, many += c > 1;
+      std::cout << "   coverage: " << seg.regions.size() << " regions, " << none << " in no surface, " << many << " in several" << std::endl;
+      if (!(getenv("SEGMENT") && *getenv("SEGMENT"))) {
+        // Each surface before and after rebuildPrismatic's snaps, with the farthest of its own nodes.
+        std::vector<ExtrudoFacade::MeshSurface> before = seg.surfaces;
+        const std::string why = "refused";
+        f.keepRebuildFaces_ = getenv("GAPS") && *getenv("GAPS");
+        Handle(ExtrudoFacade::MeshDeadline) deadline = new ExtrudoFacade::MeshDeadline(ExtrudoFacade::nowMs() + 30000);
+        int h = 0;
+        try {
+          h = f.rebuildPrismatic(tolerance, seg.surfaces, seg.regions, seg.regionOf, seg.regionNeighbours, seg.normals, seg.areas,
+                                 seg.meshArea, seg.meshVolume, why, deadline);
+        } catch (...) {
+        }
+        if (h) f.release(h);
+        if (getenv("GAPS") && *getenv("GAPS") && f.rebuildFaces_.size() == seg.surfaces.size()) {
+          // Neighbouring surfaces whose oversized faces don't meet: a gap MakerVolume can't close.
+          std::vector<int> surfaceOf(seg.regions.size(), -1);
+          for (size_t i = 0; i < seg.surfaces.size(); ++i)
+            for (int r : seg.surfaces[i].regions) surfaceOf[r] = int(i);
+          std::set<std::pair<int, int>> pairs;
+          for (size_t r = 0; r < seg.regions.size(); ++r)
+            for (int o : seg.regionNeighbours[r])
+              if (surfaceOf[r] < surfaceOf[o]) pairs.insert({surfaceOf[r], surfaceOf[o]});
+          std::cout << "     MakerVolume warnings: " << f.rebuildWarnings_ << std::endl;
+          for (const auto& [a, b] : pairs) {
+            BRepExtrema_DistShapeShape d(f.rebuildFaces_[a], f.rebuildFaces_[b]);
+            if (!d.IsDone() || d.Value() > 1e-7)
+              std::cout << "     gap between surface " << a << " (kind " << seg.surfaces[a].kind << ") and " << b << " (kind "
+                        << seg.surfaces[b].kind << "): " << (d.IsDone() ? d.Value() : -1.0) << std::endl;
+          }
+        }
+        auto farthest = [&](const ExtrudoFacade::MeshSurface& surface) {
+          double d = 0;
+          for (int r : surface.regions)
+            for (int n : seg.regions[r].nodes) d = std::max(d, ExtrudoFacade::distanceToSurface(surface, f.meshNode(n)));
+          return d;
+        };
+        // The surfaces as fitted, then as rebuilt (same surfaces merged, snapped).
+        for (int pass = 0; pass < 2; ++pass)
+        for (size_t i = 0; i < (pass ? seg.surfaces : before).size(); ++i) {
+          const auto &a = (pass ? seg.surfaces : before)[i], &b = a;
+          if (i == 0) std::cout << (pass ? "   rebuilt:" : "   fitted:") << std::endl;
+          std::cout << std::setprecision(9) << "     surface " << i << " kind " << a.kind << " regions " << a.regions.size() << " area " << a.area
+                    << " r " << a.radius << " R " << a.majorRadius << " at " << a.origin.X() << "," << a.origin.Y() << "," << a.origin.Z() << " dir "
+                    << a.direction.X() << "," << a.direction.Y() << "," << a.direction.Z() << " sag " << a.sag << " off " << farthest(a) << std::setprecision(6)
+                    << std::endl;
+        }
+        stage();
+      }
+    }
+  }
+  if (getenv("SEGMENT") && *getenv("SEGMENT")) return;
+  double t0 = now();
+  const int ok = f.meshRegions(tolerance);
+  std::cout << "   regions " << (ok ? std::to_string(f.meshRegionCount()) : std::string("failed: ") + f.lastError()) << " ("
+            << now() - t0 << " ms)";
+  if (ok && f.meshReport_.size() == 10) {
+    const auto& r = f.meshReport_;
+    std::cout << " pl/cy/co/sp/to " << r[1] << "/" << r[2] << "/" << r[3] << "/" << r[4] << "/" << r[5] << ", unfit " << r[6];
+  }
+  std::cout << std::endl;
+  f.clearMeshRegions();
+  stage();
+  t0 = now();
+  const int h = f.meshToSolid(1, tolerance);
+  const double ms = now() - t0;
+  if (getenv("TIMES") && *getenv("TIMES")) {
+    double rebuild = 0;
+    for (const auto& [name, stageMs] : f.rebuildTimes_) rebuild += stageMs;
+    std::cout << "   times: segmentation and fits " << ms - rebuild;
+    for (const auto& [name, stageMs] : f.rebuildTimes_) std::cout << ", " << name << " " << stageMs;
+    std::cout << " ms" << std::endl;
+    if (!h && !f.rebuildRefusal_.empty()) std::cout << "   rebuild refused at: " << f.rebuildRefusal_ << std::endl;
+  }
+  if (!h) {
+    std::cout << "   prismatic refused (" << ms << " ms): " << f.lastError() << std::endl;
+    return;
+  }
+  double meshVolume = 0;
+  for (size_t t = 0; t < m.triangles.size(); t += 3) {
+    const double* a = &m.nodes[3 * m.triangles[t]];
+    const double* b = &m.nodes[3 * m.triangles[t + 1]];
+    const double* c = &m.nodes[3 * m.triangles[t + 2]];
+    meshVolume += (a[0] * (b[1] * c[2] - b[2] * c[1]) - a[1] * (b[0] * c[2] - b[2] * c[0]) + a[2] * (b[0] * c[1] - b[1] * c[0])) / 6;
+  }
+  const TopoDS_Shape& s = *f.find(h);
+  const double v = ExtrudoFacade::volumeOf(s);
+  std::cout << "   prismatic " << f.count(h, 0) << " faces:" << kinds(s) << ", valid " << BRepCheck_Analyzer(s).IsValid() << ", volume "
+            << v << " / mesh " << meshVolume << " = " << v / meshVolume << " (" << ms << " ms)" << std::endl;
+  f.release(h);
+}
+
 static double noise32(int ring, int i) { return 0.005 * (ring == 0 ? std::sin(1.7 * i + 0.3) : std::cos(2.3 * i + 0.1)); }
 
 int main(int argc, char** argv) {
   ExtrudoFacade f;
+  // BUDGET=ms lowers the rebuild's budget (PRISMATIC_REBUILD_BUDGET_MS), to see it hit.
+  if (getenv("BUDGET") && *getenv("BUDGET")) f.prismaticBudgetMs_ = std::atof(getenv("BUDGET"));
   const std::string only = argc > 1 ? argv[1] : "";
+  const double envTol = getenv("TOL") && *getenv("TOL") ? std::atof(getenv("TOL")) : 0.01;
+  if (only == "f") {
+    file(f, std::string("/stl/") + (getenv("FILE") ? getenv("FILE") : ""), envTol);
+    std::cout << "live shapes " << f.liveShapes() << "\n";
+    return 0;
+  }
+  if (only == "F") {
+    // Every .stl under /stl in one process: state left by one file shows in the next.
+    std::vector<std::string> paths;
+    for (const auto& e : std::filesystem::recursive_directory_iterator("/stl"))
+      if (e.is_regular_file() && (e.path().extension() == ".stl" || e.path().extension() == ".mesh")) paths.push_back(e.path().string());
+    std::sort(paths.begin(), paths.end());
+    for (const auto& p : paths) file(f, p, envTol);
+    std::cout << "live shapes " << f.liveShapes() << "\n";
+    return 0;
+  }
   auto want = [&](const char* id) { return only.empty() || only == id; };
   if (want("1")) {
     int h = run(f, "1 cube.stl", stlFile("/repo/fixtures/imports/cube.stl"), 0.01, 8000);

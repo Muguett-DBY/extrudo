@@ -2880,5 +2880,24 @@ asked before the preview, late answers dropped, cleared for faceted and on
 close, edit mode waits for the base. While regions exist the view draws the
 body's de-indexed coloured copy (`regionGeometry`) **in place of** its faces
 and of the drawing, coloured from the tokens (`--x-cat-create` planes,
-`--x-cat-sketch` curved, `--x-error` unfit), never literals. The feature lives
+`--x-cat-sketch` curved, `--x-error` unfit), never literals. **Hardening
+slice A** (2026-10-22 amendment): every region is on exactly one surface
+after `segmentMesh` (`splitComponent` refits any piece that lost or gained a
+region; the rebuild refuses a region on none rather than index with -1);
+the rebuild after `segmentMesh` has `PRISMATIC_REBUILD_BUDGET_MS` (30 s)
+through `MeshDeadline` (a `Message_ProgressIndicator`; pass its `Start()` to
+every OCCT algorithm in the rebuild that takes a range, and `check()` the
+deadline in every new loop) and refuses past it with "Mesh to Solid gave up
+after 30 s: this mesh has too many surfaces to rebuild exactly. Use
+Faceted, or simplify the mesh in your slicer." (never a trap); same
+surfaces are merged before the snaps, a snap that leaves a surface's own
+nodes outside the tolerance is undone, a decided cell (16 votes, 90 %) is
+skipped by later samples, and a face's margin uses its own and its
+neighbours' chord error. Test real files with
+`packages/kernel/src/mesh-to-solid-files.test.ts`: the owner's public
+fixtures in `fixtures/imports/mesh-to-solid/` (own designs only; downloaded
+models never go into the repository) and, with `STL_DIR=<folder>` (`TOL`,
+`FILE`, `MESH_OUT`), every STL of a folder, where only a trap fails;
+`pnpm check` doesn't need `STL_DIR`. Harness: `f`/`F` cases, `SAN=1`
+(AddressSanitizer), `TIMES=1` (spike README). The feature lives
 on branch `claude/stl-import-native-solid-e60e8c` until one pull request.
