@@ -2,8 +2,6 @@
 // the owner's fixtures in fixtures/imports/mesh-to-solid/, and, when STL_DIR
 // names a folder, every .stl under it (at TOL, default 0.01 mm), where only a
 // trap fails: a refusal is an answer, a WASM RuntimeError is a bug.
-import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative } from 'node:path';
 import { readStl } from '@extrudo/io';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import holeFillerStl from '../../../fixtures/imports/mesh-to-solid/hole-filler-35mm.stl?url&inline';
@@ -13,6 +11,22 @@ import spacerStl from '../../../fixtures/imports/mesh-to-solid/trashcan-spacer.s
 import { Kernel, KernelError, type ShapeHandle } from './kernel';
 import { loadManifold } from './manifold';
 import { loadOcct } from './occt/load';
+
+const env =
+  (globalThis as { process?: { env: Record<string, string | undefined> } }).process?.env ?? {};
+
+/** The kernel's tsconfig has no Node types: a module name in a variable keeps tsc out of it. */
+interface NodeFs {
+  readdirSync(
+    path: string,
+    options: { withFileTypes: true },
+  ): { name: string; isDirectory(): boolean }[];
+  readFileSync(path: string): Uint8Array;
+  mkdirSync(path: string, options: { recursive: true }): void;
+  writeFileSync(path: string, data: Uint8Array): void;
+}
+const nodeFs = 'node:fs';
+const fs = env.STL_DIR ? ((await import(/* @vite-ignore */ nodeFs)) as NodeFs) : undefined;
 
 let kernel: Kernel;
 
@@ -31,12 +45,12 @@ function bytesOf(dataUrl: string): Uint8Array {
   return Uint8Array.from(binary, (c) => c.charCodeAt(0));
 }
 
-/** Every .stl under `root`, sorted. */
-function stlFiles(root: string): string[] {
+/** Every .stl under `root`, sorted, relative to it. */
+function stlFiles(files: NodeFs, root: string, under = ''): string[] {
   const list: string[] = [];
-  for (const entry of readdirSync(root, { withFileTypes: true })) {
-    const path = join(root, entry.name);
-    if (entry.isDirectory()) list.push(...stlFiles(path));
+  for (const entry of files.readdirSync(`${root}/${under}`, { withFileTypes: true })) {
+    const path = `${under}${entry.name}`;
+    if (entry.isDirectory()) list.push(...stlFiles(files, root, `${path}/`));
     else if (/\.stl$/i.test(entry.name)) list.push(path);
   }
   return list.sort();
@@ -44,14 +58,16 @@ function stlFiles(root: string): string[] {
 
 /** The signed volume of a triangle mesh. */
 function meshVolume(positions: ArrayLike<number>, indices: ArrayLike<number>): number {
+  const at = (i: number) => positions[i] as number;
   let v = 0;
   for (let t = 0; t < indices.length; t += 3) {
-    const [a, b, c] = [0, 1, 2].map((k) => 3 * (indices[t + k] as number));
-    const p = (i: number, k: number) => positions[(i as number) + k] as number;
+    const a = 3 * (indices[t] as number);
+    const b = 3 * (indices[t + 1] as number);
+    const c = 3 * (indices[t + 2] as number);
     v +=
-      p(a, 0) * (p(b, 1) * p(c, 2) - p(b, 2) * p(c, 1)) -
-      p(a, 1) * (p(b, 0) * p(c, 2) - p(b, 2) * p(c, 0)) +
-      p(a, 2) * (p(b, 0) * p(c, 1) - p(b, 1) * p(c, 0));
+      at(a) * (at(b + 1) * at(c + 2) - at(b + 2) * at(c + 1)) -
+      at(a + 1) * (at(b) * at(c + 2) - at(b + 2) * at(c)) +
+      at(a + 2) * (at(b) * at(c + 1) - at(b + 1) * at(c));
   }
   return v / 6;
 }
@@ -61,6 +77,70 @@ function refusal(error: unknown): string {
   if (error instanceof KernelError) return error.message;
   throw error;
 }
+
+/** What prismatic at 0.01 mm makes of a fixture: faces by kind, or the refusal. */
+type Outcome =
+  | { planes: number; cylinders: number; cones: number; spheres: number; tori: number }
+  | { refusal: string };
+
+const fixtures: [string, string, Outcome][] = [
+  [
+    'hole-filler-35mm.stl',
+    holeFillerStl,
+    { planes: 3, cylinders: 2, cones: 0, spheres: 0, tori: 1 },
+  ],
+  [
+    'trashcan-repair-foot.stl',
+    repairFootStl,
+    { planes: 12, cylinders: 4, cones: 0, spheres: 0, tori: 0 },
+  ],
+  [
+    'puzzle-base-circle.stl',
+    puzzleBaseStl,
+    { planes: 35, cylinders: 1, cones: 0, spheres: 0, tori: 1 },
+  ],
+  [
+    'trashcan-spacer.stl',
+    spacerStl,
+    {
+      // Slice C's: a freeform surface the segmentation leaves unfit.
+      refusal:
+        "Mesh to Solid couldn't close the body: 1 region (82 % of the surface) fits no plane, cylinder, sphere, cone or torus. Use Faceted, or simplify the mesh in your slicer.",
+    },
+  ],
+];
+
+describe('Mesh to Solid, prismatic on the fixtures', { timeout: 120_000 }, () => {
+  for (const [name, url, outcome] of fixtures) {
+    it(`converts ${name} at 0.01 mm${'refusal' in outcome ? ' (refused)' : ''}`, () => {
+      const stl = readStl(bytesOf(url));
+      const volume = meshVolume(stl.mesh.positions, stl.mesh.indices);
+      const mesh = kernel.meshFrom(stl.mesh);
+      try {
+        if ('refusal' in outcome) {
+          expect(() => kernel.meshToSolid(mesh, { method: 'prismatic', tolerance: 0.01 })).toThrow(
+            new KernelError(outcome.refusal),
+          );
+          return;
+        }
+        const { shape, report } = kernel.meshToSolid(mesh, {
+          method: 'prismatic',
+          tolerance: 0.01,
+        });
+        try {
+          const { planes, cylinders, cones, spheres, tori } = report;
+          expect({ planes, cylinders, cones, spheres, tori }).toEqual(outcome);
+          expect(kernel.isValid(shape)).toBe(true);
+          expect(Math.abs(kernel.properties(shape).volume / volume - 1)).toBeLessThan(0.005);
+        } finally {
+          kernel.release(shape);
+        }
+      } finally {
+        kernel.release(mesh);
+      }
+    });
+  }
+});
 
 describe('Mesh to Solid, the segmentation', { timeout: 120_000 }, () => {
   it('puts every triangle of trashcan-spacer.stl on a surface, and refuses it without a trap', () => {
@@ -84,17 +164,34 @@ describe('Mesh to Solid, the segmentation', { timeout: 120_000 }, () => {
   });
 });
 
-const stlDir = process.env.STL_DIR;
-const tolerance = Number(process.env.TOL ?? '0.01');
-const only = process.env.FILE;
+/**
+ * MESH_OUT: the mesh as the kernel stages it (manifold's order), for the spike
+ * harness's `f` case: uint32 nodes, uint32 triangles, float32 xyz, uint32 corners.
+ */
+function writeStagedMesh(mesh: ShapeHandle, path: string): void {
+  const { positions, indices } = kernel.exportMesh(mesh, {
+    linearDeflection: 0.1,
+    angularDeflection: 0.5,
+  });
+  const nodes = positions.length / 3;
+  const bytes = new ArrayBuffer(8 + 4 * positions.length + 4 * indices.length);
+  new Uint32Array(bytes, 0, 2).set([nodes, indices.length / 3]);
+  new Float32Array(bytes, 8, positions.length).set(positions);
+  new Uint32Array(bytes, 8 + 4 * positions.length, indices.length).set(indices);
+  fs?.mkdirSync(path.slice(0, path.lastIndexOf('/')), { recursive: true });
+  fs?.writeFileSync(path, new Uint8Array(bytes));
+}
+
+const stlDir = env.STL_DIR;
+const tolerance = Number(env.TOL ?? '0.01');
+const only = env.FILE;
 
 describe.skipIf(!stlDir)('Mesh to Solid over STL_DIR', { timeout: 3_600_000 }, () => {
   const root = stlDir as string;
-  for (const file of stlDir ? stlFiles(root) : []) {
-    const name = relative(root, file);
+  for (const name of fs && stlDir ? stlFiles(fs, root) : []) {
     if (only && name !== only) continue;
     it(name, () => {
-      const stl = readStl(new Uint8Array(readFileSync(file)));
+      const stl = readStl(new Uint8Array((fs as NodeFs).readFileSync(`${root}/${name}`)));
       const volume = meshVolume(stl.mesh.positions, stl.mesh.indices);
       const cells: string[] = [name, String(stl.mesh.indices.length / 3)];
       let mesh: ShapeHandle | undefined;
@@ -105,6 +202,9 @@ describe.skipIf(!stlDir)('Mesh to Solid over STL_DIR', { timeout: 3_600_000 }, (
       }
       if (mesh) {
         try {
+          if (env.MESH_OUT) {
+            writeStagedMesh(mesh, `${env.MESH_OUT}/${name.replace(/\.stl$/i, '.mesh')}`);
+          }
           try {
             const r = kernel.meshRegions(mesh, tolerance);
             cells.push(

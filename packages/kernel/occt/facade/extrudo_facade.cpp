@@ -6701,19 +6701,6 @@ private:
         }
         return s;
       };
-      // A curved fit holds the facets too, not only their corners: each
-      // facet's centroid within the tolerance plus twice the chord error. A
-      // vertical cylinder's STL has nodes on its two end rings only, which
-      // are all on a sphere as well (ADR-0097's 2026-10-22 amendment).
-      auto facetsOn = [&](const MeshSurface& s, const Gathered& g) {
-        if (s.kind <= 0) return true;
-        const double reach = tolerance + 2 * s.sag;
-        for (int t : g.triangles) {
-          const gp_XYZ centroid = (meshNode(corner(t, 0)) + meshNode(corner(t, 1)) + meshNode(corner(t, 2))) / 3;
-          if (distanceToSurface(s, centroid) > reach) return false;
-        }
-        return true;
-      };
       // The first of plane, cylinder, cone, sphere and torus that holds
       // every node of `members` within the tolerance, else unfit with the
       // smallest deviation. The cone before the sphere: a frustum with only
@@ -6725,11 +6712,7 @@ private:
         for (int kind = 0; kind <= 4; ++kind) {
           const MeshFit fit = fitKind(kind, g);
           if (!fit.ok) continue;
-          if (fit.deviation <= tolerance) {
-            MeshSurface s = surfaceOfFit(kind, fit, members, g);
-            if (facetsOn(s, g)) return s;
-            continue;
-          }
+          if (fit.deviation <= tolerance) return surfaceOfFit(kind, fit, members, g);
           deviation = std::min(deviation, fit.deviation);
         }
         MeshSurface s;
@@ -6742,10 +6725,7 @@ private:
       auto fitOfKind = [&](int kind, const std::vector<int>& members) {
         const Gathered g = gather(members);
         const MeshFit fit = fitKind(kind, g);
-        if (fit.ok && fit.deviation <= tolerance) {
-          MeshSurface s = surfaceOfFit(kind, fit, members, g);
-          if (facetsOn(s, g)) return s;
-        }
+        if (fit.ok && fit.deviation <= tolerance) return surfaceOfFit(kind, fit, members, g);
         MeshSurface s;
         s.kind = -1;
         return s;
@@ -7333,12 +7313,8 @@ private:
     // position exactly, square ones (an end cap, a hole's plate) its axis.
     // Booleans are weak on nearly tangent surfaces; exactly tangent ones they
     // handle.
-    // The plane normals that fix each cylinder's axis position (one: it
-    // still slides along that plane; two: fixed), for the cylinder snap below.
-    std::vector<std::vector<gp_XYZ>> fixedBy(surfaceCount);
     for (MeshSurface& c : surfaces) {
       if (c.kind != 1) continue;
-      std::vector<gp_XYZ>& fixes = fixedBy[&c - surfaces.data()];
       gp_XYZ axis = c.direction.XYZ(), o = c.origin.XYZ();
       std::vector<MeshTangent> tangents;
       std::vector<gp_XYZ> squares;
@@ -7369,7 +7345,6 @@ private:
               axis = dir;
               o = gp_XYZ(x[0], x[1], x[2]);
               snapped = true;
-              fixes = {a.n, b.n};
             }
           } else if (dot < -cosOne) {
             // Two opposite walls: the cylinder fills the gap between them.
@@ -7379,24 +7354,10 @@ private:
               axis = (axis - axis.Dot(a.n) * a.n).Normalized();
               o = o - ((o - a.p).Dot(a.n) - a.side * c.radius) * a.n;
               snapped = true;
-              fixes = {a.n};
             }
           }
         }
       }
-      // A snap that turns the axis refits the circle about the new one (a
-      // fit's tilted axis has its own centre and radius, ADR-0097's
-      // 2026-10-22 amendment); kept when it holds the nodes.
-      auto refitAlong = [&](const gp_XYZ& along) {
-        std::vector<int> nodes;
-        for (int r : c.regions) nodes.insert(nodes.end(), regions[r].nodes.begin(), regions[r].nodes.end());
-        std::sort(nodes.begin(), nodes.end());
-        nodes.erase(std::unique(nodes.begin(), nodes.end()), nodes.end());
-        const MeshFit fit = fitMeshCylinderAlong(nodes, gp_Dir(along));
-        if (!fit.ok || !(fit.deviation <= tolerance)) return;
-        c.radius = fit.radius;
-        o = fit.origin.XYZ();
-      };
       if (!snapped && !tangents.empty()) {
         // One tangent plane: the axis in it, along a square plane's normal
         // when there is one (an end cap), else the fitted axis's projection.
@@ -7409,60 +7370,12 @@ private:
           }
         }
         axis = (along - along.Dot(a.n) * a.n).Normalized();
-        refitAlong(axis);
         o = o - ((o - a.p).Dot(a.n) - a.side * c.radius) * a.n;
         snapped = true;
-        fixes = {a.n};
       }
-      if (!snapped && !squares.empty()) {
-        axis = axis.Dot(squares[0]) < 0 ? squares[0].Reversed() : squares[0];
-        refitAlong(axis);
-      }
+      if (!snapped && !squares.empty()) axis = axis.Dot(squares[0]) < 0 ? squares[0].Reversed() : squares[0];
       c.direction = gp_Dir(axis);
       c.origin = gp_Pnt(o);
-    }
-
-    // A cylinder next to a larger parallel one it is tangent to (a fillet
-    // between a boss and a wall, a slot's end round a hole) within the
-    // tolerance takes its axis and moves to be exactly tangent: along the
-    // plane it is tangent to when there is one, else straight away from the
-    // larger axis; one fixed by two planes stays (ADR-0097's 2026-10-22
-    // amendment).
-    for (int i = 0; i < surfaceCount; ++i) {
-      MeshSurface& small = surfaces[i];
-      if (small.kind != 1 || fixedBy[i].size() >= 2) continue;
-      for (int other : adjacent[i]) {
-        const MeshSurface& large = surfaces[other];
-        if (large.kind != 1 || large.radius <= small.radius) continue;
-        gp_XYZ axis = large.direction.XYZ();
-        if (std::fabs(axis.Dot(small.direction.XYZ())) < cosOne) continue;
-        if (axis.Dot(small.direction.XYZ()) < 0) axis.Reverse();
-        const gp_XYZ lo = large.origin.XYZ();
-        gp_XYZ w = small.origin.XYZ() - lo;
-        const double h = w.Dot(axis);
-        w -= h * axis;
-        const double d = w.Modulus(), outer = large.radius + small.radius, inner = large.radius - small.radius;
-        const double target = std::fabs(d - outer) <= tolerance ? outer : std::fabs(d - inner) <= tolerance ? inner : -1;
-        if (target < 0 || d < 1e-9) continue;
-        gp_XYZ moved;
-        if (fixedBy[i].size() == 1) {
-          const gp_XYZ n = fixedBy[i][0];
-          if (std::fabs(axis.Dot(n)) > 1e-9) continue;
-          const gp_XYZ u = axis.Crossed(n);
-          const double a = w.Dot(n), b = w.Dot(u);
-          if (target * target < a * a) continue;
-          const double slide = std::sqrt(target * target - a * a);
-          moved = a * n + (b >= 0 ? slide : -slide) * u;
-        } else {
-          moved = w * (target / d);
-        }
-        if (keepRebuildFaces_)
-          rebuildWarnings_ += "\n     cylinder " + std::to_string(i) + " tangent to " + std::to_string(other) + ", moved " +
-                              std::to_string((lo + h * axis + moved - small.origin.XYZ()).Modulus());
-        small.direction = gp_Dir(axis);
-        small.origin = gp_Pnt(lo + h * axis + moved);
-        break;
-      }
     }
 
     // A sphere next to cylinders it shares its radius with (a dome): take

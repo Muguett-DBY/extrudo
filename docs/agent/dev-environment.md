@@ -92,7 +92,22 @@ them. Notes further down that name a machine apply to that machine only.
   are required.
   Mesh to Solid's harness (ADR-0097) is `bash spikes/stl-to-solid/run.sh
   prismatic [case]` (works on the Ubuntu machine too); case `r` runs
-  `meshRegions`, the region preview, with its timings next to the conversion's.
+  `meshRegions`, the region preview, with its timings next to the conversion's;
+  cases `f`/`F` run real STL files from `STL_DIR` (one, or all in one process).
+- **A sanitizer build of the harness finds WASM memory bugs** (2026-10-22):
+  `SAN=1 bash spikes/stl-to-solid/run.sh prismatic f` links with
+  `-fsanitize=address -O1 -g2 -sINITIAL_MEMORY=2GB` (memory growth stays on;
+  the pinned image's Emscripten accepts it) and prints ASan's report with
+  the allocating frame's function name (the faulting frame is often inlined
+  and shows only an address); about 4 minutes to link and 100 × slower to
+  run. The Mesh to Solid trap of 2026-10-21 showed as a read 12 bytes before
+  a `vector<vector<int>>`: an index of -1. `SAN=ub` (UBSan) and `SAN=heap`
+  (`-sSAFE_HEAP=1 -sASSERTIONS=2`) are wired up but untried. The harness's O2
+  build didn't trap where the app's O3 build did (an out-of-bounds read only
+  traps when it leaves the heap): reproduce through the kernel
+  (`mesh-to-solid-files.test.ts` with `STL_DIR`), write the mesh in the
+  kernel's own order with `MESH_OUT=<dir>`, and run the harness on those
+  `.mesh` files.
 - **The planegcs WASM is not in git either** (`packages/sketch/planegcs/dist/`):
   CI's `planegcs` job publishes `planegcs-<hash>`, `pnpm wasm` fetches both
   builds. After changing `build.sh`, the `Dockerfile` or the patch, run

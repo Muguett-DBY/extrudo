@@ -46,3 +46,31 @@ the time, the report, the faces by kind, the validity and the volume against
 the exact one. The numbers are in ADR-0097's amendments of 2026-10-21;
 disabling the cylinder snap (an edit of the copy) makes the coarse
 four-fillet box and the slot fail.
+
+## Real files, sanitizers and stage times (hardening slice A, 2026-10-22)
+
+```sh
+STL_DIR=~/stl FILE=own/part.stl TOL=0.05 bash spikes/stl-to-solid/run.sh prismatic f   # one file
+STL_DIR=~/stl TOL=0.01 bash spikes/stl-to-solid/run.sh prismatic F                     # every .stl/.mesh under STL_DIR, one process
+SAN=1 STL_DIR=~/stl FILE=… bash spikes/stl-to-solid/run.sh prismatic f                  # AddressSanitizer (about 4 min to link)
+TIMES=1 …   # the rebuild's stage times, cell counts and the check that refused
+PIECES=1 …  # how many surfaces each region is on, every surface as fitted and as rebuilt
+GAPS=1 …    # with PIECES: MakerVolume's warnings, the snaps and reverts, inside samples in no cell by surface
+BUDGET=ms … # a lower rebuild budget than PRISMATIC_REBUILD_BUDGET_MS, to see it hit
+SEGMENT=1 … # with PIECES: the segmentation only
+```
+
+`STL_DIR` is mounted read-only at `/stl`; `FILE` is relative to it, `TOL`
+defaults to 0.01. `f` stages the file through `stlFile()` (`RWStl`, nodes
+welded by position; or a `.mesh` file: uint32 nodes, uint32 triangles,
+float32 xyz, uint32 corners), rounds the nodes to float32, runs
+`meshRegions`, then `meshToSolid(1, TOL)`, and prints the time, the report
+or the refusal. `F` runs every file in one process, so state one file leaves
+shows in the next (the 2026-10-21 trap corrupted the heap for every later
+file). The kernel orders a mesh as manifold's `getMesh()` does, which can
+segment differently: write that order with
+`MESH_OUT=<dir> STL_DIR=… pnpm vitest run packages/kernel/src/mesh-to-solid-files.test.ts --project @extrudo/kernel`.
+`BUILD=<folder>` builds into `spikes/stl-to-solid/<folder>` (default
+`build`), so two runs don't share one; `NOBUILD=1` reruns the last build;
+`FACADE=<file>` builds an edited copy of the facade (it must have the members prismatic.cpp reads; an older facade needs its own run.sh and prismatic.cpp).
+`SAN=ub` (UBSan) and `SAN=heap` (`SAFE_HEAP`) are wired up but untried.
