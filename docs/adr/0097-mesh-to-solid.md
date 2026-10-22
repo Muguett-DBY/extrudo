@@ -763,7 +763,45 @@ print (spike README) and the kernel over `STL_DIR`.
 - **Slice A's hand-offs.** micro-sd-keyring-inner and wyze-garage-bracket
   still fail at 0.01 mm (micro-sd: two r 0.6 arcs and a 0.15 mm flat fit as
   one r 0.853 cylinder within the tolerance, and the slot ends as a sphere;
-  wyze: the nearly tangent top plane); micro-sd's refusal now names 0.05 mm.
+  wyze: the nearly tangent top plane); both refusals now name 0.05 mm, where
+  both convert.
+- **What still fails** among the files below is the rebuild of the fitted
+  part, not the left-out regions: remove-before-flight-cover is invalid after
+  healing (neighbouring tangent cylinders 0.006 mm apart, `GAPS=1`), at 0.01
+  as at 0.05 mm; shower-holder and hot-wheels-connector spend 30–60 s in
+  MakerVolume (the budget overruns inside its steps, slice A); object-permanence
+  is invalid after healing. track-straight at 0.01 mm keeps its socket void
+  in the main cell (+4.5 % volume) although every face is there; at 0.05 mm
+  it converts.
+
+Prismatic, the kernel over the files (Ubuntu machine), before (head
+0c0f1cf7: slice A's table and the brief; "baseline" marks the owner's
+2026-10-21 runs where slice A has no figure) and after; faces
+planes/cylinders/cones/spheres/tori, "left out" the unfit regions left out,
+volume against the mesh's:
+
+| file | 0.01 mm before → after | 0.05 mm before → after | 0.1 mm before → after |
+|---|---|---|---|
+| own/drill-block | unfit 3 (0 %) → **93 (77/12/0/0/4), 3 left out, 1.0014** (4.3 s) | 168 → 168 (137/30/0/1/0), 1.0003 (3.2 s) | rebuild → rebuild (6.2 s) |
+| own/track-straight-100mm | unfit 2 (1 %) → unfit 2 (1 %), "Raise the tolerance to 0.05 mm" (2.5 s) | unfit (baseline) → **107 (89/12/3/0/3), 1 left out, 1.0002** (1.5 s) | rebuild (baseline) → rebuild, "… to 0.2 mm" (2.3 s) |
+| own/remove-before-flight-cover | unfit 5 (1 %), 0.064 → same, after a failed rebuild (16 s) | unfit 4 (0 %) → same (18 s) | rebuild (baseline) → rebuild, "… to 0.2 mm" (16 s) |
+| own/shower-holder | unfit 3 (1 %) → budget (66 s) | rebuild (baseline) → budget (30 s) | rebuild (baseline) → rebuild, "… to 0.5 mm" (26 s) |
+| own/object-permanence-base | unfit 7 (1 %) → unfit 7 (1 %), after a failed rebuild (11 s) | unfit 3 (83 %) → same | unfit 2 (83 %) → same |
+| third-party/hot-wheels-connector | unfit 2 (1 %) → unfit 2 (1 %), after a failed rebuild (30 s) | trap (baseline) → budget (30 s) | trap (baseline) → budget (51 s) |
+| third-party/vented-funnel | unfit 1 (2 %) → same (2.08 %, over the allowance) | – → budget (30 s) | – → budget (30 s) |
+| own/mirna-doodle-1 | unfit 11 (6 %) → same | unfit 6 (5 %) → same, "… to 0.475 mm" | unfit 2 (3 %) → same, "… to 0.191 mm" |
+| own/puzzle-insert-circle | unfit 1 (6 %) → same | trap (baseline) → budget (31 s) | rebuild (baseline) → budget (30 s) |
+| own/spool-screw-v4.1 | unfit 2 (6 %) → same | cap 1,098 → same | cap 1,181 → same |
+| own/trashcan-spacer | unfit 1 (82 %) → same | rebuild → rebuild (3.9 s) | rebuild → rebuild (16 s) |
+| third-party/micro-sd-keyring-inner | rebuild → rebuild, "… to 0.05 mm" (4.8 s) | 97 → 97 (91/6/0/0/0), 1.0006 | 84 → 84 (78/6/0/0/0), 1.0007 |
+| third-party/wyze-garage-bracket | rebuild → rebuild, "… to 0.05 mm" (13 s) | 84 → 84 (55/27/2/0/0), 1.0002 (8.8 s) | 88 → 88 (58/28/2/0/0), 0.9987 (4.6 s) |
+
+Over the 41 files (36 import as closed bodies), prismatic converts 10 at 0.01
+mm (9 before: drill-block is new), 12 at 0.05 (11: track-straight) and 9 at
+0.1 (9), each in one process per tolerance with no trap. The nine files that
+converted at 0.01 mm give the same faces, validity and volumes. A refusal
+that retries costs up to the rest of the 30 s budget (remove-before-flight
+16 s, wyze 13 s) where it was refused in under a second or two before.
 
 ### 6. Where it is
 
