@@ -517,7 +517,6 @@ int main(int argc, char** argv) {
   ExtrudoFacade f;
   // BUDGET=ms lowers the rebuild's budget (PRISMATIC_REBUILD_BUDGET_MS), to see it hit.
   if (getenv("BUDGET") && *getenv("BUDGET")) f.prismaticBudgetMs_ = std::atof(getenv("BUDGET"));
-  if (getenv("DEBUGFLAGS") && *getenv("DEBUGFLAGS")) f.debugFlags_ = std::atoi(getenv("DEBUGFLAGS"));
   const std::string only = argc > 1 ? argv[1] : "";
   const double envTol = getenv("TOL") && *getenv("TOL") ? std::atof(getenv("TOL")) : 0.01;
   if (only == "f") {

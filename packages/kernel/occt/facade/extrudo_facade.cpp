@@ -5781,8 +5781,6 @@ private:
   static constexpr double PRISMATIC_UNFIT_ALLOWED = 0.02;
   /** The budget the next rebuild gets: PRISMATIC_REBUILD_BUDGET_MS, lowered only by the spike harness. */
   double prismaticBudgetMs_ = PRISMATIC_REBUILD_BUDGET_MS;
-  /** Spike-harness experiments only (DEBUGFLAGS): 1 no gap growth, 2 no same-surface merge. */
-  int debugFlags_ = 0;
   /** The last rebuild's oversized faces, one per surface, when the spike harness asks (GAPS=1). */
   bool keepRebuildFaces_ = false;
   std::vector<TopoDS_Shape> rebuildFaces_;
@@ -6197,7 +6195,7 @@ private:
     for (int t : triangles) along += areas[t] * normals[t].Dot(axis);
     along /= areaSum;
     const double alpha0 = std::asin(std::min(1.0, std::fabs(along)));
-    if (!(alpha0 > (debugFlags_ & 8 ? 0.0003 : M_PI / 180)) || !(alpha0 < 89 * M_PI / 180)) return fit;
+    if (!(alpha0 > M_PI / 180) || !(alpha0 < 89 * M_PI / 180)) return fit;
     // The apex: the point every tangent plane passes through, least squares.
     double matrix[3][3] = {{0, 0, 0}, {0, 0, 0}, {0, 0, 0}}, rhs[3] = {0, 0, 0};
     for (int t : triangles) {
@@ -6953,6 +6951,12 @@ private:
         s.kind = -1;
         return s;
       };
+      // A region much longer than wide: its area under a tenth of its node box's diagonal squared.
+      auto thin = [&](int r) {
+        Bnd_Box box;
+        for (int n : regions[r].nodes) box.Add(gp_Pnt(meshNode(n)));
+        return !box.IsVoid() && regions[r].area < 0.1 * box.SquareExtent();
+      };
       // Splits a smooth component that fits nothing whole into primitives by
       // seeded region growing (ADR-0097 §3, slice 4a2). The seed is the
       // largest region left. A large one (4 x the component's median region
@@ -6968,12 +6972,6 @@ private:
       // when such a piece has 4 regions or more, the split explains too
       // little (a freeform surface fits small primitives here and there) and
       // the component stays whole and unfit.
-      // A region much longer than wide: its area under a tenth of its node box's diagonal squared.
-      auto thin = [&](int r) {
-        Bnd_Box box;
-        for (int n : regions[r].nodes) box.Add(gp_Pnt(meshNode(n)));
-        return !box.IsVoid() && regions[r].area < 0.1 * box.SquareExtent();
-      };
       std::vector<int> pieceOf(regionCount, -2), frontierMark(regionCount, -1);
       int frontierRound = 0;
       constexpr int minimumNodes = 16;
@@ -7150,31 +7148,6 @@ private:
           if (pieceOf[r] == unassigned) left.push_back(r);
           // Outside the component, pieceOf means nothing (the next split's own).
           pieceOf[r] = -2;
-        }
-        if (debugFlags_ & 4) {
-          std::printf("split of %zu regions (area %g): %zu pieces\n", members.size(), whole.area, pieces.size());
-          for (const MeshSurface& p : pieces) std::printf("  piece kind %d regions %zu area %g r %g\n", p.kind, p.regions.size(), p.area, p.radius);
-          for (const std::vector<int>& component : components(left)) {
-            double a = 0;
-            for (int r : component) a += regions[r].area;
-            Bnd_Box box;
-            for (int r : component)
-              for (int n : regions[r].nodes) box.Add(gp_Pnt(meshNode(n)));
-            double x0, y0, z0, x1, y1, z1;
-            box.Get(x0, y0, z0, x1, y1, z1);
-            const Gathered g = gather(component);
-            std::printf("  left %zu regions area %g (first %d) box %g,%g,%g .. %g,%g,%g fits", component.size(), a, component[0], x0, y0, z0,
-                        x1, y1, z1);
-            for (int kind = 0; kind <= 4; ++kind) {
-              const MeshFit fit = fitKind(kind, g);
-              std::printf(" %g(r %g)", fit.ok ? fit.deviation : -1.0, fit.radius);
-            }
-            std::printf("\n");
-            if (component.size() >= 4)
-              for (int r : component)
-                std::printf("    region %d area %g tris %zu normal %g,%g,%g\n", r, regions[r].area, regions[r].triangles.size(),
-                            regions[r].normal.X(), regions[r].normal.Y(), regions[r].normal.Z());
-          }
         }
         for (const std::vector<int>& component : components(left)) {
           if (component.size() >= 4) return std::vector<MeshSurface>(1, whole);
@@ -7511,7 +7484,7 @@ private:
       for (int b : order) {
         MeshSurface& small = surfaces[b];
         for (int a : roots) {
-          if (small.kind < 0 || (debugFlags_ & 2)) break;
+          if (small.kind < 0) break;
           MeshSurface& large = surfaces[a];
           if (large.kind != small.kind) continue;
           const double along = large.direction.XYZ().Dot(small.direction.XYZ());
@@ -7864,7 +7837,7 @@ private:
     for (int i = 0; i < surfaceCount; ++i) {
       double sag = surfaces[i].sag;
       for (int other : adjacent[i]) sag = std::max(sag, surfaces[other].sag);
-      margins[i] = 10 * tolerance + 2 * sag + ((debugFlags_ & 1) ? 0 : gaps[i]);
+      margins[i] = 10 * tolerance + 2 * sag + gaps[i];
     }
     // An angle's range over a surface's nodes (radians in [0, 2π)): from the
     // end of the largest gap between them round to its start, grown by
