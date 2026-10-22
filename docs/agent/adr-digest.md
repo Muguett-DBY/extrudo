@@ -2807,7 +2807,8 @@ and segmentation + plane/cylinder/cone/sphere/torus fits + `BOPAlgo_MakerVolume`
 verification for `prismatic`. **Rules:** never fall back from one method to
 the other (the user's choice runs or is refused); refuse faceted above
 `FACETED_FACE_CAP` (2,000 faces after unify, counted before the heavy fix)
-and prismatic above `PRISMATIC_SURFACE_CAP` (500) or with any unfit region,
+and prismatic above `PRISMATIC_SURFACE_CAP` (500) or with unfit regions over
+2 % of the surface (slice C),
 each message naming the count and the way out (the other method, a higher
 tolerance, the slicer); `MAX_MESH_TRIANGLES` stays the input cap; the report
 (`kind: 'meshToSolid'`: faces, planes, cylinders, cones, spheres, tori, unfit
@@ -2899,8 +2900,28 @@ fixtures in `fixtures/imports/mesh-to-solid/` (own designs only; downloaded
 models never go into the repository) and, with `STL_DIR=<folder>` (`TOL`,
 `FILE`, `MESH_OUT`), every STL of a folder, where only a trap fails;
 `pnpm check` doesn't need `STL_DIR`. Harness: `f`/`F` cases, `SAN=1`
-(AddressSanitizer), `TIMES=1` (spike README). The feature lives
-on branch `claude/stl-import-native-solid-e60e8c` until one pull request.
+(AddressSanitizer), `TIMES=1` (spike README). **Hardening slice C**
+(2026-10-22 amendment): unfit regions covering at most
+`PRISMATIC_UNFIT_ALLOWED` (0.02) of the surface area in total **don't
+refuse**: they stay kind −1 surfaces with no face (skip them in every
+rebuild loop: merge, snap check, faces, samples; their nodes are skipped by
+the node check, the volume check keeps its allowance), each neighbour's face
+grows by the gap the region leaves (per node, the distance to the second
+nearest neighbour's nearest node), and the report's `unfit` keeps what was
+left out; when that rebuild fails the user gets the **unfit** refusal (with a
+tolerance that converted, if the retry found one), over 2 % it refuses as
+before. A failed rebuild (not past the budget) retries segmentation and
+rebuild at 2 T and 5 T within the same `MeshDeadline`; the first that
+converts is named ("couldn't rebuild … within T mm. Raise the tolerance to X
+mm, or use Faceted."), its result released, the report and stage times kept
+from T. Unify that breaks a valid cells' solid is undone (the split faces
+stay) when healing fails. Segmentation: a large seed in `splitComponent` is
+a plane only when it isn't thin (area under a tenth of its node box's
+diagonal squared: one facet strip of a long fillet); a sphere or torus fit
+whose nodes all lie within the tolerance of two planes square to the facet
+normals' least-varying direction (one or two rings) is no fit. The feature
+lives on branch `claude/stl-import-native-solid-e60e8c` until one pull
+request.
 
 **Faceted hardening** (2026-10-22 amendment, `facetedFromMesh` in the
 facade): a private `facetedMeshCounts()` runs **before** any build, over the
