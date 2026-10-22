@@ -6922,12 +6922,6 @@ private:
         s.kind = -1;
         return s;
       };
-      // A region much longer than wide: its area under a tenth of its node box's diagonal squared.
-      auto thin = [&](int r) {
-        Bnd_Box box;
-        for (int n : regions[r].nodes) box.Add(gp_Pnt(meshNode(n)));
-        return !box.IsVoid() && regions[r].area < 0.1 * box.SquareExtent();
-      };
       // Splits a smooth component that fits nothing whole into primitives by
       // seeded region growing (ADR-0097 §3, slice 4a2). The seed is the
       // largest region left. A large one (4 x the component's median region
@@ -6960,11 +6954,8 @@ private:
           MeshSurface s;
           s.kind = -1;
           std::vector<int> patch(1, seed);
-          // A large seed is a plane (the flat face between fillets) and grows
-          // as one; a thin one (its area under a tenth of its extent squared:
-          // one facet strip of a long fillet, slice C's trashcan-spacer) is a
-          // patch's seed like any other.
-          const bool large = regions[seed].area >= 4 * median && !thin(seed);
+          // A large seed is a plane (the flat face between fillets) and grows as one.
+          const bool large = regions[seed].area >= 4 * median;
           if (large) s = planeOf(seed);
           // Else the seed patch, and its node count after each region.
           std::vector<int> nodesAfter;

@@ -2915,11 +2915,8 @@ rebuild at 2 T and 5 T within the same `MeshDeadline`; the first that
 converts is named ("couldn't rebuild … within T mm. Raise the tolerance to X
 mm, or use Faceted."), its result released, the report and stage times kept
 from T. Unify that breaks a valid cells' solid is undone (the split faces
-stay) when healing fails. Segmentation: a large seed in `splitComponent` is
-a plane only when it isn't thin (area under a tenth of its node box's
-diagonal squared: one facet strip of a long fillet); a sphere or torus fit
-whose nodes all lie within the tolerance of two planes square to the facet
-normals' least-varying direction (one or two rings) is no fit. The feature
+stay) when healing fails. The segmentation is unchanged (two rules tried and
+rejected are in the amendment). The feature
 lives on branch `claude/stl-import-native-solid-e60e8c` until one pull
 request.
 
