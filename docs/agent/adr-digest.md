@@ -2907,7 +2907,11 @@ facade): a private `facetedMeshCounts()` runs **before** any build, over the
 triangle buffers, estimating the unified face count (edge-adjacent triangles
 whose unit normals agree within 1e-3 rad and planes within 1e-3 mm are one
 face, with a union-find; a zero-area triangle joins a neighbour). Over
-`FACETED_FACE_CAP` (2,000) it refuses at once with "Faceted would give
+`FACETED_FACE_CAP * FACETED_ESTIMATE_MARGIN` (`FACETED_ESTIMATE_MARGIN` = 1.5;
+2026-10-22 slice D — the estimate over-counts by up to about 40 % on real
+meshes, so the pre-count refuses only this far over the cap, and between 2,000
+and 3,000 estimated faces the build runs, the exact count deciding) it refuses
+at once with "Faceted would give
 **about** N faces; …" (the "about" marks the estimate; the after-unify count
 stays a backstop and its message has no "about"). The faces are grouped by
 shared edge and **each connected shell becomes its own solid** (one shell

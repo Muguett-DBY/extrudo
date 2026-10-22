@@ -774,3 +774,15 @@ in the faceted `describe` of `packages/kernel/src/mesh-to-solid.test.ts`: a
 two-cube mesh converts into a compound of two solids; a mesh whose two cubes
 touch at a single vertex is refused with "vertex joins shells that only touch
 at a point"; the cap-refusal test asserts the refusal takes under 1 s.
+
+### Amendment, 2026-10-22: hardening slice D
+
+The pre-count refused whenever the estimate was over `FACETED_FACE_CAP`, but
+the estimate over-counts by up to about 40 % on real meshes (387 estimated
+against 275 exact on `own/trashcan-repair-foot.stl`), so a mesh whose exact
+count is just under 2,000 could be refused without ever building. The
+pre-count now refuses only past `FACETED_FACE_CAP * FACETED_ESTIMATE_MARGIN`
+(`FACETED_ESTIMATE_MARGIN` = 1.5); between the cap and 3,000 estimated faces
+the build runs and the exact count decides, as before slice B. For the user:
+refusals of meshes with 2,000–3,000 faces take the build's time again
+(2–4 s); estimates over 3,000 are still refused at once.

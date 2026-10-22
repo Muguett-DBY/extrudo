@@ -5514,6 +5514,8 @@ private:
   std::vector<int32_t> meshRegionKinds_;
   /** Faceted refuses a result with more faces than this (ADR-0097 §3). */
   static constexpr int FACETED_FACE_CAP = 2000;
+  /** The pre-count refuses only this far over the cap: the estimate over-counts by up to about 40 % on real meshes (ADR-0097, 2026-10-22 slice D). */
+  static constexpr double FACETED_ESTIMATE_MARGIN = 1.5;
 
   /**
    * What faceted would produce, from the triangle buffers alone (ADR-0097 §3,
@@ -5651,7 +5653,11 @@ private:
       if (!facetedMeshCounts(estimate, nonManifoldEdges, openEdges, nonManifoldVertices))
         return fail("Mesh to Solid failed: the mesh refers to a node it doesn't have.");
       if (debug()) std::fprintf(stderr, "[faceted] estimate %d faces from %d triangles\n", estimate, triangles);
-      if (estimate > FACETED_FACE_CAP) {
+      // The estimate over-counts by up to about 40 % on real meshes
+      // (ADR-0097, 2026-10-22 slice D), so it refuses only past the cap times
+      // the margin; between the cap and that the build runs and the exact
+      // count below decides.
+      if (estimate > FACETED_FACE_CAP * FACETED_ESTIMATE_MARGIN) {
         const std::string message = "Faceted would give about " + std::to_string(estimate) +
                                     " faces; Extrudo converts up to 2,000. Use Prismatic, or simplify the mesh in your slicer.";
         return fail(message.c_str());
