@@ -8,14 +8,26 @@ if [ "${1:-}" = prismatic ]; then
   IMAGE="${OCCT_IMAGE:-ghcr.io/taucad/opencascade.js:3.1.0-single-threaded}"
   mkdir -p "$S/build"
   # The facade with its private members public, so the harness can look inside.
-  sed 's/^ *private:/ public:/' "$R/packages/kernel/occt/facade/extrudo_facade.cpp" > "$S/build/facade_public.cpp"
-  docker run --rm --user 0 -e FACES="${FACES:-}" -e PIECES="${PIECES:-}" -v "$S:/w" -v "$R/fixtures:/repo/fixtures:ro" -w /w --entrypoint sh "$IMAGE" -c '
+  sed 's/^ *private:/ public:/' "${FACADE:-$R/packages/kernel/occt/facade/extrudo_facade.cpp}" > "$S/build/facade_public.cpp"
+  # STL_DIR: a folder mounted read-only at /stl for cases f (FILE) and F (all of it), at TOL.
+  STL=()
+  [ -n "${STL_DIR:-}" ] && STL=(-v "$STL_DIR:/stl:ro")
+  # SAN=1: AddressSanitizer; SAN=ub: UndefinedBehaviorSanitizer; SAN=heap: SAFE_HEAP + assertions.
+  FLAGS="-O2 -sALLOW_MEMORY_GROWTH -sMAXIMUM_MEMORY=4GB"
+  OUT=prismatic
+  case "${SAN:-}" in
+    1) FLAGS="-O1 -g2 -fsanitize=address -sINITIAL_MEMORY=2GB -sALLOW_MEMORY_GROWTH -sMAXIMUM_MEMORY=4GB"; OUT=prismatic-asan ;;
+    ub) FLAGS="-O1 -g2 -fsanitize=undefined -sALLOW_MEMORY_GROWTH -sMAXIMUM_MEMORY=4GB"; OUT=prismatic-ubsan ;;
+    heap) FLAGS="-O1 -g2 -sSAFE_HEAP=1 -sASSERTIONS=2 -DEXTRUDO_FACADE_CHECKS -sALLOW_MEMORY_GROWTH -sMAXIMUM_MEMORY=4GB"; OUT=prismatic-heap ;;
+  esac
+  docker run --rm --user 0 -e FACES="${FACES:-}" -e PIECES="${PIECES:-}" -e TIMES="${TIMES:-}" -e SEGMENT="${SEGMENT:-}" -e BUDGET="${BUDGET:-}" -e FILE="${FILE:-}" -e TOL="${TOL:-}" \
+    -e NOBUILD="${NOBUILD:-}" -e FLAGS="$FLAGS" -e OUT="$OUT" -v "$S:/w" -v "$R/fixtures:/repo/fixtures:ro" "${STL[@]}" -w /w --entrypoint sh "$IMAGE" -c '
     set -e
     LINK=$(ls /opencascade.js/build/occt-libraries/*.a | tr "\n" " ")
-    em++ -std=c++17 -O2 -fwasm-exceptions -I/opencascade.js/build/occt-includes prismatic.cpp \
-      -sALLOW_MEMORY_GROWTH -sMAXIMUM_MEMORY=4GB -sENVIRONMENT=node -sERROR_ON_UNDEFINED_SYMBOLS=0 -sSTACK_SIZE=8MB -sNODERAWFS=1 \
-      -Wl,--start-group $LINK -Wl,--end-group -o build/prismatic.cjs
-    node build/prismatic.cjs '"${2:-}"
+    [ -n "$NOBUILD" ] || em++ -std=c++17 $FLAGS -fwasm-exceptions -I/opencascade.js/build/occt-includes prismatic.cpp \
+      -sENVIRONMENT=node -sERROR_ON_UNDEFINED_SYMBOLS=0 -sSTACK_SIZE=8MB -sNODERAWFS=1 \
+      -Wl,--start-group $LINK -Wl,--end-group -o build/$OUT.cjs
+    node build/$OUT.cjs '"${2:-}"
   exit
 fi
 IMAGE="${OCCT_IMAGE:-ghcr.io/taucad/opencascade.js:3.0.2-single-threaded}"

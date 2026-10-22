@@ -132,6 +132,7 @@
 #include <Message.hxx>
 #include <Message_Messenger.hxx>
 #include <Message_PrinterOStream.hxx>
+#include <Message_ProgressIndicator.hxx>
 #include <Geom_BSplineCurve.hxx>
 #include <Geom_BSplineSurface.hxx>
 #include <Geom_Circle.hxx>
@@ -225,6 +226,7 @@
 #include <cstdlib>
 #include <exception>
 #include <map>
+#include <chrono>
 #include <memory>
 #include <array>
 #include <sstream>
@@ -5581,6 +5583,30 @@ private:
 
   /** Prismatic refuses more recognised surfaces than this (ADR-0097 §3). */
   static constexpr int PRISMATIC_SURFACE_CAP = 500;
+  /** Prismatic's rebuild (everything after segmentMesh) gives up after this much wall-clock time (ADR-0097's 2026-10-22 amendment). */
+  static constexpr double PRISMATIC_REBUILD_BUDGET_MS = 30000;
+  /** The budget the next rebuild gets: PRISMATIC_REBUILD_BUDGET_MS, lowered only by the spike harness. */
+  double prismaticBudgetMs_ = PRISMATIC_REBUILD_BUDGET_MS;
+  /** The last rebuild's stage timings in ms (the spike harness prints them under TIMES=1). */
+  std::vector<std::pair<std::string, double>> rebuildTimes_;
+
+  static double nowMs() {
+    return std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now().time_since_epoch()).count();
+  }
+
+  /** A progress indicator that breaks the OCCT algorithm it is passed to once a deadline is past. */
+  class MeshDeadline : public Message_ProgressIndicator {
+   public:
+    explicit MeshDeadline(double deadline) : deadline_(deadline) {}
+    bool expired() const { return nowMs() > deadline_; }
+
+   protected:
+    bool UserBreak() override { return expired(); }
+    void Show(const Message_ProgressScope&, const bool) override {}
+
+   private:
+    double deadline_;
+  };
 
   /**
    * One surface prismatic recognised (ADR-0097 §3, slices 4a1 and 4a2): a
@@ -6848,12 +6874,19 @@ private:
               --sizes[own];
             }
           }
-          for (const auto& [r, to] : moves) pieceOf[r] = to;
+          // A piece that lost or gained a region is refitted (one can do both
+          // and keep its size: its old region list would then miss a region
+          // and name one of another piece's, ADR-0097's 2026-10-22 amendment).
+          std::vector<char> moved(pieces.size(), 0);
+          for (const auto& [r, to] : moves) {
+            moved[pieceOf[r]] = moved[to] = 1;
+            pieceOf[r] = to;
+          }
           std::vector<std::vector<int>> membersOf(pieces.size());
           for (int r : members)
             if (pieceOf[r] >= 0) membersOf[pieceOf[r]].push_back(r);
           for (size_t p = 0; p < pieces.size(); ++p) {
-            if (membersOf[p].size() == pieces[p].regions.size()) continue;
+            if (!moved[p]) continue;
             MeshSurface refit = fitOfKind(pieces[p].kind, membersOf[p]);
             if (refit.kind >= 0) {
               pieces[p] = std::move(refit);
@@ -7085,12 +7118,19 @@ private:
                                     ". Use Faceted, or simplify the mesh in your slicer.";
         return fail(message.c_str());
       }
-      // An exception in the booleans is a failed rebuild like any other.
+      // An exception in the booleans is a failed rebuild like any other;
+      // past the budget, the rebuild gives up (a refusal, never a trap).
+      static const char* const gaveUp =
+          "Mesh to Solid gave up after 30 s: this mesh has too many surfaces to rebuild exactly. Use Faceted, or "
+          "simplify the mesh in your slicer.";
+      Handle(MeshDeadline) deadline = new MeshDeadline(nowMs() + prismaticBudgetMs_);
       try {
-        return rebuildPrismatic(tolerance, seg.surfaces, seg.regions, seg.regionOf, seg.regionNeighbours, seg.normals,
-                                seg.areas, seg.meshArea, seg.meshVolume, rebuildFailed);
+        const int handle = rebuildPrismatic(tolerance, seg.surfaces, seg.regions, seg.regionOf, seg.regionNeighbours,
+                                            seg.normals, seg.areas, seg.meshArea, seg.meshVolume, rebuildFailed, deadline);
+        if (!handle && deadline->expired()) return fail(gaveUp);
+        return handle;
       } catch (...) {
-        return fail(rebuildFailed.c_str());
+        return fail(deadline->expired() ? gaveUp : rebuildFailed.c_str());
       }
     } catch (...) {
       return failFromException("Mesh to Solid failed");
@@ -7109,11 +7149,27 @@ private:
   int rebuildPrismatic(double tolerance, std::vector<MeshSurface>& surfaces, const std::vector<MeshRegion>& regions,
                        const std::vector<int>& regionOf, const std::vector<std::vector<int>>& regionNeighbours,
                        const std::vector<gp_XYZ>& normals, const std::vector<double>& areas, double meshArea,
-                       double meshVolume, const std::string& rebuildFailed) {
+                       double meshVolume, const std::string& rebuildFailed, const Handle(MeshDeadline)& deadline) {
+    rebuildTimes_.clear();
+    double stageStart = nowMs();
+    auto stage = [&](const char* name) {
+      const double t = nowMs();
+      rebuildTimes_.push_back({name, t - stageStart});
+      stageStart = t;
+    };
+    // Past the deadline, the rebuild stops between its own loops too (prismaticFromMesh words the refusal).
+    struct OutOfTime {};
+    auto check = [&] {
+      if (deadline->expired()) throw OutOfTime();
+    };
     const int surfaceCount = static_cast<int>(surfaces.size());
     std::vector<int> surfaceOf(regions.size(), -1);
     for (int s = 0; s < surfaceCount; ++s)
       for (int r : surfaces[s].regions) surfaceOf[r] = s;
+    // Every region is on exactly one surface (segmentMesh's promise); one on
+    // none would index adjacent[-1] (the trap of ADR-0097's 2026-10-22 amendment).
+    for (int s : surfaceOf)
+      if (s < 0) return fail(rebuildFailed.c_str());
     std::vector<std::vector<int>> adjacent(surfaceCount);
     for (size_t r = 0; r < regions.size(); ++r) {
       for (int other : regionNeighbours[r]) {
@@ -7435,6 +7491,8 @@ private:
                 .Face());
       }
     }
+    stage("snaps and faces");
+    check();
     BOPAlgo_MakerVolume maker;
     maker.SetArguments(faces);
     maker.SetIntersect(true);
@@ -7442,7 +7500,9 @@ private:
     // cylinder's end inside a plate) would stay in its cell as an internal face.
     maker.SetAvoidInternalShapes(true);
     maker.SetRunParallel(false);
-    maker.Perform();
+    maker.Perform(deadline->Start());
+    stage("MakerVolume");
+    check();
     if (maker.HasErrors()) return fail(rebuildFailed.c_str());
     std::vector<TopoDS_Shape> cells;
     for (TopExp_Explorer e(maker.Shape(), TopAbs_SOLID); e.More(); e.Next()) cells.push_back(e.Current());
@@ -7478,6 +7538,7 @@ private:
     size_t last[2] = {0, 0};
     for (int t : samples) {
       if (areas[t] <= 0) continue;
+      check();
       const MeshSurface& s = surfaces[surfaceOf[regionOf[t]]];
       const double step = 3 * tolerance + 2 * s.sag;
       gp_XYZ centroid(0, 0, 0);
@@ -7510,6 +7571,8 @@ private:
       if (keep) kept.push_back(cells[i]);
     }
     classifiers.clear();
+    stage("cells classified");
+    check();
     if (kept.empty()) return fail(rebuildFailed.c_str());
 
     // Merge the kept cells: a face two of them share is inside the body.
@@ -7539,20 +7602,25 @@ private:
     TopoDS_Shape solid = makeSolid.Solid();
     if (!BRepCheck_Analyzer(solid).IsValid()) {
       ShapeFix_Solid fixSolid(TopoDS::Solid(solid));
-      fixSolid.Perform();
+      fixSolid.Perform(deadline->Start());
       solid = fixSolid.Solid();
     }
+    check();
     if (volumeOf(solid) < 0) solid.Reverse();
     // The cells split surfaces where other faces crossed them: one face per surface again.
     ShapeUpgrade_UnifySameDomain unify(solid, true, true, false);
     unify.Build();
     TopoDS_Shape result = unify.Shape();
+    stage("merged and unified");
+    check();
     if (!BRepCheck_Analyzer(result).IsValid()) {
       ShapeFix_Shape healer(result);
-      healer.Perform();
+      healer.Perform(deadline->Start());
       result = healer.Shape();
+      check();
       if (!BRepCheck_Analyzer(result).IsValid()) return fail(rebuildFailed.c_str());
     }
+    stage("validity");
 
     // 4. Verify: the volume within the mesh's chord error (or 1 %), and
     // every sampled mesh node within the tolerance of the solid's surface.
@@ -7606,6 +7674,7 @@ private:
     const int nodeStride = std::max(1, nodeCount / 2000);
     const double reach = tolerance * 1.01 + 1e-7;
     for (int n = 0; n < nodeCount; n += nodeStride) {
+      check();
       const gp_Pnt p(meshNode(n));
       bool near = false;
       for (const MeshCheckedFace& c : checked) {
@@ -7639,10 +7708,12 @@ private:
         }
       }
       if (!near) {
-        BRepExtrema_DistShapeShape distance(BRepBuilderAPI_MakeVertex(p).Vertex(), result);
+        BRepExtrema_DistShapeShape distance(BRepBuilderAPI_MakeVertex(p).Vertex(), result, Extrema_ExtFlag_MINMAX,
+                                            Extrema_ExtAlgo_Grad, deadline->Start());
         if (!distance.IsDone() || distance.Value() > reach) return fail(rebuildFailed.c_str());
       }
     }
+    stage("checked against the mesh");
     meshReport_[0] = static_cast<double>(resultFaces.Extent());
     meshReport_[1] = static_cast<double>(resultPlanes);
     meshReport_[2] = static_cast<double>(resultCylinders);
