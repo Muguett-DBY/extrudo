@@ -231,6 +231,27 @@ describe('Kernel.meshToSolid, faceted', { timeout: 300_000 }, () => {
     }
   });
 
+  // The 72-segment sphere's faceted result has 2,592 faces (measured); its
+  // estimate matches exactly, so the pre-count (2,592 ≤ 1.5 × 2,000) lets the
+  // build run and the exact count refuses: the message has no "about".
+  it('refuses a 2,592-face sphere between the cap and the margin, by the exact count', () => {
+    const mesh = meshOf(manifold.Manifold.sphere(10, 72));
+    try {
+      let error: unknown;
+      try {
+        const { shape } = kernel.meshToSolid(mesh, { method: 'faceted', tolerance: 0.01 });
+        kernel.release(shape);
+      } catch (e) {
+        error = e;
+      }
+      expect(error).toBeInstanceOf(KernelError);
+      expect((error as Error).message).toMatch(/^Faceted would give \d+ faces;/);
+      expect((error as Error).message).toContain('Extrudo converts up to 2,000');
+    } finally {
+      kernel.release(mesh);
+    }
+  });
+
   it('refuses a solid body', () => {
     const box = kernel.box([10, 10, 10]);
     try {
