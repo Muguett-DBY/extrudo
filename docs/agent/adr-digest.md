@@ -2817,3 +2817,18 @@ Ctrl+Space opens the list on an empty word. The list is a Radix Popover (portall
 `aria-selected`, `onEscapeKeyDown` prevented, no auto focus); the field keeps the
 `textbox` role with `aria-autocomplete`, `aria-controls`, `aria-activedescendant`, and
 `data-keep-escape` while the list is open.
+
+ADR-0099 (2026-10-23, #78, P4-13) adds **Remove Faces** (`removeFaces`,
+`packages/core/src/remove-faces.ts`, evaluator `packages/kernel/src/features/remove-faces.ts`,
+facade `removeFaces` with `BRepAlgoAPI_Defeaturing`). Rules: **all or nothing** (any
+"unable to remove" warning refuses the step; never a partial removal); the result is one valid
+solid that differs from the input; **no `UnifySameDomain`** after it (it renames faces);
+removed faces' names are gone (a later reference is a `LostReferenceError`), **extended
+neighbours keep their names** (history `modified`); a pick of every face is refused before OCCT
+runs. Picks (`removeFacesPick`, TypeScript over the shape description, `threadFace` and
+`coneFace`; no facade query): a hole wall takes the coaxial faces within its largest radius
+(bottom, counterbore, countersink, drill point), a round takes its smooth chain through
+non-planar faces only, anything else is itself; the feature stores the faces it got. Delete on
+a selection of only solid-body faces makes the feature in one step (`Remove Faces N`). The
+refusal names how many faces to add (unpicked faces of the failed faces' chains or holes).
+`.f3d` face deletions map to it (ADR-0083's amendment).
