@@ -1074,7 +1074,11 @@ end to end, faster than in established desktop CAD.
   bracket fixtures, e2e for the dialog and a fillet on the result.
   *Slices:* (1) facade faceted + kernel; (2) feature, dialog, API, docs,
   e2e; (3) facade prismatic; (4) preview, more surfaces, clip, guide. Done
-  2026-10-21 on the feature branch (slices 1–4c, 4a1, 4a2 and the clip).
+  2026-10-21 on the feature branch (slices 1–4c, 4a1, 4a2 and the clip);
+  hardening slices A–D 2026-10-22; slice D1 (2026-10-23, ADR-0097's
+  amendment): the hybrid rebuild, prismatic's second stage, keeps what fits
+  nothing as facets (≤ 4,000) on shared mesh edges. Next: D2 (polyline edges
+  as lines and arcs, fillet strips).
 
 ## Phase 5 — Programmatic design (→ v0.6)
 
