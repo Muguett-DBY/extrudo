@@ -91,7 +91,7 @@ export const TOOL_SCHEMAS = {
   },
   get_feature: {
     description:
-      "One feature: its type, name, status and inputs as the API's plain values (what add_feature and edit_feature take); a sketch lists its plane, frame (world mm), profiles, regions (each profile's area, box, centroid and loops, as add_sketch answers them) and curves with their reference { kind: 'sketchEntity', id: '<sketch id>/<curve id>' } (a revolve's axis takes one; an extrude's side face of curve <c> is side:<c>); a Mesh to Solid gives its meshToSolid report (faces, planes, cylinders, cones, spheres, tori, unfit { regions, triangles, fraction }, suggestedTolerance?).",
+      "One feature: its type, name, status and inputs as the API's plain values (what add_feature and edit_feature take); a sketch lists its plane, frame (world mm), profiles, regions (each profile's area, box, centroid and loops, as add_sketch answers them) and curves with their reference { kind: 'sketchEntity', id: '<sketch id>/<curve id>' } (a revolve's axis takes one; an extrude's side face of curve <c> is side:<c>); a Mesh to Solid gives its meshToSolid report (faces, planes, cylinders, cones, spheres, tori, unfit { regions, triangles, fraction }, suggestedTolerance?, rebuild? (exact or hybrid: hybrid keeps what fits nothing as facets), facets).",
     input: z.object({ id: id('The feature id.') }),
   },
   get_bodies: {

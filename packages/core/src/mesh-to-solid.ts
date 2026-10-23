@@ -2,9 +2,9 @@
  * The Mesh to Solid feature (P4-13, FR-IO-10, ADR-0097 §1): turns an
  * imported mesh body into a B-rep solid with real faces, so it fillets,
  * shells and takes sketches like any body. `body` is the mesh body (a solid
- * is refused); `method` says how: `prismatic` recognises planes and
- * cylinders within `tolerance` and rebuilds exact faces, `faceted` keeps
- * every flat facet as a face. `tolerance` is a length in mm and only matters
+ * is refused); `method` says how: `prismatic` recognises planes, cylinders,
+ * cones, spheres and tori within `tolerance` and rebuilds exact faces (what
+ * fits nothing stays as facets), `faceted` keeps every flat facet as a face. `tolerance` is a length in mm and only matters
  * to `prismatic`.
  *
  * The result **replaces the mesh body under its own body ID** (as Combine
@@ -34,7 +34,7 @@ export const MeshToSolidInputsSchema = z.strictObject({
   method: enumInput(MESH_TO_SOLID_METHODS)
     .optional()
     .describe(
-      'prismatic recognises planes and cylinders within the tolerance and rebuilds exact faces; faceted keeps every flat facet as a face. Default prismatic.',
+      'prismatic recognises planes, cylinders, cones, spheres and tori within the tolerance and rebuilds exact faces; what fits nothing stays as facets. faceted keeps every flat facet as a face. Default prismatic.',
     ),
   /** Prismatic only: how far a facet may sit from a fitted surface. Default 0.01 mm. */
   tolerance: exprOf('length')
@@ -81,6 +81,14 @@ export interface MeshToSolidReport {
   unfit: { regions: number; triangles: number; fraction: number };
   /** The tolerance that would have fitted the largest unfit region, when there is one. */
   suggestedTolerance?: number;
+  /**
+   * How prismatic built the solid (ADR-0097, slice D1): `exact` from its
+   * surfaces alone, `hybrid` from the mesh with an exact face per recognised
+   * region and facets for the rest. Absent for faceted and before a solid.
+   */
+  rebuild?: 'exact' | 'hybrid';
+  /** The result's facet faces (a hybrid rebuild's; 0 for faceted and exact). */
+  facets: number;
 }
 
 /** The surface counts of a report or of a region preview. */
@@ -110,11 +118,23 @@ export function meshSurfaceSummary(counts: MeshSurfaceCounts): string {
   return [found.join(', '), `${counts.unfit.regions} unfit`].filter(Boolean).join(' · ');
 }
 
-/** A conversion's report in one line: "6 faces" (faceted), "6 planes, 1 cylinder · 0 unfit" (prismatic). */
+/**
+ * A conversion's report in one line: "6 faces" (faceted), "6 planes,
+ * 1 cylinder · 0 unfit" (prismatic, exact), "12 planes, 4 cylinders · 3 unfit
+ * regions kept as 318 facets" (prismatic, hybrid: ADR-0097 slice D1).
+ */
 export function meshToSolidSummary(report: MeshToSolidReport): string {
-  return report.method === 'faceted'
-    ? count(report.faces, 'face', 'faces')
-    : meshSurfaceSummary(report);
+  if (report.method === 'faceted') return count(report.faces, 'face', 'faces');
+  if (report.rebuild !== 'hybrid') return meshSurfaceSummary(report);
+  const found = SURFACE_KINDS.filter(([key]) => report[key] > 0).map(([key, one, many]) =>
+    count(report[key], one, many),
+  );
+  const facets = count(report.facets, 'facet', 'facets');
+  const rest =
+    report.unfit.regions > 0
+      ? `${count(report.unfit.regions, 'unfit region', 'unfit regions')} kept as ${facets}`
+      : facets;
+  return [found.join(', '), rest].filter(Boolean).join(' · ');
 }
 
 /**

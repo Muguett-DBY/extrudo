@@ -1891,7 +1891,7 @@ export class Kernel {
     const f = this.#facade;
     if (!f.meshRegions(tolerance)) throw new KernelError(f.lastError());
     try {
-      const { faces: _faces, ...counts } = this.#meshReport();
+      const { faces: _faces, rebuild: _rebuild, facets: _facets, ...counts } = this.#meshReport();
       return {
         surfaceOf: this.#copy(Int32Array, f.meshRegionsPtr(), f.meshRegionTriangles()),
         kinds: this.#copy(Int32Array, f.meshRegionKindsPtr(), f.meshRegionCount()),
@@ -1933,7 +1933,7 @@ export class Kernel {
     ).set(gl.triVerts);
   }
 
-  /** The facade's Mesh to Solid report (10 doubles), without the method. */
+  /** The facade's Mesh to Solid report (12 doubles), without the method. */
   #meshReport(): Omit<MeshToSolidReport, 'method'> {
     const f = this.#facade;
     const r = this.#copy(Float64Array, f.meshReportPtr(), f.meshReportSize());
@@ -1948,6 +1948,8 @@ export class Kernel {
       // An area share: the sums' rounding can put a whole mesh a hair over 1.
       unfit: { regions: at(6), triangles: at(7), fraction: Math.min(1, at(8)) },
       ...(at(9) >= 0 ? { suggestedTolerance: at(9) } : {}),
+      ...(at(10) === 0 ? { rebuild: 'exact' as const } : at(10) === 1 ? { rebuild: 'hybrid' as const } : {}),
+      facets: at(11) || 0,
     };
   }
 

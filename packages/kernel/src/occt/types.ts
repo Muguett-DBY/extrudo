@@ -244,6 +244,10 @@ export interface FacadeBinding {
   meshRegionKindsPtr(): number;
   meshRegionCount(): number;
   clearMeshRegions(): void;
+  /** Tests only (ADR-0097 slice D1): the hybrid rebuild's regions and loops; see the facade. */
+  meshLoopsDebug(tolerance: number): number;
+  meshLoopsPtr(): number;
+  meshLoopsSize(): number;
   readStepColors(text: string): number;
   readStepNames(text: string): number;
   clearExport(): void;

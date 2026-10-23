@@ -28,15 +28,20 @@ const METHOD_LABELS: Record<MeshToSolidMethod, string> = {
 const isPrismatic = (v: Pick<DialogValues, 'choices'>) =>
   (v.choices.method ?? 'prismatic') === 'prismatic';
 
-/** The Result line: the region preview while prismatic, else the draft's report. */
+/**
+ * The Result line: the region preview while prismatic, else the draft's
+ * report; a hybrid result's report (it says what stayed facets) once it is in.
+ */
 function summary(
   values: Pick<DialogValues, 'choices'>,
   ctx: DialogContext | undefined,
 ): string | undefined {
   const regions = ctx?.draftRegions;
   const report = ctx?.draftMeshToSolid;
+  const current = report?.method === (values.choices.method ?? 'prismatic');
+  if (current && report?.rebuild === 'hybrid') return meshToSolidSummary(report);
   if (isPrismatic(values) && regions) return meshSurfaceSummary(regions);
-  if (!report || report.method !== (values.choices.method ?? 'prismatic')) return undefined;
+  if (!report || !current) return undefined;
   return meshToSolidSummary(report);
 }
 
@@ -65,7 +70,7 @@ export const meshToSolidDialog = defineFeatureDialog({
       label: 'Method',
       options: MESH_TO_SOLID_METHODS.map((value) => ({ value, label: METHOD_LABELS[value] })),
       default: 'prismatic',
-      hint: 'Prismatic finds planes, cylinders, cones, spheres and tori and rebuilds exact faces. Faceted keeps every flat facet as a face.',
+      hint: 'Prismatic finds planes, cylinders, cones, spheres and tori and rebuilds exact faces; what fits nothing stays as facets. Faceted keeps every flat facet as a face.',
     },
     {
       kind: 'expression',
