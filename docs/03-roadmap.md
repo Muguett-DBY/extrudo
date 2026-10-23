@@ -1077,8 +1077,12 @@ end to end, faster than in established desktop CAD.
   2026-10-21 on the feature branch (slices 1–4c, 4a1, 4a2 and the clip);
   hardening slices A–D 2026-10-22; slice D1 (2026-10-23, ADR-0097's
   amendment): the hybrid rebuild, prismatic's second stage, keeps what fits
-  nothing as facets (≤ 4,000) on shared mesh edges. Next: D2 (polyline edges
-  as lines and arcs, fillet strips).
+  nothing as facets (≤ 4,000) on shared mesh edges; slice D2 (2026-10-23):
+  Auto tolerance, the facet cap at 5,000, cavities in Faceted; slice D3
+  (2026-10-23): the hybrid's boundary chains between two recognised regions
+  collapsed into one line, circle or ellipse edge where the nodes lie on the
+  surfaces' curve. Next: fillet strips, tangent lines where a plane meets a
+  fillet's cylinder.
 
 ## Phase 5 — Programmatic design (→ v0.6)
 
