@@ -2607,7 +2607,8 @@ public:
   /**
    * Turns the staged mesh into a solid (ADR-0097 §3). method 0 = faceted (one
    * planar face per coplanar patch), 1 = prismatic (exact planes, cylinders,
-   * cones, spheres and tori). Frees the input buffers either way. Returns a handle, or 0;
+   * cones, spheres and tori). A tolerance of 0 or less means Auto (slice D2).
+   * Frees the input buffers either way. Returns a handle, or 0;
    * the report (meshReportPtr/Size) is filled on success, and by prismatic
    * on a refusal after segmentation too.
    */
@@ -2642,7 +2643,11 @@ public:
     int ok = 0;
     try {
       MeshSegmentation seg;
-      if (segmentMesh(tolerance, seg)) {
+      double chosen = tolerance;
+      // A tolerance of 0 or less means Auto (ADR-0097, slice D2).
+      const bool segmented =
+          tolerance <= 0 ? meshAutoTolerance(chosen, seg) : segmentMesh(tolerance, seg);
+      if (segmented) {
         meshRegionOf_.assign(seg.regionOf.size(), -1);
         meshRegionKinds_.resize(seg.surfaces.size());
         for (size_t s = 0; s < seg.surfaces.size(); ++s) {
@@ -2715,10 +2720,11 @@ public:
   int meshLoopsSize() const { return static_cast<int>(meshLoops_.size()); }
 
   /**
-   * Mesh to Solid's report, 12 doubles: faces, planes, cylinders, cones,
+   * Mesh to Solid's report, 13 doubles: faces, planes, cylinders, cones,
    * spheres, tori, unfit regions, unfit triangles, unfit fraction, suggested
    * tolerance (-1 = none), rebuild (0 exact, 1 hybrid, -1 none: faceted or
-   * no solid), facets (the hybrid result's facet faces).
+   * no solid), facets (the hybrid result's facet faces), the tolerance used
+   * in mm (always for prismatic, Auto or not; -1 for faceted).
    */
   uintptr_t meshReportPtr() const { return reinterpret_cast<uintptr_t>(meshReport_.data()); }
   int meshReportSize() const { return static_cast<int>(meshReport_.size()); }
@@ -5680,6 +5686,60 @@ private:
     return true;
   }
 
+  /**
+   * Makes one solid per closed shell, with a shell whose faces enclose a
+   * negative volume (below -1e-6 x max(1, |meshVolume|), ADR-0097 slice D1's
+   * rule) as a **cavity**: never a solid of its own, but an inner shell of
+   * the solid that contains one of its nodes. `shells` and `insidePoints`
+   * are parallel (a point on each shell, strictly inside the solid that
+   * holds it); the non-cavity solids are appended to `solids`. The hybrid
+   * and (slice D2) faceted both call this. Returns false with `why` when a
+   * shell won't make a solid ("MakeSolid failed") or a cavity won't go in
+   * ("a cavity that won't go in its solid") or lies in none ("a cavity in no
+   * solid").
+   */
+  bool solidsWithCavities(const std::vector<TopoDS_Shell>& shells,
+                          const std::vector<gp_Pnt>& insidePoints,
+                          double meshVolume,
+                          std::vector<TopoDS_Shape>& solids,
+                          std::string& why) {
+    std::vector<std::pair<TopoDS_Shell, gp_Pnt>> cavities;
+    for (size_t i = 0; i < shells.size(); ++i) {
+      BRepBuilderAPI_MakeSolid makeSolid(shells[i]);
+      if (!makeSolid.IsDone()) {
+        why = "MakeSolid failed";
+        return false;
+      }
+      TopoDS_Shape solid = makeSolid.Solid();
+      // A real void (a sliver's rounding of ±1e-17 mm³ is no cavity).
+      if (volumeOf(solid) < -1e-6 * std::max(1.0, std::fabs(meshVolume))) {
+        cavities.push_back({shells[i], insidePoints[i]});
+        continue;
+      }
+      solids.push_back(solid);
+    }
+    for (const auto& [cavity, inside] : cavities) {
+      bool held = false;
+      for (TopoDS_Shape& solid : solids) {
+        if (BRepClass3d_SolidClassifier(solid, inside, 1e-7).State() != TopAbs_IN) continue;
+        BRepBuilderAPI_MakeSolid hollow(TopoDS::Solid(solid));
+        hollow.Add(cavity);
+        if (!hollow.IsDone()) {
+          why = "a cavity that won't go in its solid";
+          return false;
+        }
+        solid = hollow.Solid();
+        held = true;
+        break;
+      }
+      if (!held) {
+        why = "a cavity in no solid";
+        return false;
+      }
+    }
+    return true;
+  }
+
   /** meshToSolid's faceted method (ADR-0097 §3), over the staged buffers. */
   int facetedFromMesh() {
     static const char* const notClosed =
@@ -5769,16 +5829,43 @@ private:
       BRep_Builder builder;
       std::vector<TopoDS_Shape> pieces;
       int totalFaces = 0;
+      // One solid per shell; a shell whose faces enclose negative volume is a
+      // cavity (ADR-0097, slice D2: D1's rule in the hybrid): an inner shell
+      // of the solid that holds one of its nodes, never a solid of its own.
+      double meshVolume = 0;
+      {
+        const int triangleCount = static_cast<int>(meshTriangles_.size() / 3);
+        for (int t = 0; t < triangleCount; ++t) {
+          const gp_XYZ a = meshNode(meshTriangles_[3 * t]), b = meshNode(meshTriangles_[3 * t + 1]),
+                        c = meshNode(meshTriangles_[3 * t + 2]);
+          meshVolume += a.Dot(b.Crossed(c)) / 6;
+        }
+      }
+      std::vector<TopoDS_Shell> shells;
+      std::vector<gp_Pnt> insidePoints;
       for (auto& [root, faceIdx] : components) {
         TopoDS_Shell shell;
         builder.MakeShell(shell);
         for (int f : faceIdx) builder.Add(shell, allFaces[f]);
         shell.Closed(BRep_Tool::IsClosed(shell));
-        BRepBuilderAPI_MakeSolid makeSolid(shell);
-        if (!makeSolid.IsDone()) return notClosedAt("makeSolid");
-        ShapeFix_Solid fixSolid(makeSolid.Solid());
+        gp_Pnt inside;
+        for (TopExp_Explorer v(shell, TopAbs_VERTEX); v.More(); v.Next()) {
+          inside = BRep_Tool::Pnt(TopoDS::Vertex(v.Current()));
+          break;
+        }
+        shells.push_back(shell);
+        insidePoints.push_back(inside);
+      }
+      std::vector<TopoDS_Shape> solids;
+      std::string cavityWhy;
+      if (!solidsWithCavities(shells, insidePoints, meshVolume, solids, cavityWhy)) {
+        if (cavityWhy == "a cavity in no solid") return refuseReason("a hollow lies in no solid.");
+        return notClosedAt("solids with cavities");
+      }
+      for (TopoDS_Shape& solid : solids) {
+        ShapeFix_Solid fixSolid(TopoDS::Solid(solid));
         fixSolid.Perform();
-        TopoDS_Shape solid = fixSolid.Solid();
+        solid = fixSolid.Solid();
         if (solid.IsNull()) return notClosedAt("null solid");
         if (volumeOf(solid) < 0) solid.Reverse();
         if (!BRepCheck_Analyzer(solid).IsValid()) return notClosedAt("invalid before unify");
@@ -5821,7 +5908,7 @@ private:
       for (int i = 1; i <= faces.Extent(); ++i) {
         if (BRepAdaptor_Surface(TopoDS::Face(faces(i))).GetType() == GeomAbs_Plane) ++planes;
       }
-      meshReport_ = {static_cast<double>(faces.Extent()), static_cast<double>(planes), 0, 0, 0, 0, 0, 0, 0, -1, -1, 0};
+      meshReport_ = {static_cast<double>(faces.Extent()), static_cast<double>(planes), 0, 0, 0, 0, 0, 0, 0, -1, -1, 0, -1};
       return store(result);
     } catch (...) {
       return failFromException("Mesh to Solid failed");
@@ -5834,6 +5921,17 @@ private:
   static constexpr double PRISMATIC_REBUILD_BUDGET_MS = 30000;
   /** Unfit regions covering at most this share of the surface area are left out of the rebuild instead of refusing (slice C). */
   static constexpr double PRISMATIC_UNFIT_ALLOWED = 0.02;
+  /**
+   * Auto's tolerance ladder (ADR-0097, slice D2): a tolerance of 0 or less
+   * means Auto, and the kernel tries these in order, stopping at the first
+   * step whose unfit share is at most PRISMATIC_UNFIT_ALLOWED (the share the
+   * exact rebuild tolerates) and reusing that step's segmentation. When no
+   * step qualifies it takes the step with the smallest share (ties: the
+   * smaller tolerance). A fixed default was the wrong knob: at 0.01 mm many
+   * parts keep hundreds of facets that fit at 0.05 mm, while 0.05 mm makes
+   * other parts worse (ADR-0097's D1 sweep).
+   */
+  static constexpr double MESH_AUTO_LADDER[] = {0.01, 0.02, 0.05, 0.1};
   /** The budget the next rebuild gets: PRISMATIC_REBUILD_BUDGET_MS, lowered only by the spike harness. */
   double prismaticBudgetMs_ = PRISMATIC_REBUILD_BUDGET_MS;
   /** The last rebuild's oversized faces, one per surface, when the spike harness asks (GAPS=1). */
@@ -7339,7 +7437,8 @@ private:
                      unfitFraction,
                      suggested,
                      -1,
-                     0};
+                     0,
+                     tolerance};
       out.meshArea = meshArea;
       out.meshVolume = meshVolume;
       out.planes = planes;
@@ -7352,6 +7451,49 @@ private:
       out.suggested = suggested;
       return 1;
     }
+  }
+
+  /**
+   * Auto's tolerance (ADR-0097, slice D2): segmentMesh at each step of
+   * MESH_AUTO_LADDER in order and stop at the first whose unfit share is at
+   * most PRISMATIC_UNFIT_ALLOWED (the share the exact rebuild tolerates);
+   * that step's tolerance and segmentation are returned and reused, so the
+   * caller doesn't segment again. When no step qualifies, the one with the
+   * smallest unfit share (ties: the smaller tolerance). Fills `out` and
+   * meshReport_ (the chosen step's report, with its tolerance in slot 12).
+   * Each extra step costs a segmentation (~0.3 s on 20,000 triangles);
+   * under TIMES (the spike harness) each step's tolerance, unfit share and
+   * time is printed as "auto <tol>: unfit <share> %". Returns 1, or 0 with
+   * lastError for an empty or inconsistent mesh.
+   */
+  int meshAutoTolerance(double& chosen, MeshSegmentation& out) {
+    bool haveBest = false;
+    double bestShare = 0;
+    std::vector<double> bestReport;
+    for (double step : MESH_AUTO_LADDER) {
+      MeshSegmentation seg;
+      const double start = nowMs();
+      if (!segmentMesh(step, seg)) return 0;
+      const int tenths = static_cast<int>(std::lround(seg.unfitFraction * 1000));
+      rebuildTimes_.push_back(
+          {"auto " + millimetres(step) + ": unfit " + std::to_string(tenths / 10) + "." +
+               std::to_string(tenths % 10) + " %",
+           nowMs() - start});
+      if (seg.unfitFraction <= PRISMATIC_UNFIT_ALLOWED) {
+        chosen = step;
+        out = std::move(seg);
+        return 1;
+      }
+      if (!haveBest || seg.unfitFraction < bestShare) {
+        haveBest = true;
+        bestShare = seg.unfitFraction;
+        chosen = step;
+        out = std::move(seg);
+        bestReport = meshReport_;
+      }
+    }
+    meshReport_ = bestReport;
+    return 1;
   }
 
   /**
@@ -7729,22 +7871,35 @@ private:
     hybridRefusal_.clear();
     hybridExploded_ = 0;
     try {
+      // A tolerance of 0 or less means Auto (ADR-0097, slice D2): the ladder
+      // picks one from the mesh and its segmentation is reused.
+      const bool autoTolerance = !(tolerance > 0);
       MeshSegmentation seg;
-      if (!segmentMesh(tolerance, seg)) return 0;
+      double used = tolerance;
+      if (autoTolerance) {
+        if (!meshAutoTolerance(used, seg)) return 0;
+      } else {
+        if (!segmentMesh(tolerance, seg)) return 0;
+      }
       const int planes = seg.planes, cylinders = seg.cylinders, cones = seg.cones, spheres = seg.spheres, tori = seg.tori;
       const int unfitRegions = seg.unfitRegions;
       const double unfitFraction = seg.unfitFraction, suggested = seg.suggested;
       const std::string rebuildFailed = "Mesh to Solid couldn't rebuild this mesh as an exact solid within " +
-                                        millimetres(tolerance) + " mm. Raise the tolerance, or use Faceted.";
+                                        millimetres(used) + " mm. " +
+                                        (autoTolerance ? "Use Faceted, or simplify the mesh in your slicer."
+                                                       : "Raise the tolerance, or use Faceted.");
       std::string unfitFailed;
       if (unfitRegions > 0) {
         const std::string regionsText =
             std::to_string(unfitRegions) + (unfitRegions == 1 ? " region (" : " regions (") +
             std::to_string(static_cast<int>(std::lround(unfitFraction * 100))) + " % of the surface) " +
             (unfitRegions == 1 ? "fits" : "fit") + " no plane, cylinder, sphere, cone or torus. ";
-        unfitFailed = "Mesh to Solid couldn't close the body: " + regionsText +
-                      (suggested > 0 ? "Raise the tolerance to " + millimetres(suggested) + " mm, or use Faceted."
-                                     : std::string("Use Faceted, or simplify the mesh in your slicer."));
+        // Auto already went up the ladder: no "raise to" clause then.
+        const std::string advice =
+            autoTolerance ? std::string("Use Faceted, or simplify the mesh in your slicer.")
+            : suggested > 0 ? "Raise the tolerance to " + millimetres(suggested) + " mm, or use Faceted."
+                            : std::string("Use Faceted, or simplify the mesh in your slicer.");
+        unfitFailed = "Mesh to Solid couldn't close the body: " + regionsText + advice;
       }
       // Small unfit regions (a sliver, a blend, text) are left out of the
       // exact rebuild (slice C); more, or more surfaces than MakerVolume can
@@ -7774,7 +7929,7 @@ private:
       bool exactExpired = false;
       if (!exactSkipped) {
         deadline = new MeshDeadline(nowMs() + prismaticBudgetMs_);
-        const int handle = rebuild(tolerance, seg, rebuildFailed);
+        const int handle = rebuild(used, seg, rebuildFailed);
         if (handle) return handle;
         exactExpired = deadline->expired();
         deadlineLeft_ = deadline->left();
@@ -7789,7 +7944,7 @@ private:
         const std::string exactWhy = rebuildRefusal_;
         Handle(MeshDeadline) hybridDeadline = new MeshDeadline(nowMs() + hybridBudgetMs_);
         try {
-          const int handle = rebuildHybrid(tolerance, seg, rebuildFailed, hybridDeadline, capMessage);
+          const int handle = rebuildHybrid(used, seg, rebuildFailed, hybridDeadline, capMessage);
           if (handle) return handle;
         } catch (const HybridOutOfTime&) {
           hybridExpired = true;
@@ -7819,15 +7974,16 @@ private:
       const auto times = rebuildTimes_;
       const std::string why = rebuildRefusal_, hybridWhy = hybridRefusal_;
       double works = -1;
+      // Auto already went up the ladder: the 2 T / 5 T retries make no sense then.
       for (double factor : {2.0, 5.0}) {
-        if (deadline->expired()) break;
+        if (autoTolerance || deadline->expired()) break;
         try {
           MeshSegmentation wider;
-          if (!segmentMesh(factor * tolerance, wider)) break;
+          if (!segmentMesh(factor * used, wider)) break;
           if (wider.unfitFraction > PRISMATIC_UNFIT_ALLOWED ||
               wider.planes + wider.cylinders + wider.cones + wider.spheres + wider.tori > PRISMATIC_SURFACE_CAP)
             continue;
-          const int h = rebuild(factor * tolerance, wider, rebuildFailed);
+          const int h = rebuild(factor * used, wider, rebuildFailed);
           if (h) {
             release(h);
             works = factor * tolerance;
@@ -7874,7 +8030,8 @@ private:
                        const std::vector<int>& regionOf, const std::vector<std::vector<int>>& regionNeighbours,
                        const std::vector<gp_XYZ>& normals, const std::vector<double>& areas, double meshArea,
                        double meshVolume, const std::string& rebuildFailed, const Handle(MeshDeadline)& deadline) {
-    rebuildTimes_.clear();
+    // The stage times are cleared by prismaticFromMesh, so Auto's ladder
+    // entries (ADR-0097, slice D2) stay in front of the rebuild's.
     rebuildRefusal_.clear();
     rebuildWarnings_.clear();
     // Which check refused (the spike harness prints it under TIMES=1).
@@ -8697,8 +8854,8 @@ private:
 
   /** The hybrid rebuild gives up after this much wall-clock time, a deadline of its own (ADR-0097, slice D1). */
   static constexpr double HYBRID_BUDGET_MS = 90000;
-  /** The hybrid rebuild refuses a result with more facet faces than this (slice D1). */
-  static constexpr int HYBRID_FACET_CAP = 4000;
+  /** The hybrid rebuild refuses a result with more facet faces than this (slice D1; 5,000 since slice D2). */
+  static constexpr int HYBRID_FACET_CAP = 5000;
   /** A recognised region whose edges would need a larger tolerance (mm) is built as facets (slice D1). */
   static constexpr double HYBRID_EDGE_TOLERANCE_MAX = 1.0;
   /** Every hybrid edge has at least this tolerance (mm): twice unify's linear tolerance, so an edge unify moves onto a merged plane stays valid. */
@@ -9029,48 +9186,26 @@ private:
       }
       stage("facets");
 
-      // One solid per shell of the mesh, unified.
+      // One solid per shell of the mesh, unified, with a shell that encloses
+      // a negative volume as a cavity of the solid that holds it (slice D1).
       std::map<int, std::vector<int>> byShell;
       for (size_t f = 0; f < faces.size(); ++f)
         byShell[shellOf[regions[faces[f].region].triangles[0]]].push_back(static_cast<int>(f));
       std::vector<TopoDS_Shape> solids, unified;
       std::vector<Handle(BRepTools_History)> histories;
-      // A shell whose triangles enclose negative volume is a cavity: it
-      // becomes an inner shell of the solid around it, never a solid of its own.
-      std::map<int, double> shellVolume;
-      for (int t = 0; t < triangleCount; ++t) {
-        const gp_XYZ a = meshNode(corner(t, 0)), b = meshNode(corner(t, 1)), c = meshNode(corner(t, 2));
-        shellVolume[shellOf[t]] += a.Dot(b.Crossed(c)) / 6;
-      }
-      std::vector<std::pair<TopoDS_Shell, int>> cavities;
+      std::vector<TopoDS_Shell> shells;
+      std::vector<gp_Pnt> insidePoints;
       for (auto& [shellIndex, members] : byShell) {
         TopoDS_Shell shell;
         builder.MakeShell(shell);
         for (int f : members) builder.Add(shell, faces[f].face);
         shell.Closed(BRep_Tool::IsClosed(shell));
-        // A real void (a sliver's rounding of ±1e-17 mm³ is no cavity).
-        if (shellVolume[shellIndex] < -1e-6 * std::max(1.0, std::fabs(seg.meshVolume))) {
-          cavities.push_back({shell, members.front()});
-          continue;
-        }
-        BRepBuilderAPI_MakeSolid makeSolid(shell);
-        if (!makeSolid.IsDone()) return refuse("MakeSolid failed");
-        solids.push_back(makeSolid.Solid());
+        shells.push_back(shell);
+        insidePoints.push_back(gp_Pnt(meshNode(corner(regions[faces[members.front()].region].triangles[0], 0))));
       }
-      for (const auto& [cavity, face] : cavities) {
-        const gp_Pnt inside(meshNode(corner(regions[faces[face].region].triangles[0], 0)));
-        bool held = false;
-        for (TopoDS_Shape& solid : solids) {
-          if (BRepClass3d_SolidClassifier(solid, inside, 1e-7).State() != TopAbs_IN) continue;
-          BRepBuilderAPI_MakeSolid hollow(TopoDS::Solid(solid));
-          hollow.Add(cavity);
-          if (!hollow.IsDone()) return refuse("a cavity that won't go in its solid");
-          solid = hollow.Solid();
-          held = true;
-          break;
-        }
-        if (!held) return refuse("a cavity in no solid");
-      }
+      std::string cavityWhy;
+      if (!solidsWithCavities(shells, insidePoints, seg.meshVolume, solids, cavityWhy))
+        return refuse(cavityWhy);
       for (TopoDS_Shape& solid : solids) {
         if (!BRepCheck_Analyzer(solid).IsValid()) {
           ShapeFix_Solid fixSolid(TopoDS::Solid(solid));

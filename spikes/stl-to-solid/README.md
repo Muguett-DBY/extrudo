@@ -52,6 +52,7 @@ four-fillet box and the slot fail.
 
 ```sh
 STL_DIR=~/stl FILE=own/part.stl TOL=0.05 bash spikes/stl-to-solid/run.sh prismatic f   # one file
+STL_DIR=~/stl TOL=auto bash spikes/stl-to-solid/run.sh prismatic f                      # Auto (ADR-0097 slice D2; picks 0.01/0.02/0.05/0.1)
 STL_DIR=~/stl TOL=0.01 bash spikes/stl-to-solid/run.sh prismatic F                     # every .stl/.mesh under STL_DIR, one process
 SAN=1 STL_DIR=~/stl FILE=… bash spikes/stl-to-solid/run.sh prismatic f                  # AddressSanitizer (about 4 min to link)
 TIMES=1 …   # the rebuild's stage times, cell counts and the check that refused
@@ -71,7 +72,9 @@ saddle no primitive fits: 1.4 % of the surface, left out of the rebuild) and
 the same at three times the size (4.8 %: refused).
 
 `STL_DIR` is mounted read-only at `/stl`; `FILE` is relative to it, `TOL`
-defaults to 0.01. `f` stages the file through `stlFile()` (`RWStl`, nodes
+defaults to 0.01 and `TOL=auto` (or `TOL=0`) means Auto (ADR-0097 slice D2:
+the facade picks 0.01/0.02/0.05/0.1 mm from the mesh, the `rebuild … tolerance`
+line and `TIMES=1`'s `auto <tol>: unfit <share> %` name it). `f` stages the file through `stlFile()` (`RWStl`, nodes
 welded by position; or a `.mesh` file: uint32 nodes, uint32 triangles,
 float32 xyz, uint32 corners), rounds the nodes to float32, runs
 `meshRegions`, then `meshToSolid(1, TOL)`, and prints the time, the report

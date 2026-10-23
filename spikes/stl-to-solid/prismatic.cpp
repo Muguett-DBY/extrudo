@@ -539,8 +539,11 @@ static void file(ExtrudoFacade& f, const std::string& path, double tolerance) {
   const TopoDS_Shape& s = *f.find(h);
   const double v = ExtrudoFacade::volumeOf(s);
   const auto& rep = f.meshReport_;
-  if (rep.size() >= 12) std::cout << "   rebuild " << (rep[10] == 1 ? "hybrid" : "exact") << ", facets " << rep[11] << ", exploded " << f.hybridExploded_
+  if (rep.size() >= 13) std::cout << "   rebuild " << (rep[10] == 1 ? "hybrid" : "exact") << ", facets " << rep[11]
+                                  << ", tolerance " << rep[12] << ", exploded " << f.hybridExploded_
                                   << ", pl/cy/co/sp/to " << rep[1] << "/" << rep[2] << "/" << rep[3] << "/" << rep[4] << "/" << rep[5] << std::endl;
+  else if (rep.size() >= 12) std::cout << "   rebuild " << (rep[10] == 1 ? "hybrid" : "exact") << ", facets " << rep[11] << ", exploded " << f.hybridExploded_
+                                       << ", pl/cy/co/sp/to " << rep[1] << "/" << rep[2] << "/" << rep[3] << "/" << rep[4] << "/" << rep[5] << std::endl;
   std::cout << "   prismatic " << f.count(h, 0) << " faces:" << kinds(s) << ", valid " << BRepCheck_Analyzer(s).IsValid() << ", volume "
             << v << " / mesh " << meshVolume << " = " << v / meshVolume << " (" << ms << " ms)" << std::endl;
   f.release(h);
