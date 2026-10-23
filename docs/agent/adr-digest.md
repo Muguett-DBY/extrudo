@@ -2982,7 +2982,9 @@ triangles'), checked alone with `BRepCheck_Analyzer` **right after it is
 built** (an invalid one takes its pcurves off the shared edges); an edge
 tolerance over `HYBRID_EDGE_TOLERANCE_MAX` (1 mm), an invalid face or a throw
 explodes the region; unfit and exploded triangles are planar facets on the
-same edges. Then a solid per mesh shell, `UnifySameDomain(true, true, true)`
+same edges. Then a solid per mesh shell (a shell of negative mesh volume is a cavity:
+an inner shell of the solid that holds its node, never a solid of its own),
+`UnifySameDomain(true, true, true)`
 at 1e-3 (coplanar facets merge, split pieces merge back), `ShapeFix_Shape`
 only when that is invalid; a face still invalid explodes its regions (unify's
 history), and so does a mesh node no face covers: up to three builds. The
