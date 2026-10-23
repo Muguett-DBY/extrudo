@@ -24,9 +24,6 @@ export const MESH_TO_SOLID_TYPE = 'meshToSolid';
 export const MESH_TO_SOLID_METHODS = ['prismatic', 'faceted'] as const;
 export type MeshToSolidMethod = (typeof MESH_TO_SOLID_METHODS)[number];
 
-/** How far a facet may sit from a fitted surface, in mm (ADR-0097 §1). */
-export const MESH_TO_SOLID_DEFAULT_TOLERANCE = 0.01;
-
 export const MeshToSolidInputsSchema = z.strictObject({
   /** The mesh body to convert. Empty: the feature fails until one is picked. */
   body: refsOf(['body'], 1).describe('The mesh body to convert. Required.'),
@@ -36,11 +33,11 @@ export const MeshToSolidInputsSchema = z.strictObject({
     .describe(
       'prismatic recognises planes, cylinders, cones, spheres and tori within the tolerance and rebuilds exact faces; what fits nothing stays as facets. faceted keeps every flat facet as a face. Default prismatic.',
     ),
-  /** Prismatic only: how far a facet may sit from a fitted surface. Default 0.01 mm. */
+  /** Prismatic only: how far a facet may sit from a fitted surface. Absent: Auto. */
   tolerance: exprOf('length')
     .optional()
     .describe(
-      'How far a facet may sit from a fitted surface, in mm (prismatic only). Default 0.01.',
+      'How far a facet may sit from a fitted surface, in mm (prismatic only). Absent: Auto, the kernel picks 0.01-0.1 mm from the mesh.',
     ),
 });
 export type MeshToSolidInputs = z.infer<typeof MeshToSolidInputsSchema>;
@@ -81,6 +78,10 @@ export interface MeshToSolidReport {
   unfit: { regions: number; triangles: number; fraction: number };
   /** The tolerance that would have fitted the largest unfit region, when there is one. */
   suggestedTolerance?: number;
+  /** The fitting tolerance the kernel used in mm (ADR-0097, slice D2): always for prismatic, Auto or not; absent for faceted. */
+  tolerance?: number;
+  /** The tolerance was Auto: the kernel picked it from the mesh (slice D2). */
+  auto?: boolean;
   /**
    * How prismatic built the solid (ADR-0097, slice D1): `exact` from its
    * surfaces alone, `hybrid` from the mesh with an exact face per recognised
@@ -94,7 +95,7 @@ export interface MeshToSolidReport {
 /** The surface counts of a report or of a region preview. */
 export type MeshSurfaceCounts = Pick<
   MeshToSolidReport,
-  'planes' | 'cylinders' | 'cones' | 'spheres' | 'tori' | 'unfit'
+  'planes' | 'cylinders' | 'cones' | 'spheres' | 'tori' | 'unfit' | 'tolerance' | 'auto'
 >;
 
 const SURFACE_KINDS = [
@@ -107,21 +108,36 @@ const SURFACE_KINDS = [
 
 const count = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
+/** "0.02", "0.1": a tolerance's millimetres with no trailing zeros. */
+export function formatTolerance(tolerance: number): string {
+  return String(Number(tolerance.toFixed(4)));
+}
+
+/** " · auto 0.02 mm" when the kernel picked the tolerance (ADR-0097, slice D2). */
+function autoSuffix(counts: Pick<MeshSurfaceCounts, 'auto' | 'tolerance'>): string {
+  return counts.auto && counts.tolerance !== undefined
+    ? ` · auto ${formatTolerance(counts.tolerance)} mm`
+    : '';
+}
+
 /**
  * "6 planes, 1 cylinder · 0 unfit" (ADR-0097 §4): every kind found, and the
- * unfit regions always.
+ * unfit regions always; " · auto 0.05 mm" appended when the kernel picked the
+ * tolerance (slice D2).
  */
 export function meshSurfaceSummary(counts: MeshSurfaceCounts): string {
   const found = SURFACE_KINDS.filter(([key]) => counts[key] > 0).map(([key, one, many]) =>
     count(counts[key], one, many),
   );
-  return [found.join(', '), `${counts.unfit.regions} unfit`].filter(Boolean).join(' · ');
+  const text = [found.join(', '), `${counts.unfit.regions} unfit`].filter(Boolean).join(' · ');
+  return text + autoSuffix(counts);
 }
 
 /**
  * A conversion's report in one line: "6 faces" (faceted), "6 planes,
  * 1 cylinder · 0 unfit" (prismatic, exact), "12 planes, 4 cylinders · 3 unfit
- * regions kept as 318 facets" (prismatic, hybrid: ADR-0097 slice D1).
+ * regions kept as 318 facets" (prismatic, hybrid: ADR-0097 slice D1); with
+ * " · auto 0.05 mm" when the kernel picked the tolerance (slice D2).
  */
 export function meshToSolidSummary(report: MeshToSolidReport): string {
   if (report.method === 'faceted') return count(report.faces, 'face', 'faces');
@@ -134,7 +150,7 @@ export function meshToSolidSummary(report: MeshToSolidReport): string {
     report.unfit.regions > 0
       ? `${count(report.unfit.regions, 'unfit region', 'unfit regions')} kept as ${facets}`
       : facets;
-  return [found.join(', '), rest].filter(Boolean).join(' · ');
+  return [found.join(', '), rest].filter(Boolean).join(' · ') + autoSuffix(report);
 }
 
 /**
@@ -155,13 +171,23 @@ export interface MeshToSolidSettings {
   /** The mesh body to convert, or `undefined` until one is picked. */
   body: GeomRef | undefined;
   method: MeshToSolidMethod;
+  /** The evaluated tolerance in mm, or `'auto'` when the input is absent (ADR-0097, slice D2). */
+  tolerance: number | 'auto';
 }
 
-/** Reads a conversion's (valid) inputs with their defaults. */
-export function meshToSolidSettings(inputs: MeshToSolidInputs): MeshToSolidSettings {
+/**
+ * Reads a conversion's (valid) inputs with their defaults. `value` is the
+ * evaluated `tolerance` expression (the caller evaluates it; absent means
+ * Auto, as the input itself is absent).
+ */
+export function meshToSolidSettings(
+  inputs: MeshToSolidInputs,
+  value?: number,
+): MeshToSolidSettings {
   return {
     body: inputs.body.refs[0],
     method: inputs.method?.value ?? 'prismatic',
+    tolerance: inputs.tolerance && value !== undefined ? value : 'auto',
   };
 }
 

@@ -254,7 +254,7 @@ export const importDialog = defineFeatureDialog({
       default: false,
       // A mesh only, and only when importing (an edit can't add a feature).
       shown: (_values, ctx) => (ctx ? isMesh(ctx) && !ctx.feature : false),
-      hint: 'Also run Mesh to Solid on the mesh (Prismatic, 0.01 mm), in the same step. Faces and edges become real, so you can fillet, shell and sketch on the part.',
+      hint: 'Also run Mesh to Solid on the mesh (Prismatic, Auto tolerance), in the same step. Faces and edges become real, so you can fillet, shell and sketch on the part.',
     },
   ],
   toInputs(values: DialogValues, ctx: DialogContext): ImportInputs {

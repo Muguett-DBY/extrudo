@@ -124,6 +124,7 @@ export class MeshBodyError extends KernelError {
 /** Mesh to Solid's options (ADR-0097 §3): the method, and its fitting tolerance in mm. */
 export interface MeshToSolidOptions {
   method: 'faceted' | 'prismatic';
+  /** The fitting tolerance in mm; for prismatic, 0 or less means Auto (ADR-0097, slice D2). Faceted ignores it. */
   tolerance: number;
 }
 
@@ -146,6 +147,10 @@ export interface MeshRegions {
   tori: number;
   unfit: { regions: number; triangles: number; fraction: number };
   suggestedTolerance?: number;
+  /** The tolerance the segmentation used in mm (ADR-0097, slice D2): always for prismatic, the Auto pick included. */
+  tolerance?: number;
+  /** Whether the tolerance was Auto (the caller passed 0 or less). */
+  auto?: boolean;
 }
 
 export interface MeshToSolidResult {
@@ -1878,13 +1883,20 @@ export class Kernel {
     const handle = this.#check(
       f.meshToSolid(options.method === 'faceted' ? 0 : 1, options.tolerance),
     );
-    return { shape: handle, report: { method: options.method, ...this.#meshReport() } };
+    // A tolerance of 0 or less means Auto (ADR-0097, slice D2); the report
+    // names the tolerance the kernel picked (the facade's slot 12).
+    const auto = options.method === 'prismatic' && !(options.tolerance > 0);
+    return {
+      shape: handle,
+      report: { method: options.method, ...(auto ? { auto: true } : {}), ...this.#meshReport() },
+    };
   }
 
   /**
    * Mesh to Solid's region preview (ADR-0097 §5): prismatic's segmentation
-   * and fits of a mesh body within `tolerance` (mm), no solid built. The same
-   * code as `meshToSolid`'s prismatic method, so the two always agree.
+   * and fits of a mesh body within `tolerance` (mm), no solid built; a
+   * tolerance of 0 or less means Auto (slice D2). The same code as
+   * `meshToSolid`'s prismatic method, so the two always agree.
    */
   meshRegions(shape: ShapeHandle, tolerance: number): MeshRegions {
     this.#stageMesh(shape);
@@ -1896,6 +1908,7 @@ export class Kernel {
         surfaceOf: this.#copy(Int32Array, f.meshRegionsPtr(), f.meshRegionTriangles()),
         kinds: this.#copy(Int32Array, f.meshRegionKindsPtr(), f.meshRegionCount()),
         ...counts,
+        ...(!(tolerance > 0) ? { auto: true } : {}),
       };
     } finally {
       f.clearMeshRegions();
@@ -1933,7 +1946,7 @@ export class Kernel {
     ).set(gl.triVerts);
   }
 
-  /** The facade's Mesh to Solid report (12 doubles), without the method. */
+  /** The facade's Mesh to Solid report (13 doubles), without the method. */
   #meshReport(): Omit<MeshToSolidReport, 'method'> {
     const f = this.#facade;
     const r = this.#copy(Float64Array, f.meshReportPtr(), f.meshReportSize());
@@ -1948,6 +1961,7 @@ export class Kernel {
       // An area share: the sums' rounding can put a whole mesh a hair over 1.
       unfit: { regions: at(6), triangles: at(7), fraction: Math.min(1, at(8)) },
       ...(at(9) >= 0 ? { suggestedTolerance: at(9) } : {}),
+      ...(at(12) > 0 ? { tolerance: at(12) } : {}),
       ...(at(10) === 0
         ? { rebuild: 'exact' as const }
         : at(10) === 1

@@ -18,7 +18,6 @@
  */
 import {
   type BodyId,
-  MESH_TO_SOLID_DEFAULT_TOLERANCE,
   type MeshToSolidInputs,
   meshToSolidFeature,
   meshToSolidSettings,
@@ -47,7 +46,10 @@ export const kernelMeshToSolid: KernelFeatureDefinition<MeshToSolidInputs> = {
 
 function evaluateMeshToSolid(ctx: EvalContext<MeshToSolidInputs>): FeatureOutput {
   const { kernel } = ctx;
-  const settings = meshToSolidSettings(ctx.inputs);
+  // An absent tolerance means Auto (ADR-0097, slice D2): the kernel picks one
+  // from the mesh. A present one is evaluated and validated as before.
+  const evaluated = ctx.inputs.tolerance ? ctx.value('tolerance') : undefined;
+  const settings = meshToSolidSettings(ctx.inputs, evaluated);
   if (!settings.body) throw new KernelError('Pick the mesh body to convert.');
   const [id] = existing(ctx, [settings.body], 'convert');
   if (id === undefined) throw new KernelError('Pick the mesh body to convert.');
@@ -57,10 +59,13 @@ function evaluateMeshToSolid(ctx: EvalContext<MeshToSolidInputs>): FeatureOutput
     // message exact (ADR-0097 §1).
     throw new KernelError('Mesh to Solid needs a mesh body: this body is already a solid.');
   }
-  const tolerance = ctx.inputs.tolerance ? ctx.value('tolerance') : MESH_TO_SOLID_DEFAULT_TOLERANCE;
-  if (!Number.isFinite(tolerance) || tolerance <= 0) {
+  if (
+    settings.tolerance !== 'auto' &&
+    (!Number.isFinite(settings.tolerance) || settings.tolerance <= 0)
+  ) {
     throw new KernelError('The tolerance must be greater than 0 mm.');
   }
+  const tolerance = settings.tolerance === 'auto' ? -1 : settings.tolerance;
 
   using scope = kernel.scope();
   const { shape: solid, report } = kernel.meshToSolid(shape, {
