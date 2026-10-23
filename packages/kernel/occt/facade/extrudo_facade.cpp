@@ -5854,6 +5854,8 @@ private:
    public:
     explicit MeshDeadline(double deadline) : deadline_(deadline) {}
     bool expired() const { return nowMs() > deadline_; }
+    /** The time left, ms (negative past the deadline). */
+    double left() const { return deadline_ - nowMs(); }
 
    protected:
     bool UserBreak() override { return expired(); }
@@ -7775,8 +7777,11 @@ private:
         const int handle = rebuild(tolerance, seg, rebuildFailed);
         if (handle) return handle;
         exactExpired = deadline->expired();
+        deadlineLeft_ = deadline->left();
       }
       const std::vector<double> report = meshReport_;
+      // What the exact budget had left; the retries get that much after the hybrid.
+      const double exactLeft = deadline.IsNull() ? prismaticBudgetMs_ : std::max(0.0, deadlineLeft_);
       seg.surfaces = fitted;
       std::string capMessage;
       bool hybridExpired = false, hybridThrew = false;
@@ -7810,7 +7815,7 @@ private:
       // of its own when it was skipped). The result there is dropped (the
       // user chose this tolerance); the report and the stage times stay this
       // tolerance's.
-      if (deadline.IsNull()) deadline = new MeshDeadline(nowMs() + prismaticBudgetMs_);
+      deadline = new MeshDeadline(nowMs() + exactLeft);
       const auto times = rebuildTimes_;
       const std::string why = rebuildRefusal_, hybridWhy = hybridRefusal_;
       double works = -1;
@@ -8700,6 +8705,8 @@ private:
   static constexpr double HYBRID_EDGE_TOLERANCE_MIN = 2e-3;
   /** The budget the next hybrid rebuild gets: HYBRID_BUDGET_MS, lowered only by the spike harness. */
   double hybridBudgetMs_ = HYBRID_BUDGET_MS;
+  /** What the exact rebuild's budget had left when it refused (prismaticFromMesh's retries get it). */
+  double deadlineLeft_ = 0;
   /** The last hybrid rebuild's exploded regions, and why it refused (the spike harness prints them). */
   int hybridExploded_ = 0;
   std::string hybridRefusal_;
@@ -8952,16 +8959,17 @@ private:
         MeshHybridRegion& region = regions[i];
         if (region.kind < 0) continue;
         double worst = 0;
+        std::vector<EdgeUse> used;
+        Handle(Geom_Surface) surface;
         if (region.why.empty()) {
           try {
-            const Handle(Geom_Surface) surface = region.chart.surface();
+            surface = region.chart.surface();
             int largest = region.triangles[0];
             for (int t : region.triangles)
               if (seg.areas[t] > seg.areas[largest]) largest = t;
             const gp_XYZ centre = (meshNode(corner(largest, 0)) + meshNode(corner(largest, 1)) + meshNode(corner(largest, 2))) / 3;
             const gp_Pnt2d at = region.chart.uv(gp_Pnt(centre));
             const bool flip = region.chart.normal(at.X(), at.Y()).XYZ().Dot(seg.normals[largest]) < 0;
-            std::vector<EdgeUse> used;
             const TopoDS_Face face = makeFace(region.chart, surface, region.loops, flip, worst, used);
             if (face.IsNull()) {
               region.why = "edge tolerance " + std::to_string(worst) + " mm";
@@ -8974,6 +8982,8 @@ private:
             }
           } catch (const Standard_Failure& e) {
             region.why = std::string("threw ") + e.GetMessageString();
+            for (const EdgeUse& use : used)
+              if (!use.edge.IsNull()) builder.UpdateEdge(use.edge, Handle(Geom2d_Curve)(), surface, TopLoc_Location(), 0);
           }
         }
         if (keepHybridFaces_ && (attempt == 0 || !region.why.empty())) {
@@ -9025,14 +9035,42 @@ private:
         byShell[shellOf[regions[faces[f].region].triangles[0]]].push_back(static_cast<int>(f));
       std::vector<TopoDS_Shape> solids, unified;
       std::vector<Handle(BRepTools_History)> histories;
+      // A shell whose triangles enclose negative volume is a cavity: it
+      // becomes an inner shell of the solid around it, never a solid of its own.
+      std::map<int, double> shellVolume;
+      for (int t = 0; t < triangleCount; ++t) {
+        const gp_XYZ a = meshNode(corner(t, 0)), b = meshNode(corner(t, 1)), c = meshNode(corner(t, 2));
+        shellVolume[shellOf[t]] += a.Dot(b.Crossed(c)) / 6;
+      }
+      std::vector<std::pair<TopoDS_Shell, int>> cavities;
       for (auto& [shellIndex, members] : byShell) {
         TopoDS_Shell shell;
         builder.MakeShell(shell);
         for (int f : members) builder.Add(shell, faces[f].face);
         shell.Closed(BRep_Tool::IsClosed(shell));
+        if (shellVolume[shellIndex] < 0) {
+          cavities.push_back({shell, members.front()});
+          continue;
+        }
         BRepBuilderAPI_MakeSolid makeSolid(shell);
         if (!makeSolid.IsDone()) return refuse("MakeSolid failed");
-        TopoDS_Shape solid = makeSolid.Solid();
+        solids.push_back(makeSolid.Solid());
+      }
+      for (const auto& [cavity, face] : cavities) {
+        const gp_Pnt inside(meshNode(corner(regions[faces[face].region].triangles[0], 0)));
+        bool held = false;
+        for (TopoDS_Shape& solid : solids) {
+          if (BRepClass3d_SolidClassifier(solid, inside, 1e-7).State() != TopAbs_IN) continue;
+          BRepBuilderAPI_MakeSolid hollow(TopoDS::Solid(solid));
+          hollow.Add(cavity);
+          if (!hollow.IsDone()) return refuse("a cavity that won't go in its solid");
+          solid = hollow.Solid();
+          held = true;
+          break;
+        }
+        if (!held) return refuse("a cavity in no solid");
+      }
+      for (TopoDS_Shape& solid : solids) {
         if (!BRepCheck_Analyzer(solid).IsValid()) {
           ShapeFix_Solid fixSolid(TopoDS::Solid(solid));
           fixSolid.Perform(deadline->Start());
@@ -9040,7 +9078,6 @@ private:
         }
         check();
         if (volumeOf(solid) < 0) solid.Reverse();
-        solids.push_back(solid);
       }
       stage("solid");
       for (const TopoDS_Shape& solid : solids) {
@@ -9070,15 +9107,21 @@ private:
         // linear tolerance off their own: ShapeFix raises their tolerances.
         if (keepHybridFaces_) hybridInvalid_ = result;
         try {
+          // Healed into copies, kept only when every solid healed.
+          std::vector<TopoDS_Shape> fixed = unified;
+          std::vector<Handle(BRepTools_History)> fixes(unified.size());
           for (size_t s = 0; s < unified.size(); ++s) {
             if (BRepCheck_Analyzer(unified[s]).IsValid()) continue;
             ShapeFix_Shape healer(unified[s]);
             healer.Perform(deadline->Start());
             check();
-            // The healer's own history, onto unify's: what it replaced, the region map follows.
-            unified[s] = healer.Shape();
-            if (!histories[s].IsNull()) histories[s]->Merge(healer.Context()->History());
+            fixed[s] = healer.Shape();
+            fixes[s] = healer.Context()->History();
           }
+          // The healer's own history, onto unify's: what it replaced, the region map follows.
+          for (size_t s = 0; s < unified.size(); ++s)
+            if (!fixes[s].IsNull() && !histories[s].IsNull()) histories[s]->Merge(fixes[s]);
+          unified = fixed;
           result = assemble(unified);
           healed = true;
           valid = BRepCheck_Analyzer(result).IsValid();
@@ -9243,14 +9286,16 @@ private:
             }
           }
           if (!near) {
+            int region = -1;
+            for (int t : trianglesOf[n])
+              if (regions[hybridOf[t]].kind >= 0 && regions[hybridOf[t]].why.empty()) region = hybridOf[t];
+            if (offRegions.count(region)) continue;
             BRepExtrema_DistShapeShape distance(BRepBuilderAPI_MakeVertex(p).Vertex(), result, Extrema_ExtFlag_MINMAX,
                                                 Extrema_ExtAlgo_Grad, deadline->Start());
+            if (!distance.IsDone()) check();
             if (!distance.IsDone() || distance.Value() > reach) {
               // A node a recognised face doesn't cover (its parameters outside
               // the face's straight-edged domain): that region explodes.
-              int region = -1;
-              for (int t : trianglesOf[n])
-                if (regions[hybridOf[t]].kind >= 0 && regions[hybridOf[t]].why.empty()) region = hybridOf[t];
               if (region >= 0 && attempt < 2) {
                 offRegions.insert(region);
                 continue;

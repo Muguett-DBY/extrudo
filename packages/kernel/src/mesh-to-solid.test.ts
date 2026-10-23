@@ -1052,6 +1052,24 @@ describe('Mesh to Solid, the hybrid rebuild (ADR-0097 slice D1)', { timeout: 300
       kernel.release(shape);
     }
   });
+
+  it('keeps a closed cavity hollow: its shell goes inside the solid around it', () => {
+    const part = bossWithBump();
+    const cavity = manifold.Manifold.cube([10, 10, 4]).translate([10, 10, 3]);
+    const hollow = part.subtract(cavity);
+    part.delete();
+    cavity.delete();
+    const volume = hollow.volume();
+    const { shape, report } = prismatic(meshOf(hollow));
+    try {
+      expect(report.rebuild).toBe('hybrid');
+      expect(kernel.isValid(shape)).toBe(true);
+      // The cavity's 400 mm3 stay out (filled, the volume would be 800 off).
+      expect(Math.abs(kernel.properties(shape).volume / volume - 1)).toBeLessThan(0.01);
+    } finally {
+      kernel.release(shape);
+    }
+  });
 });
 
 describe('Kernel.meshRegions', { timeout: 300_000 }, () => {

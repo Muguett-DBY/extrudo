@@ -136,6 +136,7 @@ describe('the Mesh to Solid feature (P4-13, ADR-0097)', { timeout: 300_000 }, ()
       spheres: 0,
       tori: 0,
       unfit: { regions: 0, triangles: 0, fraction: 0 },
+      facets: 0,
     });
   });
 
