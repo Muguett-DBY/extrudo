@@ -103,11 +103,10 @@ type Outcome =
   | { refusal: string; tolerance?: number };
 
 // Slice C's fixtures. drill-block's lettering walls (3 unfit regions) are
-// left out; track-straight's socket-rim chamfer is left out at 0.05 mm, and
-// at 0.01 mm the rebuild without it fails, so the unfit refusal names the
-// tolerance the retry converted at; at 0.1 mm the rebuild fails and 0.2 mm
-// converts; remove-before-flight-cover's rebuild fails with its 5 regions
-// left out and no retry converts.
+// left out; track-straight's socket-rim chamfer is left out at 0.05 mm. Slice
+// D1: where the exact rebuild fails (track-straight at 0.01 and 0.1 mm,
+// remove-before-flight-cover at 0.01 mm), the hybrid rebuild converts, the
+// unfit regions (and any region whose face wouldn't build) as facets.
 const DRILL_BLOCK: Outcome = {
   planes: 77,
   cylinders: 12,
@@ -117,8 +116,12 @@ const DRILL_BLOCK: Outcome = {
   leftOut: 3,
 };
 const TRACK_001: Outcome = {
-  refusal:
-    "Mesh to Solid couldn't close the body: 2 regions (1 % of the surface) fit no plane, cylinder, sphere, cone or torus. Raise the tolerance to 0.05 mm, or use Faceted.",
+  planes: 65,
+  cylinders: 2,
+  cones: 2,
+  spheres: 0,
+  tori: 0,
+  hybrid: { unfit: 2, facets: 237 },
 };
 const TRACK_005: Outcome = {
   planes: 89,
@@ -130,13 +133,21 @@ const TRACK_005: Outcome = {
   tolerance: 0.05,
 };
 const TRACK_01: Outcome = {
-  refusal:
-    "Mesh to Solid couldn't rebuild this mesh as an exact solid within 0.1 mm. Raise the tolerance to 0.2 mm, or use Faceted.",
+  planes: 69,
+  cylinders: 8,
+  cones: 2,
+  spheres: 0,
+  tori: 0,
+  hybrid: { unfit: 0, facets: 0 },
   tolerance: 0.1,
 };
 const FLIGHT_COVER: Outcome = {
-  refusal:
-    "Mesh to Solid couldn't close the body: 5 regions (1 % of the surface) fit no plane, cylinder, sphere, cone or torus. Raise the tolerance to 0.064 mm, or use Faceted.",
+  planes: 252,
+  cylinders: 62,
+  cones: 4,
+  spheres: 0,
+  tori: 0,
+  hybrid: { unfit: 5, facets: 120 },
 };
 
 const fixtures: [string, string, Outcome][] = [
@@ -160,9 +171,27 @@ const fixtures: [string, string, Outcome][] = [
     spacerStl,
     {
       // Slice C: a fillet network whose short fillets are 0.016-0.026 mm off
-      // round (twisted facets); those leftovers drop the split (ADR-0097).
-      refusal:
-        "Mesh to Solid couldn't close the body: 1 region (82 % of the surface) fits no plane, cylinder, sphere, cone or torus. Use Faceted, or simplify the mesh in your slicer.",
+      // round (twisted facets); those leftovers drop the split (ADR-0097), so
+      // the network is one unfit region: slice D1 keeps it as facets.
+      planes: 2,
+      cylinders: 0,
+      cones: 0,
+      spheres: 4,
+      tori: 4,
+      hybrid: { unfit: 1, facets: 409 },
+    },
+  ],
+  [
+    // Slice D1: a freeform shell (39 % of the surface) as facets, the rest exact.
+    'peg-perego-button.stl',
+    pegPeregoStl,
+    {
+      planes: 108,
+      cylinders: 94,
+      cones: 8,
+      spheres: 10,
+      tori: 2,
+      hybrid: { unfit: 3, facets: 670 },
     },
   ],
   // Slice C: unfit regions under 2 % of the surface are left out of the rebuild.
@@ -214,7 +243,7 @@ describe('Mesh to Solid, prismatic on the fixtures', { timeout: 120_000 }, () =>
 });
 
 describe('Mesh to Solid, the segmentation', { timeout: 120_000 }, () => {
-  it('puts every triangle of trashcan-spacer.stl on a surface, and refuses it without a trap', () => {
+  it('puts every triangle of trashcan-spacer.stl on a surface, and converts or refuses it without a trap', () => {
     // At 0.1 and 0.2 mm, splitComponent's border moves once left regions on no
     // surface (and others on two): meshRegions mapped their triangles to -1
     // and the rebuild indexed adjacent[-1] (ADR-0097's 2026-10-22 amendment).

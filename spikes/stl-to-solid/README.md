@@ -84,3 +84,20 @@ segment differently: write that order with
 `build`), so two runs don't share one; `NOBUILD=1` reruns the last build;
 `FACADE=<file>` builds an edited copy of the facade (it must have the members prismatic.cpp reads; an older facade needs its own run.sh and prismatic.cpp).
 `SAN=ub` (UBSan) and `SAN=heap` (`SAFE_HEAP`) are wired up but untried.
+
+## The hybrid rebuild (slice D1, 2026-10-23)
+
+Prismatic's second stage (ADR-0097's 2026-10-23 amendment) runs when the exact
+rebuild is skipped or refuses. The same `f`/`F` cases show it:
+
+```sh
+TIMES=1 …          # also the hybrid's stages ("hybrid loops", "faces", "facets", "solid", "unified", "healed",
+                   # "validity", "checked against the mesh"), why it refused and how many regions it exploded
+FACES=1 …          # per recognised region: kind, triangles, loops, edges, the largest edge tolerance, built or
+                   # exploded and why; and BRepCheck's statuses when the unified result needed healing
+HYBRID_BUDGET=ms … # a lower budget than HYBRID_BUDGET_MS (90 s)
+```
+
+The report line gains `rebuild exact|hybrid, facets N`; a converted file
+prints `rebuild hybrid, facets N, exploded N, pl/cy/co/sp/to …` (the
+recognised faces by kind, facets not counted).
