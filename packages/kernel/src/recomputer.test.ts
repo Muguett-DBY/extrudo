@@ -710,7 +710,8 @@ describe('Recomputer', () => {
     expect(Array.from(regions?.kinds ?? [])).toEqual([0, 0, 0, 0, 0, 0]);
     expect(regions?.surfaceOf).toHaveLength(12);
     expect(await r.meshRegions('nothing' as BodyId, 0.01)).toBeUndefined();
-    expect(await r.meshRegions(body, 0)).toBeUndefined();
+    // A tolerance of 0 means Auto now (ADR-0097, slice D2): it segments.
+    expect((await r.meshRegions(body, 0))?.auto).toBe(true);
 
     const convert: Feature = {
       ...testFeature('toSolid', 'meshToSolid'),
@@ -736,6 +737,8 @@ describe('Recomputer', () => {
         unfit: { regions: 0, triangles: 0, fraction: 0 },
         rebuild: 'exact',
         facets: 0,
+        auto: true,
+        tolerance: 0.01,
       },
     });
     // The solid is no mesh any more: no regions.
