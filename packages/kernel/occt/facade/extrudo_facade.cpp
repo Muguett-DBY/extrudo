@@ -7803,7 +7803,8 @@ private:
                                     " s: this mesh is too large to rebuild. Use Faceted, or simplify the mesh in your slicer.";
         return fail(message.c_str());
       }
-      if (exactExpired) return fail(exactSkipped ? rebuildFailed.c_str() : gaveUp);
+      // The exact rebuild ran out of time: no retries; the hybrid's own refusal says what happened.
+      if (exactExpired) return fail(hybridThrew ? gaveUp : rebuildFailed.c_str());
       // A tolerance to suggest: the exact rebuild (segmentation included) at
       // 2 and 5 x the tolerance, within what is left of its budget (a budget
       // of its own when it was skipped). The result there is dropped (the

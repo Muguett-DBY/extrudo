@@ -6,6 +6,7 @@ import { readStl } from '@extrudo/io';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
 import drillBlockStl from '../../../fixtures/imports/mesh-to-solid/drill-block.stl?url&inline';
 import holeFillerStl from '../../../fixtures/imports/mesh-to-solid/hole-filler-35mm.stl?url&inline';
+import pegPeregoStl from '../../../fixtures/imports/mesh-to-solid/peg-perego-button.stl?url&inline';
 import puzzleBaseStl from '../../../fixtures/imports/mesh-to-solid/puzzle-base-circle.stl?url&inline';
 import flightCoverStl from '../../../fixtures/imports/mesh-to-solid/remove-before-flight-cover.stl?url&inline';
 import trackStl from '../../../fixtures/imports/mesh-to-solid/track-straight-100mm.stl?url&inline';
@@ -83,8 +84,9 @@ function refusal(error: unknown): string {
 
 /**
  * What prismatic makes of a fixture (at 0.01 mm unless `tolerance` says):
- * faces by kind and the unfit regions left out of the rebuild (slice C), or
- * the refusal.
+ * faces by kind and the unfit regions left out of the exact rebuild (slice
+ * C), or the hybrid rebuild's unfit regions and facets (slice D1), or the
+ * refusal.
  */
 type Outcome =
   | {
@@ -95,6 +97,8 @@ type Outcome =
       tori: number;
       leftOut?: number;
       tolerance?: number;
+      /** The hybrid rebuild (slice D1): its unfit regions (as `leftOut`) and facet faces. */
+      hybrid?: { unfit: number; facets: number };
     }
   | { refusal: string; tolerance?: number };
 
@@ -193,7 +197,9 @@ describe('Mesh to Solid, prismatic on the fixtures', { timeout: 120_000 }, () =>
             spheres: outcome.spheres,
             tori: outcome.tori,
           });
-          expect(report.unfit.regions).toBe(outcome.leftOut ?? 0);
+          expect(report.rebuild).toBe(outcome.hybrid ? 'hybrid' : 'exact');
+          expect(report.facets).toBe(outcome.hybrid?.facets ?? 0);
+          expect(report.unfit.regions).toBe(outcome.hybrid?.unfit ?? outcome.leftOut ?? 0);
           if (outcome.leftOut) expect(report.unfit.fraction).toBeLessThanOrEqual(0.02);
           expect(kernel.isValid(shape)).toBe(true);
           expect(Math.abs(kernel.properties(shape).volume / volume - 1)).toBeLessThan(0.005);
@@ -285,9 +291,12 @@ describe.skipIf(!stlDir)('Mesh to Solid over STL_DIR', { timeout: 3_600_000 }, (
               const { shape, report } = kernel.meshToSolid(mesh, { method, tolerance });
               try {
                 const ratio = kernel.properties(shape).volume / volume;
-                const leftOut = report.unfit.regions
-                  ? `, ${report.unfit.regions} unfit left out`
-                  : '';
+                const leftOut =
+                  report.rebuild === 'hybrid'
+                    ? `, hybrid: ${report.unfit.regions} unfit, ${report.facets} facets`
+                    : report.unfit.regions
+                      ? `, ${report.unfit.regions} unfit left out`
+                      : '';
                 cells.push(
                   `✓ ${report.faces} faces (${report.planes}/${report.cylinders}/${report.cones}/${report.spheres}/${report.tori})${leftOut}, valid ${kernel.isValid(shape)}, vol ${ratio.toFixed(4)} (${Math.round(performance.now() - t0)} ms)`,
                 );
