@@ -11,7 +11,12 @@
  * OBJ has no units (the numbers are unitless; by the same convention as STL
  * Extrudo reads them as millimetres unless the user says otherwise) and no
  * up axis, so an OBJ from a Y-up tool needs the import's `up` setting.
+ *
+ * `writeObj` (P6-13, ADR-0101 §2) is the other direction: the bodies as an
+ * OBJ plus an MTL with one coloured material per body, which Render Picture
+ * hands to Blender.
  */
+import { num } from './format';
 import type { MeshObject } from './mesh';
 
 /** What `readObj` could not read, worded for the user. */
@@ -118,4 +123,75 @@ function numbers(rest: string, count: number, key: string): number[] {
     throw new ObjError(`This OBJ file has a "${key}" line that isn't numbers: "${rest}".`);
   }
   return values;
+}
+
+export interface ObjOptions {
+  /** Written in the header comment ("Extrudo 0.8.3"). */
+  application?: string;
+  /** Written in the header comment. */
+  project?: string;
+  /** The `mtllib` file name the OBJ refers to; default `model.mtl`. */
+  mtlName?: string;
+}
+
+/** The colour of an object that has none: a light grey. */
+const DEFAULT_KD = '0.8 0.8 0.8';
+
+/**
+ * Writes the objects as a Wavefront OBJ and its MTL (ADR-0101 §2): one `o`
+ * per object, vertices in millimetres (unit-less in the file, Extrudo's
+ * convention, as `readObj`), Z up, one material per object with its colour.
+ * Deterministic: the same input gives the same text.
+ */
+export function writeObj(
+  objects: readonly MeshObject[],
+  options: ObjOptions = {},
+): { obj: string; mtl: string } {
+  const header = `# ${[options.application, options.project].filter(Boolean).join(' — ') || 'OBJ'}`;
+  const obj: string[] = [header, `mtllib ${options.mtlName ?? 'model.mtl'}`];
+  const mtl: string[] = [header];
+  let offset = 0;
+  objects.forEach((object, i) => {
+    const { positions, indices } = object.mesh;
+    obj.push(`o ${objectName(object.name, i)}`);
+    for (let n = 0; n + 2 < positions.length; n += 3) {
+      obj.push(
+        `v ${num(positions[n] as number, 5)} ${num(positions[n + 1] as number, 5)} ${num(positions[n + 2] as number, 5)}`,
+      );
+    }
+    obj.push(`usemtl m${i}`);
+    for (let t = 0; t + 2 < indices.length; t += 3) {
+      obj.push(
+        `f ${(indices[t] as number) + 1 + offset} ${(indices[t + 1] as number) + 1 + offset} ${(indices[t + 2] as number) + 1 + offset}`,
+      );
+    }
+    offset += Math.floor(positions.length / 3);
+    mtl.push(`newmtl m${i}`);
+    const rgba = parseColor(object.color);
+    const kd = rgba
+      ? rgba
+          .slice(0, 3)
+          .map((v) => num(v, 4))
+          .join(' ')
+      : DEFAULT_KD;
+    mtl.push(`Kd ${kd}`);
+    if (rgba && rgba[3] < 1) mtl.push(`d ${num(rgba[3], 4)}`);
+  });
+  return { obj: `${obj.join('\n')}\n`, mtl: `${mtl.join('\n')}\n` };
+}
+
+/** One line, never empty: an unnamed object is `Body<n>`. */
+function objectName(name: string, index: number): string {
+  const line = name.replace(/[\r\n]+/g, ' ').trim();
+  return line || `Body${index + 1}`;
+}
+
+/** `#rrggbb` or `#rrggbbaa` as sRGB components 0–1; undefined for no or an unreadable colour. */
+function parseColor(color: string | undefined): [number, number, number, number] | undefined {
+  const match = /^#([0-9a-f]{6})([0-9a-f]{2})?$/i.exec(color ?? '');
+  if (!match) return undefined;
+  const hex = match[1] as string;
+  const channel = (at: number) => Number.parseInt(hex.slice(at, at + 2), 16) / 255;
+  const alpha = match[2] ? Number.parseInt(match[2], 16) / 255 : 1;
+  return [channel(0), channel(2), channel(4), alpha];
 }

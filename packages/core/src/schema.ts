@@ -12,6 +12,13 @@ import { FORMAT_NAME, FORMAT_VERSION } from './format';
 import { FILE_INPUT_MEDIA_TYPES, MEDIA_TYPES } from './media-types';
 import { PARAMETER_NAME } from './names';
 import { type GeomRefKind, GeomRefSchema, Vec3Schema } from './refs';
+import {
+  RENDER_FINISHES,
+  RENDER_MAX_SIDE,
+  RENDER_MIN_SIDE,
+  RENDER_PRESETS,
+  RENDER_QUALITIES,
+} from './render';
 import { attachmentFontId, SketchDataSchema } from './sketch/schema';
 import { z } from './zod';
 
@@ -257,6 +264,30 @@ export const NamedViewSchema = z.strictObject({
 });
 export type NamedView = z.infer<typeof NamedViewSchema>;
 
+/**
+ * Which camera Render Picture uses (ADR-0101 §4): the script frames the model
+ * itself (`auto`), the viewport's camera at the time of the render
+ * (`current`), or a named view.
+ */
+export const RenderCameraSchema = z.discriminatedUnion('kind', [
+  z.strictObject({ kind: z.literal('auto') }),
+  z.strictObject({ kind: z.literal('current') }),
+  z.strictObject({ kind: z.literal('view'), id: ViewIdSchema }),
+]);
+export type RenderCamera = z.infer<typeof RenderCameraSchema>;
+
+/** The Render dialog's settings, kept in the design (ADR-0101 §4). */
+export const RenderSettingsSchema = z.strictObject({
+  preset: z.enum(RENDER_PRESETS),
+  /** Only bodies whose finish isn't `matte`; entries of bodies that no longer exist are harmless. */
+  finishes: z.record(BodyIdSchema, z.enum(RENDER_FINISHES)).optional(),
+  camera: RenderCameraSchema,
+  width: z.int().min(RENDER_MIN_SIDE).max(RENDER_MAX_SIDE),
+  height: z.int().min(RENDER_MIN_SIDE).max(RENDER_MAX_SIDE),
+  quality: z.enum(RENDER_QUALITIES),
+});
+export type RenderSettings = z.infer<typeof RenderSettingsSchema>;
+
 export const SettingsSchema = z.strictObject({
   units: LengthUnitSchema,
   /** Decimal places shown for lengths and angles. */
@@ -409,6 +440,8 @@ export const DocumentSchema = z
     joints: z.array(JointSchema).optional(),
     bodies: z.record(BodyIdSchema, BodyMetaSchema),
     views: z.array(NamedViewSchema),
+    /** Render Picture settings (ADR-0101 §4); absent until the first render. */
+    render: RenderSettingsSchema.optional(),
     /** Named value sets for the customizer (P4-07); absent when there are none. */
     configurations: z.array(ConfigurationSchema).optional(),
     /** Files that travel with the design (ADR-0061); the bytes live beside the document. */

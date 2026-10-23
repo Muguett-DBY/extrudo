@@ -4,8 +4,9 @@
  * persistent-storage permission, files the user downloads or picks, a folder
  * on disk linked to the app where the browser has the API for it
  * (`folders`, FR-PRJ-06), and rescue copies of unsaved documents. Opening the
- * export in a slicer is optional and desktop-only (`openInSlicer`, ADR-0062);
- * native dialogs come later.
+ * export in a slicer (`openInSlicer`, ADR-0062) and rendering a picture with
+ * Blender (`render`, ADR-0101) are optional and desktop-only; native dialogs
+ * come later.
  */
 import {
   createBrowserProjectStore,
@@ -28,6 +29,7 @@ import {
 import { type FileAccess, webFiles } from './files';
 import { folderAccess, type LinkedFolders, webFolders } from './folders';
 import { type Preferences, webPreferences } from './preferences';
+import type { BlenderRenderer } from './render';
 import { type RescueStore, recoverRescued, webRescue } from './rescue';
 import type { OpenInSlicer, SlicerId } from './slicer';
 import { type StorageAccess, webStorage } from './storage';
@@ -170,6 +172,13 @@ export interface Platform {
    */
   installedSlicers?: () => Promise<readonly SlicerId[]>;
   /**
+   * Renders a picture of the design with Blender (ADR-0101). The web platform
+   * leaves it undefined: nothing in a browser can start a program. The
+   * Electron build implements it over a headless Blender; the Render tile
+   * offers the dialog only when it exists.
+   */
+  render?: BlenderRenderer;
+  /**
    * "A new version is ready" (ADR-0054; P6-01 slice 4 made it a platform seam).
    * The web's is `appUpdates` (the service worker waits, Reload applies it);
    * the desktop's follows electron-updater in main (Restart installs). Absent:
@@ -287,6 +296,16 @@ export {
   webFolders,
 } from './folders';
 export { memoryPreferences, type Preferences, webPreferences } from './preferences';
+export {
+  BLENDER_DOWNLOAD_URL,
+  BLENDER_MIN_VERSION,
+  type BlenderRenderer,
+  type BlenderStatus,
+  type RenderJob,
+  type RenderObject,
+  type RenderProgress,
+  type RenderResult,
+} from './render';
 export { memoryRescue, type RescueStore, recoverRescued, webRescue } from './rescue';
 export { offlineSupported, registerServiceWorker } from './serviceWorker';
 export {

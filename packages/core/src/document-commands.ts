@@ -17,6 +17,8 @@ import {
   type NamedView,
   PARAMETER_NAME,
   type Parameter,
+  type RenderSettings,
+  RenderSettingsSchema,
   type Settings,
   type ViewCamera,
 } from './schema';
@@ -48,6 +50,7 @@ export const restoreVersion = defineCommand<{ doc: ExtrudoDocument }>(
     draft.timelineMarker = doc.timelineMarker;
     draft.bodies = doc.bodies;
     draft.views = doc.views;
+    draft.render = doc.render;
     draft.configurations = doc.configurations;
     draft.attachments = doc.attachments;
     draft.groups = doc.groups;
@@ -406,6 +409,21 @@ export const removeView = defineCommand<{ id: ViewId }>(
     const index = draft.views.findIndex((v) => v.id === id);
     if (index < 0) throw new CommandError(`View ${id} doesn't exist.`);
     draft.views.splice(index, 1);
+  },
+);
+
+/**
+ * Stores the Render dialog's settings (ADR-0101 §4). The dialog dispatches it
+ * only when the settings differ from the stored ones, so a repeated render
+ * makes no undo step. The payload is validated by the schema.
+ */
+export const setRenderSettings = defineCommand<{ render: RenderSettings }>(
+  'render.set',
+  'Set render settings',
+  (draft, { render }) => {
+    const parsed = RenderSettingsSchema.safeParse(render);
+    if (!parsed.success) throw new CommandError('The render settings are invalid.');
+    draft.render = parsed.data;
   },
 );
 
