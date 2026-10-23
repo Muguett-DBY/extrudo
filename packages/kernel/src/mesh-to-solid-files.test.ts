@@ -246,32 +246,33 @@ describe('Mesh to Solid, prismatic on the fixtures', { timeout: 120_000 }, () =>
 // picks a ladder step (0.01, 0.02, 0.05 or 0.1 mm) and converts no worse than
 // at 0.01 mm.
 describe('Mesh to Solid, prismatic on the fixtures at Auto', { timeout: 120_000 }, () => {
-  const autoFixtures: [string, string][] = [
-    ['hole-filler-35mm.stl', holeFillerStl],
-    ['trashcan-repair-foot.stl', repairFootStl],
-    ['puzzle-base-circle.stl', puzzleBaseStl],
-    ['trashcan-spacer.stl', spacerStl],
-    ['peg-perego-button.stl', pegPeregoStl],
-    ['drill-block.stl', drillBlockStl],
-    ['track-straight-100mm.stl', trackStl],
-    ['remove-before-flight-cover.stl', flightCoverStl],
+  // [name, url, the ladder step Auto picks, the outcome]
+  const autoFixtures: [string, string, number, { faces: number; rebuild: string }][] = [
+    ['hole-filler-35mm.stl', holeFillerStl, 0.01, { faces: 6, rebuild: 'exact' }],
+    ['trashcan-repair-foot.stl', repairFootStl, 0.01, { faces: 16, rebuild: 'exact' }],
+    ['puzzle-base-circle.stl', puzzleBaseStl, 0.01, { faces: 37, rebuild: 'exact' }],
+    ['trashcan-spacer.stl', spacerStl, 0.05, { faces: 78, rebuild: 'hybrid' }],
+    ['peg-perego-button.stl', pegPeregoStl, 0.02, { faces: 212, rebuild: 'hybrid' }],
+    ['drill-block.stl', drillBlockStl, 0.01, { faces: 93, rebuild: 'exact' }],
+    ['track-straight-100mm.stl', trackStl, 0.01, { faces: 306, rebuild: 'hybrid' }],
+    ['remove-before-flight-cover.stl', flightCoverStl, 0.01, { faces: 438, rebuild: 'hybrid' }],
   ];
-  const ladder = [0.01, 0.02, 0.05, 0.1];
-  for (const [name, url] of autoFixtures) {
-    it(`converts ${name} with Auto`, () => {
+  for (const [name, url, tolerance, outcome] of autoFixtures) {
+    it(`converts ${name} with Auto at ${tolerance} mm`, () => {
       const stl = readStl(bytesOf(url));
       const volume = meshVolume(stl.mesh.positions, stl.mesh.indices);
       const mesh = kernel.meshFrom(stl.mesh);
       try {
         const { shape, report } = kernel.meshToSolid(mesh, { method: 'prismatic', tolerance: -1 });
         try {
-          expect(report.auto).toBe(true);
-          expect(ladder).toContain(report.tolerance);
+          expect(report).toMatchObject({
+            auto: true,
+            tolerance,
+            rebuild: outcome.rebuild,
+            faces: outcome.faces,
+          });
           expect(kernel.isValid(shape)).toBe(true);
           expect(Math.abs(kernel.properties(shape).volume / volume - 1)).toBeLessThan(0.02);
-          console.log(
-            `auto ${name}: tolerance ${report.tolerance}, rebuild ${report.rebuild}, faces ${report.faces}, facets ${report.facets}, unfit ${report.unfit.regions}`,
-          );
         } finally {
           kernel.release(shape);
         }

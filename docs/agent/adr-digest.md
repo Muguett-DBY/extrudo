@@ -2991,7 +2991,8 @@ history), and so does a mesh node no face covers: up to three builds. The
 checks are the exact stage's (validity, every n-th node within the
 tolerance), the volume within max(1 %, 2 Σ area·sag + tolerance × area) over
 the recognised regions. Facets (result faces that only facets made, by
-unify's history) over `HYBRID_FACET_CAP` (4,000; pre-estimated with
+unify's history) over `HYBRID_FACET_CAP` (4,000 in slice D1; 5,000 since slice
+D2, see the paragraph below; pre-estimated with
 faceted's coplanar rule and refused at once past 1.5 ×) refuse with the share
 rebuilt exactly and the facet count; past its budget it "gave up after 90 s";
 any other hybrid refusal gives the rebuild message (it wins over the unfit

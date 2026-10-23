@@ -1231,3 +1231,113 @@ instead of fixing it. Three things change here, the owner's decisions of
   editing a feature whose `tolerance` is present opens with Custom selected.
   The region request (`dialog.ts`) passes −1 for Auto. The Import dialog's
   "As solid" adds `meshToSolid` with Prismatic and no tolerance: Auto now.
+
+#### The real files (slice D2)
+
+The sweeps below are the kernel's (`mesh-to-solid-files.test.ts`) over the owner's 41 STLs in `~/Development/extrudo-stl-solid-test/` at `TOL=auto` and `TOL=0.01`, one process, CI's WASM `occt-43138ec84a10` on the Ubuntu machine. The importer refuses the four open meshes (grass-for-flower, chip-bag-clip-small, hex-key-cap-3mm, mms-m5-nut), so each table has the 37 it accepts. Faces by kind planes/cylinders/cones/spheres/tori count **recognised faces**; facets are apart. Auto picks the ladder step named; the same file's 0.01 outcome follows.
+
+**Prismatic over the 37 accepted files at Auto** (kernel, CI WASM `occt-43138ec84a10`, this machine; faces by kind planes/cylinders/cones/spheres/tori count recognised faces, facets apart; volume against the mesh's): 36 of 37 convert.
+
+| file | tolerance | outcome | faces (pl/cy/co/sp/to) | facets | volume | s |
+|---|---|---|---|---|---|---|
+| own/ball | 0.01 mm | exact | 1 | 0/0/0/1/0 | 0 | 1.0018 | 0.0 |
+| own/battery-holder | 0.01 mm | hybrid | 131 | 61/33/37/0/0 | 0 | 0.9991 | 11.0 |
+| own/battery-power-adapter | 0.1 mm | hybrid | 994 | 505/70/3/0/1 | 415 | 1.0012 | 3.3 |
+| own/desk-organizer-module-small | 0.01 mm | hybrid | 418 | 198/166/0/0/12 | 42 | 0.9999 | 35.6 |
+| own/drill-block | 0.01 mm | exact (3 unfit left out) | 93 | 77/12/0/0/4 | 0 | 1.0014 | 4.2 |
+| own/hole-filler-35mm | 0.01 mm | exact | 6 | 3/2/0/0/1 | 0 | 1.0013 | 0.4 |
+| own/hole-filler-5mm | 0.01 mm | exact | 6 | 3/2/1/0/0 | 0 | 1.0003 | 0.0 |
+| own/kuglbahn-pillar-base | 0.1 mm | hybrid | 3941 | 430/86/0/6/10 | 3409 | 1.0012 | 10.7 |
+| own/mirna-doodle-1 | 0.1 mm | hybrid | 120 | 63/14/0/0/0 | 43 | 0.9928 | 0.3 |
+| own/numbers-base-top | 0.01 mm | exact | 471 | 471/0/0/0/0 | 0 | 1.0000 | 1.1 |
+| own/object-permanence-base | 0.01 mm | hybrid | 1985 | 333/25/5/2/0 | 1620 | 0.9998 | 13.9 |
+| own/peg-perego-button | 0.02 mm | hybrid | 212 | 99/103/2/5/3 | 0 | 1.0036 | 25.5 |
+| own/phone-stand-foldable | 0.1 mm | hybrid | 2325 | 458/10/0/0/10 | 1847 | 1.0010 | 37.5 |
+| own/puzzle-base-circle | 0.01 mm | exact | 37 | 35/1/0/0/1 | 0 | 0.9999 | 0.3 |
+| own/puzzle-insert-circle | 0.05 mm | hybrid | 1609 | 318/59/1/0/1 | 1230 | 0.9982 | 36.2 |
+| own/remove-before-flight-cover | 0.01 mm | hybrid | 438 | 252/62/4/0/0 | 120 | 1.0000 | 10.2 |
+| own/scrap-plate | 0.02 mm | hybrid | 154 | 61/77/16/0/0 | 0 | 0.9988 | 17.9 |
+| own/shower-holder | 0.01 mm | hybrid | 901 | 201/224/4/0/0 | 472 | 0.9999 | 70.0 |
+| own/spool-nut-v4.1 | 0.01 mm | hybrid | 718 | 654/63/1/0/0 | 0 | 0.9995 | 14.5 |
+| own/spool-screw-v4.1 | 0.05 mm | hybrid | 3197 | 975/95/4/0/0 | 2123 | 1.0004 | 26.6 |
+| own/track-straight-100mm | 0.01 mm | hybrid | 306 | 65/2/2/0/0 | 237 | 1.0000 | 0.9 |
+| own/trashcan-repair-foot | 0.01 mm | exact | 16 | 12/4/0/0/0 | 0 | 0.9989 | 0.1 |
+| own/trashcan-spacer | 0.05 mm | hybrid | 78 | 56/14/0/4/4 | 0 | 1.0000 | 2.0 |
+| own/whiteboard-tray-v5 | 0.02 mm | ✗ rebuild | – | – | – | – | – |
+| third-party/door-stopper-top | 0.01 mm | hybrid | 147 | 5/142/0/0/0 | 0 | 1.0001 | 17.7 |
+| third-party/gardena-end | 0.01 mm | hybrid | 17 | 5/5/2/1/4 | 0 | 1.0038 | 3.5 |
+| third-party/gear-bearing-5 | 0.1 mm | hybrid | 2308 | 291/581/0/10/8 | 1418 | 1.0084 | 11.3 |
+| third-party/hot-wheels-connector | 0.01 mm | hybrid | 2015 | 173/9/0/0/0 | 1833 | 1.0000 | 18.4 |
+| third-party/makita-vacuum-holder | 0.05 mm | hybrid | 3480 | 557/237/8/12/4 | 2662 | 0.9999 | 8.8 |
+| third-party/micro-sd-keyring-inner | 0.01 mm | hybrid | 66 | 28/16/0/4/0 | 18 | 0.9953 | 4.8 |
+| third-party/micro-sd-keyring-outer | 0.01 mm | exact | 41 | 23/18/0/0/0 | 0 | 1.0000 | 0.4 |
+| third-party/mms-camera-mount | 0.01 mm | exact | 11 | 9/1/1/0/0 | 0 | 1.0000 | 0.0 |
+| third-party/mms-flat-stand | 0.01 mm | exact | 44 | 37/6/1/0/0 | 0 | 1.0000 | 0.3 |
+| third-party/sock-clips-6x | 0.01 mm | hybrid | 161 | 34/31/0/0/6 | 90 | 1.0035 | 34.7 |
+| third-party/spaghetti-measure | 0.01 mm | hybrid | 165 | 48/61/0/1/0 | 55 | 1.0000 | 24.5 |
+| third-party/vented-funnel | 0.02 mm | hybrid | 715 | 452/150/10/11/6 | 86 | 0.9999 | 7.0 |
+| third-party/wyze-garage-bracket | 0.01 mm | hybrid | 84 | 55/27/2/0/0 | 0 | 1.0001 | 1.1 |
+
+**Prismatic over the 37 accepted files at a fixed 0.01 mm** (kernel, CI WASM `occt-43138ec84a10`, this machine; faces by kind planes/cylinders/cones/spheres/tori count recognised faces, facets apart; volume against the mesh's): 33 of 37 convert.
+
+| file | tolerance | outcome | faces (pl/cy/co/sp/to) | facets | volume | s |
+|---|---|---|---|---|---|---|
+| own/ball | 0.01 | exact | 1 | 0/0/0/1/0 | 0 | 1.0018 | 0.0 |
+| own/battery-holder | 0.01 | hybrid | 131 | 61/33/37/0/0 | 0 | 0.9991 | 12.0 |
+| own/battery-power-adapter | 0.01 | hybrid | 4506 | 253/136/3/5/0 | 4109 | 1.0005 | 10.1 |
+| own/desk-organizer-module-small | 0.01 | hybrid | 418 | 198/166/0/0/12 | 42 | 0.9999 | 40.1 |
+| own/drill-block | 0.01 | exact (3 unfit left out) | 93 | 77/12/0/0/4 | 0 | 1.0014 | 4.9 |
+| own/hole-filler-35mm | 0.01 | exact | 6 | 3/2/0/0/1 | 0 | 1.0013 | 0.4 |
+| own/hole-filler-5mm | 0.01 | exact | 6 | 3/2/1/0/0 | 0 | 1.0003 | 0.0 |
+| own/kuglbahn-pillar-base | 0.01 | ✗ cap | – | – | – | – | – |
+| own/mirna-doodle-1 | 0.01 | hybrid | 168 | 77/26/0/0/0 | 65 | 1.0070 | 0.3 |
+| own/numbers-base-top | 0.01 | exact | 471 | 471/0/0/0/0 | 0 | 1.0000 | 1.2 |
+| own/object-permanence-base | 0.01 | hybrid | 1985 | 333/25/5/2/0 | 1620 | 0.9998 | 15.6 |
+| own/peg-perego-button | 0.01 | hybrid | 892 | 108/94/8/10/2 | 670 | 1.0041 | 2.3 |
+| own/phone-stand-foldable | 0.01 | hybrid | 3654 | 587/211/0/3/12 | 2841 | 1.0001 | 19.0 |
+| own/puzzle-base-circle | 0.01 | exact | 37 | 35/1/0/0/1 | 0 | 0.9999 | 0.3 |
+| own/puzzle-insert-circle | 0.01 | hybrid | 4722 | 11/15/1/0/17 | 4678 | 1.0002 | 5.5 |
+| own/remove-before-flight-cover | 0.01 | hybrid | 438 | 252/62/4/0/0 | 120 | 1.0000 | 11.0 |
+| own/scrap-plate | 0.01 | hybrid | 326 | 66/67/12/8/0 | 173 | 1.0001 | 2.7 |
+| own/shower-holder | 0.01 | hybrid | 901 | 201/224/4/0/0 | 472 | 0.9999 | 76.0 |
+| own/spool-nut-v4.1 | 0.01 | hybrid | 718 | 654/63/1/0/0 | 0 | 0.9995 | 16.3 |
+| own/spool-screw-v4.1 | 0.01 | hybrid | 5909 | 778/174/4/0/0 | 4953 | 0.9996 | 25.5 |
+| own/track-straight-100mm | 0.01 | hybrid | 306 | 65/2/2/0/0 | 237 | 1.0000 | 1.0 |
+| own/trashcan-repair-foot | 0.01 | exact | 16 | 12/4/0/0/0 | 0 | 0.9989 | 0.1 |
+| own/trashcan-spacer | 0.01 | hybrid | 419 | 2/0/0/4/4 | 409 | 1.0001 | 1.0 |
+| own/whiteboard-tray-v5 | 0.01 | ✗ rebuild | – | – | – | – | – |
+| third-party/door-stopper-top | 0.01 | hybrid | 147 | 5/142/0/0/0 | 0 | 1.0001 | 19.4 |
+| third-party/gardena-end | 0.01 | hybrid | 17 | 5/5/2/1/4 | 0 | 1.0038 | 3.8 |
+| third-party/gear-bearing-5 | 0.01 | ✗ cap | – | – | – | – | – |
+| third-party/hot-wheels-connector | 0.01 | hybrid | 2015 | 173/9/0/0/0 | 1833 | 1.0000 | 19.8 |
+| third-party/makita-vacuum-holder | 0.01 | ✗ cap | – | – | – | – | – |
+| third-party/micro-sd-keyring-inner | 0.01 | hybrid | 66 | 28/16/0/4/0 | 18 | 0.9953 | 5.0 |
+| third-party/micro-sd-keyring-outer | 0.01 | exact | 41 | 23/18/0/0/0 | 0 | 1.0000 | 0.4 |
+| third-party/mms-camera-mount | 0.01 | exact | 11 | 9/1/1/0/0 | 0 | 1.0000 | 0.0 |
+| third-party/mms-flat-stand | 0.01 | exact | 44 | 37/6/1/0/0 | 0 | 1.0000 | 0.3 |
+| third-party/sock-clips-6x | 0.01 | hybrid | 161 | 34/31/0/0/6 | 90 | 1.0035 | 34.5 |
+| third-party/spaghetti-measure | 0.01 | hybrid | 165 | 48/61/0/1/0 | 55 | 1.0000 | 24.6 |
+| third-party/vented-funnel | 0.01 | hybrid | 1910 | 522/187/10/13/5 | 1173 | 0.9994 | 10.5 |
+| third-party/wyze-garage-bracket | 0.01 | hybrid | 84 | 55/27/2/0/0 | 0 | 1.0001 | 1.3 |
+
+**Acceptance, slice D2.** Auto converts **36 of the 37** the importer accepts
+(one refusal, whiteboard-tray-v5: at its Auto pick of 0.02 mm the exact rebuild
+still refuses in 33 s and the hybrid has nothing to add). Every file that
+converted exactly at 0.01 mm in D1's table still converts exactly, with the
+same faces: ball (1 sphere), drill-block (93), hole-filler-35mm (6),
+hole-filler-5mm (6), numbers-base-top (471), puzzle-base-circle (37),
+trashcan-repair-foot (16), micro-sd-keyring-outer (41), mms-camera-mount (11),
+mms-flat-stand (44). The ladder adds under 2 s to the slowest file (shower-holder,
+the slowest at 70 s, picks 0.01 at the first step: no extra segmentation;
+whiteboard-tray-v5 at 0.02 is 33 s against 41 s at 0.01). **The facet cap at
+5,000 converts puzzle-insert-circle (4,678 facets, 5.5 s) and spool-screw-v4.1
+(4,953, 25.5 s), and battery-power-adapter (4,109, 10.1 s), at 0.01 mm**;
+kuglbahn-pillar-base (about 13,915), gear-bearing-5 (14,648) and
+makita-vacuum-holder (10,512) stay over it and convert under Auto at 0.1, 0.05,
+respectively. The cavity rule is proven by the kernel test (a box with a closed
+cubic cavity converts to one solid of 7,000 mm³ in Faceted and Prismatic) and by
+Prismatic on desk-organizer-module-small (418 faces, volume 0.9999). **Faceted
+does not convert desk-organizer-module-small**: its coplanar-facet result is
+about 15,635 faces, over `FACETED_FACE_CAP` (2,000), so the conversion is
+refused before the cavity rule can apply; the same holds for
+whiteboard-tray-v5 (about 7,944). Faceted's cap was not raised in this slice.
