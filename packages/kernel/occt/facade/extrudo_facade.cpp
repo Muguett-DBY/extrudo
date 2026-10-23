@@ -10103,8 +10103,15 @@ private:
         for (int t = 0; t < triangleCount; ++t)
           for (int k = 0; k < 3; ++k) trianglesOf[corner(t, k)].push_back(t);
         const double reach = tolerance * 1.01 + 1e-7;
+        // A collapsed chain's nodes were measured against its curve (within
+        // 1.5 × the tolerance, an edge of the result): not again here.
+        std::vector<char> onCollapsed(nodeCount, 0);
+        for (size_t c = 0; c < chains.size(); ++c)
+          if (collapsedNow[c])
+            for (int n : chains[c].nodes) onCollapsed[n] = 1;
         for (int n = 0; n < nodeCount; n += nodeStride) {
           check();
+          if (onCollapsed[n]) continue;
           const gp_Pnt p(meshNode(n));
           bool near = false;
           for (MeshCheckedFace& c : checked) {
