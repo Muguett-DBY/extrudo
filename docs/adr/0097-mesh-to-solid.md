@@ -79,8 +79,9 @@ per-number embind calls for a million-triangle mesh.
 tolerance 1e-3, concave faces allowed) → `ShapeFix_Shape` only if
 `BRepCheck_Analyzer` says invalid (the sphere needed it, the box didn't) →
 `store`. Refused when the estimated result has more than `FACETED_FACE_CAP`
-= 2,000 faces: "Faceted would give about 9,497 faces; Extrudo converts up to
-2,000. Use Prismatic, or simplify the mesh in your slicer." The count is
+= 5,000 faces (2,000 until slice D4, below): "Faceted would give about 9,497
+faces; Extrudo converts up to
+5,000. Use Prismatic, or simplify the mesh in your slicer." The count is
 estimated from the triangle buffers **before** anything is built (2026-10-22
 amendment); the exact count after unify stays a backstop, and its message has
 no "about".

@@ -210,7 +210,7 @@ describe('Kernel.meshToSolid, faceted', { timeout: 300_000 }, () => {
     }
   });
 
-  it('refuses a mesh that would give more than 2,000 faces', () => {
+  it('refuses a mesh that would give more than 5,000 faces', () => {
     const mesh = meshOf(manifold.Manifold.sphere(10, 128));
     try {
       let error: unknown;
@@ -224,7 +224,7 @@ describe('Kernel.meshToSolid, faceted', { timeout: 300_000 }, () => {
       const ms = performance.now() - start;
       expect(error).toBeInstanceOf(KernelError);
       expect((error as Error).message).toMatch(/^Faceted would give /);
-      expect((error as Error).message).toContain('Extrudo converts up to 2,000');
+      expect((error as Error).message).toContain('Extrudo converts up to 5,000');
       // The face count comes before the build (ADR-0097 §3, 2026-10-22).
       expect(ms).toBeLessThan(1000);
     } finally {
@@ -232,22 +232,21 @@ describe('Kernel.meshToSolid, faceted', { timeout: 300_000 }, () => {
     }
   });
 
-  // The 72-segment sphere's faceted result has 2,592 faces (measured); its
-  // estimate matches exactly, so the pre-count (2,592 ≤ 1.5 × 2,000) lets the
-  // build run and the exact count refuses: the message has no "about".
-  it('refuses a 2,592-face sphere between the cap and the margin, by the exact count', () => {
+  // Slice D4: the cap is 5,000, so the 72-segment sphere's 2,592 faces convert
+  // (before it sat between the 2,000 cap and its 1.5x margin and the exact
+  // count refused it).
+  it('converts a 2,592-face sphere in Faceted (the cap is 5,000 since slice D4)', () => {
     const mesh = meshOf(manifold.Manifold.sphere(10, 72));
     try {
-      let error: unknown;
+      const { shape, report } = kernel.meshToSolid(mesh, { method: 'faceted', tolerance: 0.01 });
       try {
-        const { shape } = kernel.meshToSolid(mesh, { method: 'faceted', tolerance: 0.01 });
+        expect(kernel.isValid(shape)).toBe(true);
+        expect(report.faces).toBe(2592);
+        expect(report.planes).toBe(2592);
+        expect(kernel.count(shape, 'face')).toBe(2592);
+      } finally {
         kernel.release(shape);
-      } catch (e) {
-        error = e;
       }
-      expect(error).toBeInstanceOf(KernelError);
-      expect((error as Error).message).toMatch(/^Faceted would give \d+ faces;/);
-      expect((error as Error).message).toContain('Extrudo converts up to 2,000');
     } finally {
       kernel.release(mesh);
     }
@@ -729,19 +728,21 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
     }
   });
 
-  it('22: leaves a small unfit blend out of the rebuild (slice C): the box comes back sharp', () => {
+  it('22: keeps a small unfit blend as facets (slice D4 skips the exact stage on any unfit region)', () => {
     const mesh = twistedChamferMesh(2, 1);
     const { shape, report } = prismatic(kernel.meshFrom(mesh));
     try {
-      expect(kinds(shape)).toEqual(Array(6).fill('plane'));
+      // The box's planes stay planes; the saddle is facets, the volume the mesh's.
+      expect(report.rebuild).toBe('hybrid');
+      expect(report.planes).toBeGreaterThanOrEqual(6);
+      expect(report.facets).toBeGreaterThan(0);
       expect(kernel.isValid(shape)).toBe(true);
-      // The report keeps what was left out: one region, its triangles and share.
+      // The report keeps what stayed facets: one region, its triangles and share.
       expect(report.unfit.regions).toBe(1);
       expect(report.unfit.triangles).toBeGreaterThan(0);
       expect(report.unfit.fraction).toBeGreaterThan(0);
       expect(report.unfit.fraction).toBeLessThanOrEqual(0.02);
-      // The chamfer's volume comes back with the sharp edge: 4000 against the mesh's ~3985.
-      expect(kernel.properties(shape).volume).toBeCloseTo(4000, 3);
+      // The blend is kept as facets, so the volume is the mesh's (not the sharp box's 4000).
       expect(Math.abs(kernel.properties(shape).volume / volumeOfMesh(mesh) - 1)).toBeLessThan(
         0.005,
       );

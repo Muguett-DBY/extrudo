@@ -1537,7 +1537,7 @@ gives the mesh back. The result's faces are named
 `toSolid:<feature>:face:<n>`, `n` the face's position in the result shape,
 with edges and vertices derived; there is no history into the mesh, so a
 reference to such a face survives a recompute until the mesh, the method or
-the tolerance changes. `faceted` refuses a result of more than 2,000 faces
+the tolerance changes. `faceted` refuses a result of more than 5,000 faces
 and `prismatic` more than 500 recognised surfaces, or any region that fits
 no plane, cylinder, cone, sphere or torus. The feature's report of kind
 `meshToSolid` carries `method`, `faces`, `planes`, `cylinders`, `cones`,

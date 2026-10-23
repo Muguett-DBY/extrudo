@@ -5589,8 +5589,8 @@ private:
   /** meshRegions' output: a surface index per triangle, a kind per surface. */
   std::vector<int32_t> meshRegionOf_;
   std::vector<int32_t> meshRegionKinds_;
-  /** Faceted refuses a result with more faces than this (ADR-0097 §3). */
-  static constexpr int FACETED_FACE_CAP = 2000;
+  /** Faceted refuses a result with more faces than this (ADR-0097 §3; 5,000 since slice D4). */
+  static constexpr int FACETED_FACE_CAP = 5000;
   /** The pre-count refuses only this far over the cap: the estimate over-counts by up to about 40 % on real meshes (ADR-0097, 2026-10-22 slice D). */
   static constexpr double FACETED_ESTIMATE_MARGIN = 1.5;
 
@@ -5790,7 +5790,8 @@ private:
       // count below decides.
       if (estimate > FACETED_FACE_CAP * FACETED_ESTIMATE_MARGIN) {
         const std::string message = "Faceted would give about " + std::to_string(estimate) +
-                                    " faces; Extrudo converts up to 2,000. Use Prismatic, or simplify the mesh in your slicer.";
+                                    " faces; Extrudo converts up to " + thousands(FACETED_FACE_CAP) +
+                                    ". Use Prismatic, or simplify the mesh in your slicer.";
         return fail(message.c_str());
       }
       // A refusal names the reason (ADR-0097 §3, 2026-10-22): what happened, then what to do.
@@ -5904,7 +5905,8 @@ private:
       // The exact count stays a backstop: the estimate can be off by a few faces.
       if (totalFaces > FACETED_FACE_CAP) {
         const std::string message = "Faceted would give " + std::to_string(totalFaces) +
-                                    " faces; Extrudo converts up to 2,000. Use Prismatic, or simplify the mesh in your slicer.";
+                                    " faces; Extrudo converts up to " + thousands(FACETED_FACE_CAP) +
+                                    ". Use Prismatic, or simplify the mesh in your slicer.";
         return fail(message.c_str());
       }
       for (TopoDS_Shape& piece : pieces) {
@@ -5939,8 +5941,13 @@ private:
 
   /** Prismatic refuses more recognised surfaces than this (ADR-0097 §3). */
   static constexpr int PRISMATIC_SURFACE_CAP = 500;
-  /** Prismatic's rebuild (everything after segmentMesh) gives up after this much wall-clock time (ADR-0097's 2026-10-22 amendment). */
-  static constexpr double PRISMATIC_REBUILD_BUDGET_MS = 30000;
+  /**
+   * Prismatic's rebuild (everything after segmentMesh) gives up after this much
+   * wall-clock time (ADR-0097's 2026-10-22 amendment; 30 s lowered to 12 s in
+   * slice D4: the exact files finish in under 5 s each). The overrun inside one
+   * long BOPAlgo_MakerVolume step is bounded by the exact stage's skip rule.
+   */
+  static constexpr double PRISMATIC_REBUILD_BUDGET_MS = 12000;
   /** Unfit regions covering at most this share of the surface area are left out of the rebuild instead of refusing (slice C). */
   static constexpr double PRISMATIC_UNFIT_ALLOWED = 0.02;
   /**
@@ -8305,8 +8312,8 @@ private:
    * the staged buffers, in two stages: segmentMesh, then the exact rebuild
    * (rebuildPrismatic: one oversized face per surface, BOPAlgo_MakerVolume,
    * the cells inside the mesh kept, the result checked against the mesh),
-   * skipped when the segmentation already rules it out (unfit regions over
-   * PRISMATIC_UNFIT_ALLOWED, surfaces over PRISMATIC_SURFACE_CAP); then,
+   * skipped when the segmentation already rules it out (any unfit region, or
+   * surfaces over PRISMATIC_SURFACE_CAP; slice D4); then,
    * when it was skipped or refused, the hybrid rebuild (rebuildHybrid, slice
    * D1) on a deadline of its own. The tolerance retries run only when both
    * refused. Fills meshReport_ before a refusal too.
@@ -8347,15 +8354,22 @@ private:
                             : std::string("Use Faceted, or simplify the mesh in your slicer.");
         unfitFailed = "Mesh to Solid couldn't close the body: " + regionsText + advice;
       }
-      // Small unfit regions (a sliver, a blend, text) are left out of the
-      // exact rebuild (slice C); more, or more surfaces than MakerVolume can
-      // take, skip it: the hybrid rebuild keeps them as facets.
-      const bool exactSkipped = unfitFraction > PRISMATIC_UNFIT_ALLOWED ||
-                                planes + cylinders + cones + spheres + tori > PRISMATIC_SURFACE_CAP;
+      // The exact stage runs only when the segmentation has no unfit region at
+      // all and at most PRISMATIC_SURFACE_CAP surfaces (slice D4). An unfit
+      // region left out (slice C) changes the geometry — its triangles are
+      // dropped and the neighbours' faces extended to meet — where the hybrid
+      // keeps it as facets, which is more faithful and is where such a file
+      // ends up anyway when the exact stage fails; and the exact rebuild can
+      // burn its whole budget (MakerVolume overruns it inside one long step).
+      // PRISMATIC_UNFIT_ALLOWED stays rebuildPrismatic's own rule (the share
+      // it leaves out) and the Auto ladder's stopping rule.
+      const int recognisedSurfaces = planes + cylinders + cones + spheres + tori;
+      const bool exactSkipped = unfitRegions > 0 || recognisedSurfaces > PRISMATIC_SURFACE_CAP;
       // An exception in the booleans is a failed rebuild like any other;
       // past the budget, the rebuild gives up (a refusal, never a trap).
-      static const char* const gaveUp =
-          "Mesh to Solid gave up after 30 s: this mesh has too many surfaces to rebuild exactly. Use Faceted, or "
+      const std::string gaveUp =
+          "Mesh to Solid gave up after " + std::to_string(static_cast<int>(PRISMATIC_REBUILD_BUDGET_MS / 1000)) +
+          " s: this mesh has too many surfaces to rebuild exactly. Use Faceted, or "
           "simplify the mesh in your slicer.";
       Handle(MeshDeadline) deadline;
       auto rebuild = [&](double t, MeshSegmentation& s, const std::string& failed) {
@@ -8410,7 +8424,7 @@ private:
         return fail(message.c_str());
       }
       // The exact rebuild ran out of time: no retries; the hybrid's own refusal says what happened.
-      if (exactExpired) return fail(hybridThrew ? gaveUp : rebuildFailed.c_str());
+      if (exactExpired) return fail(hybridThrew ? gaveUp.c_str() : rebuildFailed.c_str());
       // A tolerance to suggest: the exact rebuild (segmentation included) at
       // 2 and 5 x the tolerance, within what is left of its budget (a budget
       // of its own when it was skipped). The result there is dropped (the
