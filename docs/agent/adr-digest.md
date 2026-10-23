@@ -3006,3 +3006,30 @@ place of the region counts. Not the rejected silent faceted fallback: the
 recognised faces are real surfaces and the line says what stayed facets.
 Harness: `FACES=1`, `TIMES=1`, `HYBRID_BUDGET`; tests read the loops through
 the facade's `meshLoopsDebug` (never on `Kernel`).
+
+**ADR-0097 slice D2 (2026-10-23): Auto tolerance, the facet cap at 5,000,
+cavities in Faceted.** A tolerance of 0 or less means **Auto** in
+`meshToSolid`/`meshRegions` (faceted ignores it): `meshAutoTolerance`
+segments at each of `MESH_AUTO_LADDER` (0.01, 0.02, 0.05, 0.1 mm) and stops
+at the first whose `unfitFraction` ≤ `PRISMATIC_UNFIT_ALLOWED` (2 %), reusing
+that step's `MeshSegmentation` (else the smallest share, ties: the smaller);
+each step costs a segmentation. `prismaticFromMesh` runs the exact stage first
+at the chosen tolerance, skips the 2 T / 5 T retries when Auto, and its
+"raise the tolerance" clauses become "Use Faceted, or simplify the mesh in
+your slicer." `meshReport_` is 13 doubles (the 13th the tolerance used in mm;
+−1 for faceted); `MeshToSolidReport` gains `tolerance?: number` and
+`auto?: boolean` (the kernel sets `auto` from ≤ 0), and
+`meshSurfaceSummary`/`meshToSolidSummary` append " · auto 0.05 mm"
+(`formatTolerance`, no trailing zeros). `Kernel.meshToSolid`/`meshRegions`
+document ≤ 0 as Auto; `MeshToSolidSettings` gains `tolerance: number | 'auto'`
+(absent input = Auto; `MESH_TO_SOLID_DEFAULT_TOLERANCE` is gone; the schema
+is unchanged). The dialog gets a `toleranceMode` choice (Auto default, Custom)
+with the `tolerance` expression ("Custom tolerance") shown only for Custom,
+mapping inputs itself (`toInputs`/`fromInputs`: Auto writes no `tolerance`
+input); its regions request passes −1 for Auto. `HYBRID_FACET_CAP` is 5,000.
+`facetedFromMesh` shares the hybrid's cavity rule through
+`solidsWithCavities(shells, insidePoints, meshVolume, …)`: a shell whose solid
+volume is below −1e-6 × max(1, |mesh volume|) is an inner shell of the solid
+that holds one of its nodes, never a solid of its own (none holds it:
+faceted's "a hollow lies in no solid."). Harness: `TOL=auto` (or `AUTO=1` in
+the kernel sweep); `TIMES=1` prints the ladder's `auto <tol>: unfit <share> %`.

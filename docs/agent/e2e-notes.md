@@ -1087,7 +1087,11 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
   `[data-legend="summary"]` (Prismatic only; the second swatch is **Curved**:
   cylinders, spheres and cones together); the viewport carries
   **`data-preview-regions="<body id>"`** while the view colours the body.
-  Method is a native select: `selectOption('faceted')`. The second test's
+  Method is a native select: `selectOption('faceted')`. Since slice D2 the
+  dialog has a **Tolerance** select (Auto, the default, or Custom) and, only
+  for Custom, a **Custom tolerance** expression; the Result line and the
+  chip's report name the kernel's pick as "· auto 0.02 mm", so match the
+  summary with a trailing-optional regex. The second test's
   shape is an **ellipsoid** (`sphereStl(0.6)`, a UV sphere with its z scaled
   by 0.6: 12 rings × 22 segments, 484 triangles, r 10 in x/y): it fits no
   sphere, so `data-regions="0 planes, 0 cylinders, 1 unfit"`; since slice D1

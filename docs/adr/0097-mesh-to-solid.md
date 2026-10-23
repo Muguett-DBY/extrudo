@@ -1166,3 +1166,68 @@ facets; the facet cap (5,000 would convert puzzle-insert-circle,
 spool-screw-v4.1 and battery-power-adapter at 0.01 mm in 3–18 s); skipping
 the exact stage when the hybrid would do (it costs up to 30 s, more when
 MakerVolume overruns).
+
+### Amendment, 2026-10-23: Auto tolerance, the facet cap, cavities in Faceted (slice D2)
+
+Slice D1's sweep over the owner's 41 STLs (below, and its own tables) showed
+the fixed default tolerance of 0.01 mm was the wrong knob. At 0.01 mm many
+parts keep hundreds of facets that fit fine at 0.05 mm (trashcan-spacer 409 →
+0 facets, peg-perego-button 670 → 48, phone-stand-foldable 2,841 → 1,391,
+puzzle-insert-circle refused → converts), while 0.05 mm makes others worse
+(trashcan-repair-foot exact 16 faces → hybrid with 72 facets; drill-block
+loses its tori). The tool stl2step derives its tolerance from the mesh
+instead of fixing it. Three things change here, the owner's decisions of
+2026-10-23.
+
+- **Auto is the default tolerance, picked by the kernel.** A tolerance of 0
+  or less passed to `meshToSolid(method, tolerance)` or
+  `meshRegions(tolerance)` means Auto; faceted ignores it as before.
+  `meshAutoTolerance` (private) runs `segmentMesh` at each step of the ladder
+  `MESH_AUTO_LADDER` = 0.01, 0.02, 0.05 and 0.1 mm, in that order, and stops
+  at the first whose `unfitFraction` is at most `PRISMATIC_UNFIT_ALLOWED`
+  (2 %, the share the exact rebuild tolerates); that step is the tolerance
+  and its `MeshSegmentation` is **reused** (the caller does not segment
+  again). When no step qualifies it takes the step with the smallest share
+  (ties: the smaller tolerance). Each extra step costs a segmentation (about
+  0.3 s on a 20,000-triangle mesh); under `TIMES=1` the harness prints each
+  as `auto 0.02: unfit 3.1 % <ms>`. `prismaticFromMesh` runs the exact stage
+  first at the chosen tolerance exactly as before; the 2 T / 5 T retries are
+  skipped when the tolerance was Auto (the ladder already went up), and the
+  refusals' "Raise the tolerance to X mm" clause becomes "Use Faceted, or
+  simplify the mesh in your slicer." A fixed `tolerance` behaves as before.
+- **The report names the tolerance.** `meshReport_` gains a 13th double: the
+  tolerance used in mm (always for prismatic, Auto or not; −1 for faceted).
+  `meshRegions` writes it too. Core's `MeshToSolidReport` gains
+  `tolerance?: number` and `auto?: boolean`; the kernel sets `auto` from
+  `tolerance <= 0` (the recipe passes −1 when the input is absent), so
+  `meshSurfaceSummary` and `meshToSolidSummary` append " · auto 0.02 mm"
+  (`formatTolerance`, no trailing zeros) and the feature's chip tooltip shows
+  it too. `Kernel.meshToSolid` / `Kernel.meshRegions` document tolerance ≤ 0
+  as Auto.
+- **The facet cap is 5,000.** `HYBRID_FACET_CAP` = 5,000; the message's
+  "Extrudo keeps up to 5,000" comes from the constant through `thousands()`.
+  This converts puzzle-insert-circle (4,678 facets at 0.01 mm), spool-screw
+  (4,953) and battery-power-adapter (4,107) that were refused by 17 %.
+- **Cavities in Faceted, one rule for both.** The hybrid's cavity code is
+  factored into `solidsWithCavities(shells, insidePoints, meshVolume, …)`:
+  a shell whose solid volume is below −1e-6 × max(1, |mesh volume|) is a
+  **cavity** — an inner shell of the solid that contains one of its nodes
+  (`BRepClass3d_SolidClassifier`, `BRepBuilderAPI_MakeSolid::Add`), never a
+  solid of its own; a cavity no solid holds refuses (the hybrid's "a cavity
+  in no solid"; faceted's "a hollow lies in no solid."). `facetedFromMesh`
+  calls it now, so a hollow part (desk-organizer-module-small, whiteboard-
+  tray-v5) comes out as one solid with a hollow instead of two solids;
+  `rebuildHybrid`'s behaviour is unchanged.
+- **The document and the dialog.** `tolerance` stays an optional `expr`
+  input; **absent means Auto** (today absent meant 0.01).
+  `MESH_TO_SOLID_DEFAULT_TOLERANCE` is gone; `MeshToSolidSettings` gains
+  `tolerance: number | 'auto'` (the expression's value, or `'auto'`; the
+  caller passes the evaluated value in). The schema itself is unchanged (no
+  new key). The dialog adds a `toleranceMode` **choice** (label "Tolerance",
+  Auto default, Custom) shown for prismatic, and the old expression field
+  becomes "Custom tolerance" (default 0.01 mm), shown only when prismatic
+  **and** Custom. `toleranceMode` is dialog-only: the spec maps the inputs
+  itself (`toInputs`/`fromInputs`), so Auto writes no `tolerance` input and
+  editing a feature whose `tolerance` is present opens with Custom selected.
+  The region request (`dialog.ts`) passes −1 for Auto. The Import dialog's
+  "As solid" adds `meshToSolid` with Prismatic and no tolerance: Auto now.

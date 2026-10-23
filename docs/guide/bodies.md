@@ -29,7 +29,8 @@ An imported mesh (STL, 3MF or OBJ) is a **mesh body**: triangles, with no faces 
 pick, so a fillet, shell or sketch on a face can't use it. **Mesh to Solid** (Solid › Modify,
 or **Convert to Solid…** in the body's right-click menu) turns it into a solid with real faces
 under the same name. *Faceted* keeps every flat facet as a face and is exact for parts made of
-flat faces; *Prismatic* finds planes, cylinders, cones, spheres and tori within a tolerance and
+flat faces; *Prismatic* finds planes, cylinders, cones, spheres and tori within a tolerance
+(the Auto default picks one from the mesh) and
 rebuilds them as exact surfaces, keeping what fits none of them as flat facets. A mesh of more faces than Extrudo can convert is refused with the
 count: simplify it in your slicer and try again.
 
