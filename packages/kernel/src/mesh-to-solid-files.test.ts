@@ -242,6 +242,46 @@ describe('Mesh to Solid, prismatic on the fixtures', { timeout: 120_000 }, () =>
   }
 });
 
+// Slice D2: the same fixtures with the Auto tolerance (absent = Auto): each
+// picks a ladder step (0.01, 0.02, 0.05 or 0.1 mm) and converts no worse than
+// at 0.01 mm.
+describe('Mesh to Solid, prismatic on the fixtures at Auto', { timeout: 120_000 }, () => {
+  const autoFixtures: [string, string][] = [
+    ['hole-filler-35mm.stl', holeFillerStl],
+    ['trashcan-repair-foot.stl', repairFootStl],
+    ['puzzle-base-circle.stl', puzzleBaseStl],
+    ['trashcan-spacer.stl', spacerStl],
+    ['peg-perego-button.stl', pegPeregoStl],
+    ['drill-block.stl', drillBlockStl],
+    ['track-straight-100mm.stl', trackStl],
+    ['remove-before-flight-cover.stl', flightCoverStl],
+  ];
+  const ladder = [0.01, 0.02, 0.05, 0.1];
+  for (const [name, url] of autoFixtures) {
+    it(`converts ${name} with Auto`, () => {
+      const stl = readStl(bytesOf(url));
+      const volume = meshVolume(stl.mesh.positions, stl.mesh.indices);
+      const mesh = kernel.meshFrom(stl.mesh);
+      try {
+        const { shape, report } = kernel.meshToSolid(mesh, { method: 'prismatic', tolerance: -1 });
+        try {
+          expect(report.auto).toBe(true);
+          expect(ladder).toContain(report.tolerance);
+          expect(kernel.isValid(shape)).toBe(true);
+          expect(Math.abs(kernel.properties(shape).volume / volume - 1)).toBeLessThan(0.02);
+          console.log(
+            `auto ${name}: tolerance ${report.tolerance}, rebuild ${report.rebuild}, faces ${report.faces}, facets ${report.facets}, unfit ${report.unfit.regions}`,
+          );
+        } finally {
+          kernel.release(shape);
+        }
+      } finally {
+        kernel.release(mesh);
+      }
+    });
+  }
+});
+
 describe('Mesh to Solid, the segmentation', { timeout: 120_000 }, () => {
   it('puts every triangle of trashcan-spacer.stl on a surface, and converts or refuses it without a trap', () => {
     // At 0.1 and 0.2 mm, splitComponent's border moves once left regions on no
@@ -283,7 +323,9 @@ function writeStagedMesh(mesh: ShapeHandle, path: string): void {
 }
 
 const stlDir = env.STL_DIR;
-const tolerance = Number(env.TOL ?? '0.01');
+// TOL=auto (or AUTO=1) runs prismatic with the Auto tolerance (ADR-0097, slice D2).
+const auto = env.TOL === 'auto' || env.AUTO === '1';
+const tolerance = auto ? -1 : Number(env.TOL ?? '0.01');
 const only = env.FILE;
 
 describe.skipIf(!stlDir)('Mesh to Solid over STL_DIR', { timeout: 3_600_000 }, () => {
@@ -310,6 +352,7 @@ describe.skipIf(!stlDir)('Mesh to Solid over STL_DIR', { timeout: 3_600_000 }, (
             cells.push(
               `${r.planes}/${r.cylinders}/${r.cones}/${r.spheres}/${r.tori}`,
               `${r.unfit.regions}${r.suggestedTolerance ? `, try ${r.suggestedTolerance}` : ''}`,
+              ...(auto ? [`auto ${r.tolerance ?? '?'} mm`] : []),
             );
           } catch (error) {
             cells.push(refusal(error), '');
@@ -326,8 +369,9 @@ describe.skipIf(!stlDir)('Mesh to Solid over STL_DIR', { timeout: 3_600_000 }, (
                     : report.unfit.regions
                       ? `, ${report.unfit.regions} unfit left out`
                       : '';
+                const autoText = report.auto ? `, auto ${report.tolerance} mm` : '';
                 cells.push(
-                  `✓ ${report.faces} faces (${report.planes}/${report.cylinders}/${report.cones}/${report.spheres}/${report.tori})${leftOut}, valid ${kernel.isValid(shape)}, vol ${ratio.toFixed(4)} (${Math.round(performance.now() - t0)} ms)`,
+                  `✓ ${report.faces} faces (${report.planes}/${report.cylinders}/${report.cones}/${report.spheres}/${report.tori})${leftOut}${autoText}, valid ${kernel.isValid(shape)}, vol ${ratio.toFixed(4)} (${Math.round(performance.now() - t0)} ms)`,
                 );
               } finally {
                 kernel.release(shape);

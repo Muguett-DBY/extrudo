@@ -288,6 +288,41 @@ describe('Kernel.meshToSolid, faceted', { timeout: 300_000 }, () => {
     }
   });
 
+  // Slice D2: faceted makes a hollow's cavity an inner shell, not a second
+  // solid; prismatic (D1) does the same.
+  it('keeps a box’s cubic cavity hollow in Faceted and Prismatic', () => {
+    const outer = manifold.Manifold.cube([20, 20, 20]);
+    const inner = manifold.Manifold.cube([10, 10, 10]).translate([5, 5, 5]);
+    const hollow = outer.subtract(inner);
+    outer.delete();
+    inner.delete();
+    const mesh = meshOf(hollow);
+    try {
+      const faceted = kernel.meshToSolid(mesh, { method: 'faceted', tolerance: 0.01 });
+      try {
+        expect(kernel.isValid(faceted.shape)).toBe(true);
+        const solids = kernel.solids(faceted.shape);
+        try {
+          expect(solids).toHaveLength(1);
+          expect(kernel.properties(faceted.shape).volume).toBeCloseTo(7000, 3);
+        } finally {
+          kernel.release(...solids);
+        }
+      } finally {
+        kernel.release(faceted.shape);
+      }
+      const prism = kernel.meshToSolid(mesh, { method: 'prismatic', tolerance: -1 });
+      try {
+        expect(kernel.isValid(prism.shape)).toBe(true);
+        expect(kernel.properties(prism.shape).volume).toBeCloseTo(7000, 3);
+      } finally {
+        kernel.release(prism.shape);
+      }
+    } finally {
+      kernel.release(mesh);
+    }
+  });
+
   // Kernel.meshFrom repairs a non-manifold edge and splits a pinched vertex
   // before the mesh becomes a body, so these refusals are reachable only
   // through the facade directly.
@@ -390,8 +425,8 @@ function plate(): ShapeHandle {
 }
 const PLATE_VOLUME = 6000 - 45 * Math.PI;
 
-/** The 32-gon cylinder r 5, h 20, its nodes moved radially by up to ±0.005 mm (deterministic). */
-function noisyCylinder(): ShapeHandle {
+/** The 32-gon cylinder r 5, h 20, its nodes moved radially by up to ±`amplitude` mm (deterministic). */
+function noisyCylinder(amplitude = 0.005): ShapeHandle {
   const solid = manifold.Manifold.cylinder(20, 5, 5, 32);
   const gl = solid.getMesh();
   solid.delete();
@@ -401,7 +436,7 @@ function noisyCylinder(): ShapeHandle {
     const y = gl.vertProperties[gl.numProp * i + 1] as number;
     const z = gl.vertProperties[gl.numProp * i + 2] as number;
     const r = Math.hypot(x, y);
-    const scale = (r + 0.005 * Math.sin(1.7 * i + 0.3)) / r;
+    const scale = (r + amplitude * Math.sin(1.7 * i + 0.3)) / r;
     positions.set([x * scale, y * scale, z], 3 * i);
   }
   return kernel.meshFrom({ positions, indices: Uint32Array.from(gl.triVerts) });
@@ -651,6 +686,36 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
       expect(report).toMatchObject({ planes: 2, cylinders: 1 });
     } finally {
       kernel.release(shape);
+    }
+  });
+
+  it('24: Auto picks the ladder step (0.01 clean, higher when noisy)', () => {
+    // A clean mesh: the first ladder step (0.01) already fits under 2 %.
+    const clean = meshOf(manifold.Manifold.cylinder(20, 5, 5, 32));
+    const exact = prismatic(clean, -1);
+    try {
+      expect(exact.report).toMatchObject({ auto: true, tolerance: 0.01, rebuild: 'exact' });
+      expect(kinds(exact.shape)).toEqual(['cylinder', 'plane', 'plane']);
+    } finally {
+      kernel.release(exact.shape);
+    }
+  });
+
+  it('25: Auto on a noisy mesh picks a higher step and converts; 0.01 leaves it unfit', () => {
+    // The side is ±0.015 mm off its circle: unfit at 0.01, fits at 0.02.
+    const explicit = prismatic(noisyCylinder(0.015), 0.01);
+    try {
+      expect(explicit.report.unfit.regions).toBeGreaterThan(0);
+    } finally {
+      kernel.release(explicit.shape);
+    }
+    const auto = prismatic(noisyCylinder(0.015), -1);
+    try {
+      expect(auto.report).toMatchObject({ auto: true, rebuild: 'exact', planes: 2, cylinders: 1 });
+      expect(auto.report.tolerance as number).toBeGreaterThanOrEqual(0.02);
+      expect(kernel.isValid(auto.shape)).toBe(true);
+    } finally {
+      kernel.release(auto.shape);
     }
   });
 

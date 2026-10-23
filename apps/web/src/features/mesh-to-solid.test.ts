@@ -14,11 +14,11 @@ import type { InfoField } from './spec';
 import { BOX, settle, setupDialogs } from './testing';
 import { defaultValues, shownFields } from './values';
 
-const shown = (method: 'prismatic' | 'faceted') => {
+const shown = (method: 'prismatic' | 'faceted', toleranceMode: 'auto' | 'custom' = 'auto') => {
   const values = defaultValues(meshToSolidDialog);
   return shownFields(meshToSolidDialog, {
     ...values,
-    choices: { ...values.choices, method },
+    choices: { ...values.choices, method, toleranceMode },
   }).map((f) => f.name);
 };
 
@@ -28,7 +28,7 @@ describe('the mesh to solid dialog', () => {
     expect(meshToSolidDialog.category).toBe('modify');
     expect(
       shownFields(meshToSolidDialog, defaultValues(meshToSolidDialog)).map((f) => f.name),
-    ).toEqual(['body', 'method', 'tolerance']);
+    ).toEqual(['body', 'method', 'toleranceMode']);
   });
 
   it('picks one mesh body', () => {
@@ -36,9 +36,11 @@ describe('the mesh to solid dialog', () => {
     expect(body).toMatchObject({ kind: 'selection', accepts: ['body'], max: 1 });
   });
 
-  it('shows the tolerance only while the method is prismatic', () => {
-    expect(shown('prismatic')).toEqual(['body', 'method', 'tolerance']);
+  it('shows the tolerance choice only while the method is prismatic, the value only for Custom', () => {
+    expect(shown('prismatic')).toEqual(['body', 'method', 'toleranceMode']);
+    expect(shown('prismatic', 'custom')).toEqual(['body', 'method', 'toleranceMode', 'tolerance']);
     expect(shown('faceted')).toEqual(['body', 'method']);
+    expect(shown('faceted', 'custom')).toEqual(['body', 'method']);
   });
 
   it('takes a selected body; OK inserts a conversion whose inputs parse', () => {
@@ -46,8 +48,9 @@ describe('the mesh to solid dialog', () => {
     t.session.getState().select([{ kind: 'body', id: BOX }]);
     t.controller.start('meshToSolid');
     expect(t.open()?.values.refs.body).toEqual([{ kind: 'body', id: BOX }]);
-    // The method defaults to prismatic (ADR-0097 §1).
+    // The method defaults to prismatic (ADR-0097 §1), the tolerance to Auto (slice D2).
     expect(t.open()?.values.choices.method).toBe('prismatic');
+    expect(t.open()?.values.choices.toleranceMode).toBe('auto');
     expect(MeshToSolidInputsSchema.safeParse(t.open()?.draft.inputs).success).toBe(true);
     expect(t.controller.ok()).toBe(true);
     const feature = t.store.getState().doc.features.at(-1);
@@ -55,7 +58,35 @@ describe('the mesh to solid dialog', () => {
     expect(meshToSolidSettings(feature?.inputs as never)).toMatchObject({
       body: { kind: 'body', id: BOX },
       method: 'prismatic',
+      tolerance: 'auto',
     });
+  });
+
+  it('writes no tolerance under Auto and the expression under Custom', () => {
+    const t = setupDialogs([meshToSolidDialog]);
+    t.session.getState().select([{ kind: 'body', id: BOX }]);
+    t.controller.start('meshToSolid');
+    // Auto (the default): the tolerance input is absent.
+    expect(t.open()?.draft.inputs.tolerance).toBeUndefined();
+    t.controller.setChoice('toleranceMode', 'custom');
+    expect(t.open()?.draft.inputs.tolerance).toMatchObject({ kind: 'expr', expr: '0.01 mm' });
+    t.controller.setExpr('tolerance', '0.05 mm');
+    expect(t.open()?.draft.inputs.tolerance).toMatchObject({ kind: 'expr', expr: '0.05 mm' });
+    t.controller.setChoice('toleranceMode', 'auto');
+    expect(t.open()?.draft.inputs.tolerance).toBeUndefined();
+  });
+
+  it('opens a feature whose tolerance is present with Custom selected', () => {
+    const t = setupDialogs([meshToSolidDialog]);
+    t.session.getState().select([{ kind: 'body', id: BOX }]);
+    t.controller.start('meshToSolid');
+    t.controller.setChoice('toleranceMode', 'custom');
+    t.controller.setExpr('tolerance', '0.05 mm');
+    expect(t.controller.ok()).toBe(true);
+    const id = t.store.getState().doc.features.at(-1)?.id as FeatureId;
+    t.controller.edit(id);
+    expect(t.open()?.values.choices.toleranceMode).toBe('custom');
+    expect(t.open()?.values.exprs.tolerance).toBe('0.05 mm');
   });
 });
 
@@ -132,7 +163,8 @@ describe('the mesh to solid dialog: regions and the Result line (ADR-0097 §4, �
   it('asks for the regions of the picked body at the tolerance, and shows them', async () => {
     const t = started();
     expect(t.kernel.regions).toHaveLength(1);
-    expect(t.kernel.regions[0]).toMatchObject({ body: BOX, tolerance: 0.01, base: false });
+    // Auto asks with -1 (ADR-0097, slice D2).
+    expect(t.kernel.regions[0]).toMatchObject({ body: BOX, tolerance: -1, base: false });
     expect(result(t)).toBeUndefined();
     t.kernel.regions[0]?.resolve(sixPlanes());
     await settle();
@@ -180,8 +212,10 @@ describe('the mesh to solid dialog: regions and the Result line (ADR-0097 §4, �
 
   it('asks again when the tolerance changes, and drops the late answer', async () => {
     const t = started();
+    // Custom 0.05 mm: a second, different region request.
+    t.controller.setChoice('toleranceMode', 'custom');
     t.controller.setExpr('tolerance', '0.05 mm');
-    expect(t.kernel.regions.map((r) => r.tolerance)).toEqual([0.01, 0.05]);
+    expect(t.kernel.regions.map((r) => r.tolerance)).toEqual([-1, 0.05]);
     t.kernel.regions[0]?.resolve(sixPlanes());
     await settle();
     expect(t.open()?.preview.regions).toBeUndefined();

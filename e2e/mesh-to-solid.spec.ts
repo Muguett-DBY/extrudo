@@ -98,7 +98,9 @@ test('the cube shows six planes before it converts; Faceted says six faces', asy
   await expect(dialog).toHaveAttribute('data-regions', '6 planes, 0 cylinders, 0 unfit', {
     timeout: 60_000,
   });
-  await expect(dialog.locator('[data-info="summary"]')).toHaveText('6 planes · 0 unfit');
+  await expect(dialog.locator('[data-info="summary"]')).toHaveText(
+    /^6 planes · 0 unfit( · auto [\d.]+ mm)?$/,
+  );
   await expect(dialog.locator('[data-legend="summary"]')).toHaveText(
     /Planes.*Curved.*Fits nothing/,
   );
@@ -132,7 +134,7 @@ test('an ellipsoid fits nothing: all red, kept as facets, and Cancel leaves the 
   // facets, and the Result line says so once the draft's report is in.
   await expect(dialog).toHaveAttribute('data-preview-status', 'ok', { timeout: 90_000 });
   await expect(dialog.locator('[data-info="summary"]')).toHaveText(
-    /^1 unfit region kept as \d+ facets$/,
+    /^1 unfit region kept as \d+ facets( · auto [\d.]+ mm)?$/,
     { timeout: 90_000 },
   );
   // The regions stay drawn while the method is prismatic.

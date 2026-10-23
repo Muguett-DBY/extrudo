@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { type MeshToSolidReport, meshToSolidSummary } from './mesh-to-solid';
+import {
+  type MeshToSolidReport,
+  meshToSolidInputs,
+  meshToSolidSettings,
+  meshToSolidSummary,
+} from './mesh-to-solid';
 
 const report = (overrides: Partial<MeshToSolidReport>): MeshToSolidReport => ({
   method: 'prismatic',
@@ -56,5 +61,40 @@ describe('meshToSolidSummary (ADR-0097 §4, slice D1)', () => {
     expect(meshToSolidSummary(report({ rebuild: 'hybrid', planes: 6, facets: 4 }))).toBe(
       '6 planes · 4 facets',
     );
+  });
+
+  // Slice D2: Auto appends the tolerance the kernel picked, no trailing zeros.
+  it('names an Auto tolerance (0.02 mm, 0.1 mm)', () => {
+    expect(
+      meshToSolidSummary(
+        report({ rebuild: 'exact', planes: 2, cylinders: 1, auto: true, tolerance: 0.02 }),
+      ),
+    ).toBe('2 planes, 1 cylinder · 0 unfit · auto 0.02 mm');
+    expect(
+      meshToSolidSummary(
+        report({ rebuild: 'hybrid', planes: 6, facets: 4, auto: true, tolerance: 0.1 }),
+      ),
+    ).toBe('6 planes · 4 facets · auto 0.1 mm');
+  });
+
+  it('does not name the tolerance of a fixed (non-Auto) conversion', () => {
+    expect(
+      meshToSolidSummary(report({ rebuild: 'exact', planes: 6, cylinders: 1, tolerance: 0.01 })),
+    ).toBe('6 planes, 1 cylinder · 0 unfit');
+  });
+});
+
+describe('meshToSolidSettings (ADR-0097, slice D2: absent tolerance means Auto)', () => {
+  it('reads Auto when the tolerance input is absent', () => {
+    expect(meshToSolidSettings(meshToSolidInputs('b1'))).toMatchObject({
+      method: 'prismatic',
+      tolerance: 'auto',
+    });
+  });
+
+  it('reads the evaluated value when the input is present', () => {
+    expect(
+      meshToSolidSettings(meshToSolidInputs('b1', 'prismatic', '0.05 mm'), 0.05),
+    ).toMatchObject({ method: 'prismatic', tolerance: 0.05 });
   });
 });
