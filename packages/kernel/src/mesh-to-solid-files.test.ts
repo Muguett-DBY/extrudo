@@ -246,15 +246,38 @@ describe('Mesh to Solid, prismatic on the fixtures', { timeout: 120_000 }, () =>
 // picks a ladder step (0.01, 0.02, 0.05 or 0.1 mm) and converts no worse than
 // at 0.01 mm.
 describe('Mesh to Solid, prismatic on the fixtures at Auto', { timeout: 120_000 }, () => {
-  // [name, url, the ladder step Auto picks, the outcome]
-  const autoFixtures: [string, string, number, { faces: number; rebuild: string }][] = [
+  // [name, url, the ladder step Auto picks, the outcome; slice D3: the
+  // result's edges and circle edges where the hybrid collapsed its chains
+  // (before: peg-perego-button 2,189 edges, trashcan-spacer 443,
+  // track-straight 847, no circles)]
+  const autoFixtures: [
+    string,
+    string,
+    number,
+    { faces: number; rebuild: string; edges?: number; circles?: number },
+  ][] = [
     ['hole-filler-35mm.stl', holeFillerStl, 0.01, { faces: 6, rebuild: 'exact' }],
     ['trashcan-repair-foot.stl', repairFootStl, 0.01, { faces: 16, rebuild: 'exact' }],
     ['puzzle-base-circle.stl', puzzleBaseStl, 0.01, { faces: 37, rebuild: 'exact' }],
-    ['trashcan-spacer.stl', spacerStl, 0.05, { faces: 78, rebuild: 'hybrid' }],
-    ['peg-perego-button.stl', pegPeregoStl, 0.02, { faces: 212, rebuild: 'hybrid' }],
+    [
+      'trashcan-spacer.stl',
+      spacerStl,
+      0.05,
+      { faces: 78, rebuild: 'hybrid', edges: 359, circles: 12 },
+    ],
+    [
+      'peg-perego-button.stl',
+      pegPeregoStl,
+      0.02,
+      { faces: 212, rebuild: 'hybrid', edges: 1488, circles: 21 },
+    ],
     ['drill-block.stl', drillBlockStl, 0.01, { faces: 93, rebuild: 'exact' }],
-    ['track-straight-100mm.stl', trackStl, 0.01, { faces: 306, rebuild: 'hybrid' }],
+    [
+      'track-straight-100mm.stl',
+      trackStl,
+      0.01,
+      { faces: 306, rebuild: 'hybrid', edges: 627, circles: 4 },
+    ],
     ['remove-before-flight-cover.stl', flightCoverStl, 0.01, { faces: 438, rebuild: 'hybrid' }],
   ];
   for (const [name, url, tolerance, outcome] of autoFixtures) {
@@ -273,6 +296,9 @@ describe('Mesh to Solid, prismatic on the fixtures at Auto', { timeout: 120_000 
           });
           expect(kernel.isValid(shape)).toBe(true);
           expect(Math.abs(kernel.properties(shape).volume / volume - 1)).toBeLessThan(0.02);
+          if (outcome.edges !== undefined) {
+            expect(edgeCounts(shape)).toBe(`${outcome.edges} edges, ${outcome.circles} circles`);
+          }
         } finally {
           kernel.release(shape);
         }

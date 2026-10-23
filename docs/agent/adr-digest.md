@@ -3056,10 +3056,13 @@ pieces (unify won't merge the pieces across arcs). The edge joins the
 existing end vertices (they never move; inner nodes get none), trimmed to the
 end nodes' parameters; tolerance 1.1 × max(node distances, both pcurves'
 11-point sampled distance), floor `HYBRID_EDGE_TOLERANCE_MIN`, vertices
-raised to it; no `BRepLib::SameParameter`. Pcurves: straight in the chart
-(`Geom2d_Line`, degree-1 B-spline when the speed isn't 1) when that image
-stays within 1.5 × the tolerance, else `GeomProjLib::Curve2d` shifted by
-whole turns into the chart, its ends checked. `makeFace(…, region)` walks
+raised to it; no `BRepLib::SameParameter`. **Pcurves end exactly at the end
+nodes' chart parameters** (where the face's other pcurves end: an open
+domain skews `BRepGProp`'s volume, +1.8 % measured): a straight degree-1
+B-spline when its image stays within 1.5 × the tolerance of the curve, else
+an interpolating B-spline through samples of the curve's chart parameters
+(continuous across periods, the end offsets blended in), same check; else
+no collapse. `makeFace(…, region)` walks
 each loop from a break node and adds a collapsed chain's edge once, forward
 for the left region. Fallbacks: a face that fails is rebuilt with its chains
 as polylines (built neighbours across them stripped and rebuilt) before its

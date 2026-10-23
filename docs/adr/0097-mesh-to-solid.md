@@ -1414,22 +1414,32 @@ and residuals); the code is our own.
   `HYBRID_EDGE_TOLERANCE_MAX` (else no collapse); its vertices are raised to
   it. The inner nodes get no vertex and no edge. Both faces use the same
   edge, forward on the left region's wire, reversed on the right's.
-- **Pcurves**, one per face, on the edge's own parameter range: where the
-  curve is straight in the face's chart (a line on a plane, a circle square
-  to a cylinder's, cone's or torus's axis, a meridian of a torus, a
-  cylinder's or cone's generator: the chart parameters of the curve's end
-  points joined straight stay within 1.5 × the tolerance of it at 11
-  points) a `Geom2d_Line` (a degree-1 B-spline when the parameter speed
-  isn't 1), from D1's `MeshChart::uv` with its periodic centring; else
-  `GeomProjLib::Curve2d`, moved by whole turns into the chart's periods, and
-  accepted only when its ends are those chart parameters (0.1 in the
-  parameters, 1.5 × the tolerance in space) and its image stays within
-  1.5 × the tolerance of the curve; else no collapse ("pcurve failed").
-  `BRep_Builder::UpdateEdge(edge, pcurve, surface, loc, tol)` as in D1.
-  `BRepLib::SameParameter` is not called (the brief asked for it):
-  OCCT 8.0.1's `SameParameter(edge, tolerance)` skips an edge already
-  flagged same-parameter, as `BRep_Builder` makes them, and the sampled
-  tolerance above is slice D1's own rule for what `BRepCheck` checks.
+- **Pcurves**, one per face, on the edge's own parameter range, from the
+  chart parameters of the chain's **end nodes** (D1's `MeshChart::uv`, with
+  its periodic centring) to the other's: where the face's other edges'
+  pcurves end too. Where the curve is straight in the chart (a line on a
+  plane, a circle square to a cylinder's, cone's or torus's axis, a torus's
+  meridian, a generator) a straight pcurve between those two (degree-1
+  B-spline), when its image stays within 1.5 × the tolerance of the curve at
+  11 points; else an interpolating B-spline through the curve's chart
+  parameters at samples (every π/16, at least 8), continuous across the
+  chart's periods, the ends' offsets to the nodes' parameters blended along
+  it, accepted when its image stays within 1.5 × the tolerance; else no
+  collapse ("pcurve failed"). `BRep_Builder::UpdateEdge(edge, pcurve,
+  surface, loc, tol)` as in D1. **Tried and rejected:** pcurves through the
+  curve's own end points (`Geom2d_Line` on iso curves, `GeomProjLib::Curve2d`
+  else, as the brief had it). They end up to 1.5 × the tolerance from the
+  node's parameters, where the neighbouring edges' pcurves end, so each
+  face's parameter domain is open by that much: `BRepCheck` accepts it (the
+  vertex tolerance covers it), but `BRepGProp`'s area and volume integrals
+  over the face then depend on where the chart's origin lies.
+  phone-stand-foldable at 0.1 mm came out +1.8 % in volume (12,188 mm³
+  against 12,005 without collapses) while a boolean of the two results
+  differed by under 5 mm³, and four times as many collapses were undone.
+  `BRepLib::SameParameter` is not called (the brief asked for it): OCCT
+  8.0.1's `SameParameter(edge, tolerance)` skips an edge already flagged
+  same-parameter, as `BRep_Builder` makes them, and the sampled tolerance
+  above is slice D1's own rule for what `BRepCheck` checks.
 - **Wires from chains.** `makeFace` walks each loop from a break node; at a
   mesh edge of a collapsed chain it adds the chain's edge once and skips
   the chain's mesh edges. Loop order, the outer and inner loops and the
@@ -1457,3 +1467,164 @@ and residuals); the code is our own.
   not ("chain 33 sphere|plane: node 0 off by 0.01893"). The report gains
   nothing the user sees. `meshLoopsDebug` appends the chains (count, then per
   chain its regions, closed, mesh edges and curve type).
+
+#### The real files (slice D3)
+
+The kernel over `STL_DIR` (`mesh-to-solid-files.test.ts`, which now prints
+the result's edges and circle edges) on the owner's 41 STLs, before (slice
+D2's WASM `occt-43138ec84a10`) and after (this slice's `occt-01014631ceb4`),
+one process each, on the Ubuntu machine while other jobs shared it (the
+times are noisy; the "before" runs had more company than D2's own tables).
+The importer refuses the four open meshes. Faces by kind count recognised
+faces, facets apart; edges and circles are the result's
+(`BRepAdaptor_Curve` types). Chains, their collapses and the most common
+reason a chain stayed a polyline come from the native harness (`run.sh
+prismatic F`, same tolerance), which orders a mesh as `RWStl` does, not as
+manifold's `getMesh()`: its counts are that build's, close to the kernel's.
+
+**At Auto:**
+
+| file | tolerance | outcome | faces (pl/cy/co/sp/to) | facets | edges before → after | circles | chains | collapsed (lines/circles/ellipses) | polylines | most common reason kept | volume | s (before → after) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| own/ball | 0.01 | exact | 1 (0/0/0/1/0) | 0 | 3 → 3 | 1 | – | – | – | – | 1.0018 | 0.2 → 0.1 |
+| own/battery-holder | 0.01 | hybrid | 131 (61/33/37/0/0) | 0 | 6,181 → 470 | 116 | 441 | 293 (64/229/0) | 148 | no curve: same surface (116) | 0.9986 | 29.8 → 2.5 |
+| own/battery-power-adapter | 0.1 | hybrid | 994 (505/70/3/0/1) | 415 | 5,227 → 3,930 | 37 | 1571 | 612 (468/50/94) | 959 | a node off (633) | 1.0004 | 6.7 → 2.6 |
+| own/desk-organizer-module-small | 0.01 | hybrid | 418 (198/166/0/0/12) | 42 | 7,197 → 6,929 | 12 | 996 | 118 (93/12/13) | 878 | no curve: no geometric solution (439) | 0.9999 | 48.4 → 35.1 |
+| own/drill-block | 0.01 | exact | 93 (77/12/0/0/4) | 0 | 638 → 638 | 211 | – | – | – | – | 1.0014 | 8.4 → 4.2 |
+| own/hole-filler-35mm | 0.01 | exact | 6 (3/2/0/0/1) | 0 | 9 → 9 | 4 | – | – | – | – | 1.0013 | 0.4 → 0.4 |
+| own/hole-filler-5mm | 0.01 | exact | 6 (3/2/1/0/0) | 0 | 9 → 9 | 6 | – | – | – | – | 1.0003 | 0.1 → 0.0 |
+| own/kuglbahn-pillar-base | 0.1 | hybrid | 3941 (430/86/0/6/10) | 3409 | 11,067 → 10,278 | 43 | 1476 | 306 (235/44/27) | 1170 | a node off (501) | 1.0013 | 11.8 → 9.2 |
+| own/mirna-doodle-1 | 0.1 | hybrid | 120 (63/14/0/0/0) | 43 | 486 → 330 | 28 | 225 | 189 (161/28/0) | 36 | no curve: no geometric solution (15) | 0.9891 | 0.3 → 0.2 |
+| own/numbers-base-top | 0.01 | exact | 471 (471/0/0/0/0) | 0 | 1,292 → 1,292 | 0 | – | – | – | – | 1.0000 | 1.3 → 1.0 |
+| own/object-permanence-base | 0.01 | hybrid | 1985 (333/25/5/2/0) | 1620 | 4,365 → 4,239 | 56 | 876 | 342 (253/56/33) | 534 | a node off (304) | 0.9997 | 15.7 → 13.4 |
+| own/peg-perego-button | 0.02 | hybrid | 212 (99/103/2/5/3) | 0 | 2,189 → 1,488 | 21 | 578 | 157 (83/28/46) | 421 | a node off (171) | 1.0032 | 28.5 → 24.5 |
+| own/phone-stand-foldable | 0.1 | hybrid | 2325 (458/10/0/0/10) | 1847 | 7,663 → 6,860 | 8 | 1352 | 736 (699/12/25) | 616 | a node off (286) | 1.0012 | 37.8 → 36.2 |
+| own/puzzle-base-circle | 0.01 | exact | 37 (35/1/0/0/1) | 0 | 129 → 129 | 4 | – | – | – | – | 0.9999 | 0.3 → 0.3 |
+| own/puzzle-insert-circle | 0.05 | hybrid | 1609 (318/59/1/0/1) | 1230 | 6,177 → 5,607 | 3 | 1093 | 175 (157/6/12) | 918 | a node off (748) | 0.9984 | 33.5 → 34.4 |
+| own/remove-before-flight-cover | 0.01 | hybrid | 438 (252/62/4/0/0) | 120 | 2,722 → 1,083 | 126 | 880 | 747 (603/142/2) | 133 | a node off (43) | 1.0000 | 11.5 → 7.3 |
+| own/scrap-plate | 0.02 | hybrid | 154 (61/77/16/0/0) | 0 | 1,367 → 1,179 | 10 | 366 | 96 (80/12/4) | 270 | no curve: no geometric solution (140) | 0.9987 | 19.8 → 17.6 |
+| own/shower-holder | 0.01 | hybrid | 901 (201/224/4/0/0) | 472 | 3,361 → 3,357 | 0 | 1043 | 80 (58/0/22) | 963 | a node off (433) | 0.9999 | 79.5 → 69.4 |
+| own/spool-nut-v4.1 | 0.01 | hybrid | 718 (654/63/1/0/0) | 0 | 4,209 → 3,415 | 5 | 2159 | 1324 (1280/6/38) | 835 | no curve: hyperbola (642) | 0.9991 | 15.1 → 6.2 |
+| own/spool-screw-v4.1 | 0.05 | hybrid | 3197 (975/95/4/0/0) | 2123 | 13,094 → 11,003 | 33 | 3174 | 1655 (1400/46/209) | 1519 | no curve: hyperbola (642) | 1.0007 | 27.6 → 20.2 |
+| own/track-straight-100mm | 0.01 | hybrid | 306 (65/2/2/0/0) | 237 | 847 → 627 | 4 | 169 | 147 (139/8/0) | 22 | not a candidate (14) | 1.0000 | 0.9 → 0.6 |
+| own/trashcan-repair-foot | 0.01 | exact | 16 (12/4/0/0/0) | 0 | 72 → 72 | 20 | – | – | – | – | 0.9989 | 0.1 → 0.1 |
+| own/trashcan-spacer | 0.05 | hybrid | 78 (56/14/0/4/4) | 0 | 443 → 359 | 12 | 180 | 60 (48/12/0) | 120 | a node off (68) | 1.0001 | 2.2 → 1.9 |
+| own/whiteboard-tray-v5 | auto | ✗ rebuild | – | – | – | – | – | – | – | – | – | – |
+| third-party/door-stopper-top | 0.01 | hybrid | 147 (5/142/0/0/0) | 0 | 3,920 → 3,258 | 7 | 464 | 28 (0/10/18) | 436 | no curve: no geometric solution (411) | 1.0002 | 18.9 → 14.4 |
+| third-party/gardena-end | 0.01 | hybrid | 17 (5/5/2/1/4) | 0 | 529 → 212 | 16 | 72 | 32 (0/32/0) | 40 | no curve: same surface (22) | 1.0041 | 3.7 → 3.2 |
+| third-party/gear-bearing-5 | 0.1 | hybrid | 2308 (291/581/0/10/8) | 1418 | 8,649 → 7,814 | 106 | 2383 | 738 (217/106/415) | 1645 | no curve: no geometric solution (1060) | 1.0078 | 11.2 → 10.3 |
+| third-party/hot-wheels-connector | 0.01 | hybrid | 2015 (173/9/0/0/0) | 1833 | 3,984 → 3,363 | 16 | 482 | 281 (252/19/10) | 201 | not a candidate (78) | 0.9998 | 19.0 → 17.1 |
+| third-party/makita-vacuum-holder | 0.05 | hybrid | 3480 (557/237/8/12/4) | 2662 | 9,383 → 9,004 | 26 | 2202 | 421 (317/34/70) | 1781 | a node off (921) | 0.9995 | 8.6 → 4.7 |
+| third-party/micro-sd-keyring-inner | 0.01 | hybrid | 66 (28/16/0/4/0) | 18 | 1,114 → 264 | 32 | 354 | 122 (90/32/0) | 232 | a sphere in pieces (227) | 0.9973 | 4.8 → 2.4 |
+| third-party/micro-sd-keyring-outer | 0.01 | exact | 41 (23/18/0/0/0) | 0 | 158 → 158 | 60 | – | – | – | – | 1.0000 | 0.4 → 0.4 |
+| third-party/mms-camera-mount | 0.01 | exact | 11 (9/1/1/0/0) | 0 | 24 → 24 | 4 | – | – | – | – | 1.0000 | 0.0 → 0.0 |
+| third-party/mms-flat-stand | 0.01 | exact | 44 (37/6/1/0/0) | 0 | 195 → 195 | 29 | – | – | – | – | 1.0000 | 0.3 → 0.3 |
+| third-party/sock-clips-6x | 0.01 | hybrid | 161 (34/31/0/0/6) | 90 | 2,097 → 489 | 74 | 269 | 175 (101/74/0) | 94 | undone (38) | 1.0056 | 34.6 → 30.5 |
+| third-party/spaghetti-measure | 0.01 | hybrid | 165 (48/61/0/1/0) | 55 | 3,503 → 449 | 123 | 348 | 270 (137/131/2) | 78 | no curve: no geometric solution (37) | 0.9999 | 24.6 → 1.2 |
+| third-party/vented-funnel | 0.02 | hybrid | 715 (452/150/10/11/6) | 86 | 6,508 → 5,317 | 63 | 1718 | 624 (510/68/46) | 1094 | a node off (573) | 1.0011 | 7.5 → 5.3 |
+| third-party/wyze-garage-bracket | 0.01 | hybrid | 84 (55/27/2/0/0) | 0 | 996 → 320 | 62 | 260 | 236 (162/74/0) | 24 | no curve: same surface (12) | 1.0002 | 1.2 → 0.7 |
+
+**At a fixed 0.01 mm:**
+
+| file | tolerance | outcome | faces (pl/cy/co/sp/to) | facets | edges before → after | circles | chains | collapsed (lines/circles/ellipses) | polylines | most common reason kept | volume | s (before → after) |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| own/ball | 0.01 | exact | 1 (0/0/0/1/0) | 0 | 3 → 3 | 1 | – | – | – | – | 1.0018 | 0.2 → 0.1 |
+| own/battery-holder | 0.01 | hybrid | 131 (61/33/37/0/0) | 0 | 6,181 → 470 | 116 | 441 | 293 (64/229/0) | 148 | no curve: same surface (116) | 0.9986 | 12.9 → 1.6 |
+| own/battery-power-adapter | 0.01 | hybrid | 4506 (253/136/3/5/0) | 4109 | 10,177 → 9,317 | 34 | 1051 | 318 (159/47/112) | 733 | a node off (318) | 1.0006 | 9.9 → 8.1 |
+| own/desk-organizer-module-small | 0.01 | hybrid | 418 (198/166/0/0/12) | 42 | 7,197 → 6,929 | 12 | 996 | 118 (93/12/13) | 878 | no curve: no geometric solution (439) | 0.9999 | 38.6 → 34.9 |
+| own/drill-block | 0.01 | exact | 93 (77/12/0/0/4) | 0 | 638 → 638 | 211 | – | – | – | – | 1.0014 | 4.6 → 4.1 |
+| own/hole-filler-35mm | 0.01 | exact | 6 (3/2/0/0/1) | 0 | 9 → 9 | 4 | – | – | – | – | 1.0013 | 0.5 → 0.4 |
+| own/hole-filler-5mm | 0.01 | exact | 6 (3/2/1/0/0) | 0 | 9 → 9 | 6 | – | – | – | – | 1.0003 | 0.0 → 0.0 |
+| own/kuglbahn-pillar-base | 0.01 | ✗ cap | – | – | – | – | – | – | – | – | – | – |
+| own/mirna-doodle-1 | 0.01 | hybrid | 168 (77/26/0/0/0) | 65 | 534 → 474 | 52 | 315 | 268 (216/52/0) | 47 | not a candidate (44) | 1.0105 | 0.3 → 0.2 |
+| own/numbers-base-top | 0.01 | exact | 471 (471/0/0/0/0) | 0 | 1,292 → 1,292 | 0 | – | – | – | – | 1.0000 | 1.1 → 1.0 |
+| own/object-permanence-base | 0.01 | hybrid | 1985 (333/25/5/2/0) | 1620 | 4,365 → 4,239 | 56 | 876 | 342 (253/56/33) | 534 | a node off (304) | 0.9997 | 14.9 → 13.3 |
+| own/peg-perego-button | 0.01 | hybrid | 892 (108/94/8/10/2) | 670 | 3,058 → 2,670 | 21 | 574 | 102 (32/28/42) | 472 | not a candidate (254) | 1.0034 | 1.9 → 1.6 |
+| own/phone-stand-foldable | 0.01 | hybrid | 3654 (587/211/0/3/12) | 2841 | 9,953 → 8,731 | 109 | 2194 | 985 (719/113/153) | 1209 | a node off (507) | 1.0000 | 18.7 → 16.5 |
+| own/puzzle-base-circle | 0.01 | exact | 37 (35/1/0/0/1) | 0 | 129 → 129 | 4 | – | – | – | – | 0.9999 | 0.3 → 0.3 |
+| own/puzzle-insert-circle | 0.01 | hybrid | 4722 (11/15/1/0/17) | 4678 | 10,033 → 9,457 | 5 | 133 | 16 (2/10/4) | 117 | no curve: off axis (43) | 1.0003 | 4.8 → 3.9 |
+| own/remove-before-flight-cover | 0.01 | hybrid | 438 (252/62/4/0/0) | 120 | 2,722 → 1,083 | 126 | 880 | 747 (603/142/2) | 133 | a node off (43) | 1.0000 | 10.6 → 7.3 |
+| own/scrap-plate | 0.01 | hybrid | 326 (66/67/12/8/0) | 173 | 1,611 → 1,387 | 22 | 366 | 92 (64/24/4) | 274 | not a candidate (100) | 1.0000 | 2.7 → 2.1 |
+| own/shower-holder | 0.01 | hybrid | 901 (201/224/4/0/0) | 472 | 3,361 → 3,357 | 0 | 1043 | 80 (58/0/22) | 963 | a node off (433) | 0.9999 | 78.3 → 69.0 |
+| own/spool-nut-v4.1 | 0.01 | hybrid | 718 (654/63/1/0/0) | 0 | 4,209 → 3,415 | 5 | 2159 | 1324 (1280/6/38) | 835 | no curve: hyperbola (642) | 0.9991 | 16.8 → 6.2 |
+| own/spool-screw-v4.1 | 0.01 | hybrid | 5909 (778/174/4/0/0) | 4953 | 15,735 → 13,876 | 38 | 2866 | 1525 (1379/50/96) | 1341 | no curve: hyperbola (642) | 0.9995 | 24.8 → 17.3 |
+| own/track-straight-100mm | 0.01 | hybrid | 306 (65/2/2/0/0) | 237 | 847 → 627 | 4 | 169 | 147 (139/8/0) | 22 | not a candidate (14) | 1.0000 | 1.1 → 0.6 |
+| own/trashcan-repair-foot | 0.01 | exact | 16 (12/4/0/0/0) | 0 | 72 → 72 | 20 | – | – | – | – | 0.9989 | 0.1 → 0.1 |
+| own/trashcan-spacer | 0.01 | hybrid | 419 (2/0/0/4/4) | 409 | 848 → 848 | 0 | 10 | 0 (0/0/0) | 10 | not a candidate (10) | 1.0001 | 0.9 → 0.8 |
+| own/whiteboard-tray-v5 | 0.01 | ✗ rebuild | – | – | – | – | – | – | – | – | – | – |
+| third-party/door-stopper-top | 0.01 | hybrid | 147 (5/142/0/0/0) | 0 | 3,920 → 3,258 | 7 | 464 | 28 (0/10/18) | 436 | no curve: no geometric solution (411) | 1.0002 | 20.6 → 14.4 |
+| third-party/gardena-end | 0.01 | hybrid | 17 (5/5/2/1/4) | 0 | 529 → 212 | 16 | 72 | 32 (0/32/0) | 40 | no curve: same surface (22) | 1.0041 | 4.2 → 3.2 |
+| third-party/gear-bearing-5 | 0.01 | ✗ cap | – | – | – | – | – | – | – | – | – | – |
+| third-party/hot-wheels-connector | 0.01 | hybrid | 2015 (173/9/0/0/0) | 1833 | 3,984 → 3,363 | 16 | 482 | 281 (252/19/10) | 201 | not a candidate (78) | 0.9998 | 21.7 → 17.3 |
+| third-party/makita-vacuum-holder | 0.01 | ✗ cap | – | – | – | – | – | – | – | – | – | – |
+| third-party/micro-sd-keyring-inner | 0.01 | hybrid | 66 (28/16/0/4/0) | 18 | 1,114 → 264 | 32 | 354 | 122 (90/32/0) | 232 | a sphere in pieces (227) | 0.9973 | 5.1 → 2.3 |
+| third-party/micro-sd-keyring-outer | 0.01 | exact | 41 (23/18/0/0/0) | 0 | 158 → 158 | 60 | – | – | – | – | 1.0000 | 0.4 → 0.4 |
+| third-party/mms-camera-mount | 0.01 | exact | 11 (9/1/1/0/0) | 0 | 24 → 24 | 4 | – | – | – | – | 1.0000 | 0.0 → 0.0 |
+| third-party/mms-flat-stand | 0.01 | exact | 44 (37/6/1/0/0) | 0 | 195 → 195 | 29 | – | – | – | – | 1.0000 | 0.4 → 0.3 |
+| third-party/sock-clips-6x | 0.01 | hybrid | 161 (34/31/0/0/6) | 90 | 2,097 → 489 | 74 | 269 | 175 (101/74/0) | 94 | undone (38) | 1.0056 | 34.6 → 30.5 |
+| third-party/spaghetti-measure | 0.01 | hybrid | 165 (48/61/0/1/0) | 55 | 3,503 → 449 | 123 | 348 | 270 (137/131/2) | 78 | no curve: no geometric solution (37) | 0.9999 | 23.5 → 1.2 |
+| third-party/vented-funnel | 0.01 | hybrid | 1910 (522/187/10/13/5) | 1173 | 8,690 → 7,810 | 18 | 1950 | 731 (645/20/66) | 1219 | a node off (440) | 0.9993 | 9.5 → 7.7 |
+| third-party/wyze-garage-bracket | 0.01 | hybrid | 84 (55/27/2/0/0) | 0 | 996 → 320 | 62 | 260 | 236 (162/74/0) | 24 | no curve: same surface (12) | 1.0002 | 1.2 → 0.7 |
+
+**Acceptance, slice D3.**
+
+1. **Same outcomes: pass.** Both sweeps convert the same files as before
+   and as D2's tables (Auto: 36 of 37; 0.01 mm: 33 of 37), each exact or
+   hybrid as before, with the same faces by kind and the same facets; the
+   comparison script found no difference in either. The volume rule holds
+   everywhere; the hybrid volumes move by at most 0.4 % of the mesh's
+   (mirna-doodle-1 at 0.1 mm 0.9928 → 0.9891, at 0.01 mm 1.0070 → 1.0105;
+   sock-clips-6x 1.0035 → 1.0056).
+2. **Fewer edges: pass but one.** Every hybrid result has fewer edges, in
+   total 117,278 → 91,644 at Auto (−22 %, 26 hybrid files, 1,039 circle
+   edges where there were none) and 105,664 → 83,045 at 0.01 mm (−21 %, 23
+   files, 948 circles); the largest drops are on parts made of holes and
+   bosses (battery-holder 6,181 → 470, spaghetti-measure 3,503 → 449,
+   sock-clips-6x 2,097 → 489). The exception is trashcan-spacer at 0.01 mm
+   (848 → 848): its ten chains all border its one unfit fillet network,
+   so no chain lies between two recognised regions. At Auto (0.05 mm) it
+   has no facets and drops to 359 edges with 12 circles.
+3. **Time: pass.** The slowest file, shower-holder, takes 69.4 s at Auto
+   and 69.0 s at 0.01 mm against D2's 70.0 s and 76.0 s; most hybrid files
+   got faster (battery-holder 11.0 → 2.5 s, spaghetti-measure 24.5 → 1.2 s
+   at Auto against D2's table).
+4. **In the harness only** (not in the kernel sweeps): at Auto the native
+   order explodes one region fewer on whiteboard-tray-v5 (facets 644 →
+   622): an arc in place of a polyline made a face valid that D2 exploded;
+   at 0.01 mm mms-m5-nut, an open mesh the importer refuses, converts.
+
+What collapses in practice: plane|plane lines (most of all, on every
+prismatic part), plane|cylinder circles and ellipses (holes, bosses,
+chamfered rims), coaxial cylinder|cone and cylinder|torus circles (fillets
+and chamfers on round parts). What stays a polyline: the split seams
+("same surface", by design), chains to facet islands ("not a candidate"),
+nodes more than 1.5 × the tolerance off the curve ("a node off": a fitted
+plane or cylinder that is off by more than that where it meets its
+neighbour, common at 0.01 mm on noisy parts), plane|cone hyperbolas
+(spool-nut and spool-screw's thread flanks: 642 chains each) and off-axis
+curved pairs (IntAna's "no geometric solution": a fillet's cylinder meeting
+a cylinder at an angle, door-stopper-top's 411 chains between its 142
+cylinders).
+
+**Deviations from the brief.** (1) A through hole's rim is not one closed
+chain: D1 splits a periodic surface spanning over 3/4 of a turn into
+halves, so each rim is two arcs (one per half), which unify merges into one
+circle edge with the halves; closed chains occur where a region spans less
+(a spherical cap on a plane, the test). (2) Cylinder|cylinder off-axis
+pairs with parallel axes collapse to IntAna's lines (tangent or crossing
+walls), not only the tangent case. (3) Curved|curved pairs are tested for
+a shared axis by us (1° and the tolerance) and the second surface moved
+onto the first's axis before IntAna, whose own coaxial tests are exact:
+battery-holder's 121 coaxial cone|cylinder chains got "no geometric
+solution" from the fitted surfaces as they were. (4) The pcurves end at the
+nodes' parameters, through samples where not straight, instead of
+`Geom2d_Line`/`GeomProjLib` through the curve's ends (above), and
+`BRepLib::SameParameter` is not called. (5) Three rules the brief did not
+have, each found on a file whose D2 outcome changed without it: D1's chord
+limit for the replaced mesh edges (mirna-doodle-1, sock-clips-6x), no
+collapse beside a sphere in pieces (micro-sd-keyring-inner), and undoing a
+failing region's collapses after unify and in the node check before it
+explodes (shower-holder, hot-wheels-connector); and the node check skips a
+collapsed chain's nodes (its time, above). (6) `meshLoopsDebug`'s chain
+curve type applies the acceptance test but not the build's sphere and chord
+rules.
