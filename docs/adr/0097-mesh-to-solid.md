@@ -1386,7 +1386,7 @@ and residuals); the code is our own.
   | plane\|cone | circle, ellipse, lines through the apex | parabola, hyperbola: no |
   | plane\|sphere | circle | yes |
   | plane\|torus | circles: plane square to the axis or through it | else no |
-  | cylinder\|cylinder | coaxial (axes within 1°, each origin within the tolerance of the other's axis): the circle square to the axis through the chain nodes' mean height, radius the radii's mean; parallel, not coaxial: IntAna's lines | crossing axes: no |
+  | cylinder\|cylinder | coaxial (axes within 1°, each origin within the tolerance of the other's axis): the circle square to the axis through the chain nodes' mean height, radius the radii's mean; else IntAna's lines (parallel axes) or ellipses (equal radii, crossing axes) | IntAna has no curve (unequal radii, crossing axes): no |
   | cylinder\|cone, cylinder\|sphere, cone\|cone, cone\|sphere, sphere\|sphere, any\|torus | coaxial (a sphere: its centre within the tolerance of the other's axis): the second surface moved onto the first's axis, then IntAna's circles | off axis: no |
 
   IntAna's `Empty`, `Same`, `NoGeometricSolution`, a point, a parabola or
@@ -1593,26 +1593,32 @@ manifold's `getMesh()`: its counts are that build's, close to the kernel's.
    622): an arc in place of a polyline made a face valid that D2 exploded;
    at 0.01 mm mms-m5-nut, an open mesh the importer refuses, converts.
 
-What collapses in practice: plane|plane lines (most of all, on every
-prismatic part), plane|cylinder circles and ellipses (holes, bosses,
-chamfered rims), coaxial cylinder|cone and cylinder|torus circles (fillets
-and chamfers on round parts). What stays a polyline: the split seams
-("same surface", by design), chains to facet islands ("not a candidate"),
-nodes more than 1.5 × the tolerance off the curve ("a node off": a fitted
-plane or cylinder that is off by more than that where it meets its
-neighbour, common at 0.01 mm on noisy parts), plane|cone hyperbolas
-(spool-nut and spool-screw's thread flanks: 642 chains each) and off-axis
-curved pairs (IntAna's "no geometric solution": a fillet's cylinder meeting
-a cylinder at an angle, door-stopper-top's 411 chains between its 142
-cylinders).
+What collapses in practice (the harness's `FACES=1` over all 41 files at
+Auto, every build's chains counted): of 13,973 collapses, plane|plane lines
+9,705, plane|cylinder circles 1,355, ellipses 1,330 and lines 805 (walls
+parallel to an axis), plane|sphere circles 218, coaxial cone|cylinder 181
+and cylinder|torus 52 circles, cylinder|cylinder ellipses 103 (equal radii,
+crossing axes) and lines 40, plane|cone 154, plane|torus 18. What stays a
+polyline: nodes more than 1.5 × the tolerance off the curve ("a node off":
+plane|plane 4,538, plane|cylinder 2,304: fitted surfaces off by more than
+that where they meet, mostly at 0.01 mm on noisy parts);
+cylinder|cylinder with crossing axes and unequal radii, which IntAna has no
+curve for (4,133; door-stopper-top's 142 cylinders); plane|cone hyperbolas
+(1,386: spool-nut's and spool-screw's thread flanks); plane|cylinder pairs
+that don't meet at all (869: a plane meant to be tangent to a fillet's
+cylinder, a little off: stl2step constructs the tangent line there, which
+would be the next step); plane|torus other than square to or through the
+axis (607); spheres in pieces (959); the split seams ("same surface", by
+design) and chains to facet islands ("not a candidate").
 
 **Deviations from the brief.** (1) A through hole's rim is not one closed
 chain: D1 splits a periodic surface spanning over 3/4 of a turn into
 halves, so each rim is two arcs (one per half), which unify merges into one
 circle edge with the halves; closed chains occur where a region spans less
-(a spherical cap on a plane, the test). (2) Cylinder|cylinder off-axis
-pairs with parallel axes collapse to IntAna's lines (tangent or crossing
-walls), not only the tangent case. (3) Curved|curved pairs are tested for
+(a spherical cap on a plane, the test). (2) Cylinder|cylinder pairs that
+aren't coaxial collapse to whatever lines or ellipses IntAna gives (parallel
+axes: the tangent line or the two crossing lines; equal radii with crossing
+axes: two ellipses), not only the tangent case. (3) Curved|curved pairs are tested for
 a shared axis by us (1° and the tolerance) and the second surface moved
 onto the first's axis before IntAna, whose own coaxial tests are exact:
 battery-holder's 121 coaxial cone|cylinder chains got "no geometric

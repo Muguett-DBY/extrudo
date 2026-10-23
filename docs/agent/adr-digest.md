@@ -3045,7 +3045,7 @@ between two built recognised regions collapses into one `TopoDS_Edge` on the
 two surfaces' own curve (`surfaceCurves`, `IntAna_QuadQuadGeo` at 1° and the
 tolerance, cached per surface pair; curved|curved pairs only when coaxial
 within 1° and the tolerance, the second moved onto the first's axis;
-coaxial cylinders: the circle through the nodes' mean height; parabola,
+coaxial cylinders: the circle through the nodes' mean height, other cylinder pairs IntAna's lines or ellipses; parabola,
 hyperbola, off-axis and more than two curves: none) when **every node is
 within 1.5 × the tolerance** of it, the parameters run strictly one way, a
 circle's or ellipse's span is under a turn (closed: one), and no replaced
