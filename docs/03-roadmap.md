@@ -1081,8 +1081,11 @@ end to end, faster than in established desktop CAD.
   Auto tolerance, the facet cap at 5,000, cavities in Faceted; slice D3
   (2026-10-23): the hybrid's boundary chains between two recognised regions
   collapsed into one line, circle or ellipse edge where the nodes lie on the
-  surfaces' curve. Next: fillet strips, tangent lines where a plane meets a
-  fillet's cylinder.
+  surfaces' curve; slice D4 (2026-10-23): the exact rebuild runs only on a
+  segmentation with no unfit region at all (the hybrid keeps those as facets),
+  its budget 30 s → 12 s, Faceted's cap 2,000 → 5,000, and the browser-vs-node
+  timings (Auto total over the 37 files 377.9 → 187.8 s). Next: fillet strips,
+  tangent lines where a plane meets a fillet's cylinder.
 
 ## Phase 5 — Programmatic design (→ v0.6)
 
