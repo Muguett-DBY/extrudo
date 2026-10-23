@@ -203,7 +203,7 @@ static int runFaceted(ExtrudoFacade& f, const char* name, const Mesh& m, double 
   const double ms = now() - t0;
   std::cout << "== faceted " << name << " (" << m.triangles.size() / 3 << " triangles, tol " << tolerance << "): " << ms << " ms\n";
   const auto& r = f.meshReport_;
-  if (r.size() == 10) std::cout << "   report: faces " << r[0] << ", planes " << r[1] << "\n";
+  if (r.size() >= 10) std::cout << "   report: faces " << r[0] << ", planes " << r[1] << "\n";
   if (!h) {
     std::cout << "   refused: " << f.lastError() << "\n";
     return 0;
@@ -227,11 +227,15 @@ static int run(ExtrudoFacade& f, const char* name, const Mesh& m, double toleran
   const double ms = now() - t0;
   std::cout << "== " << name << " (" << m.triangles.size() / 3 << " triangles, tol " << tolerance << "): " << ms << " ms\n";
   const auto& r = f.meshReport_;
-  if (r.size() == 10) {
+  if (r.size() >= 10) {
     std::cout << "   report: faces " << r[0] << ", planes " << r[1] << ", cylinders " << r[2] << ", cones " << r[3] << ", spheres " << r[4]
               << ", tori " << r[5] << ", unfit " << r[6] << " regions / "
-              << r[7] << " triangles / " << r[8] << ", suggested " << r[9] << "\n";
+              << r[7] << " triangles / " << r[8] << ", suggested " << r[9];
+    if (r.size() >= 12) std::cout << ", rebuild " << (r[10] == 1 ? "hybrid" : r[10] == 0 ? "exact" : "-") << ", facets " << r[11];
+    std::cout << "\n";
   }
+  if (getenv("FACES") && *getenv("FACES"))
+    for (const auto& line : f.hybridFaces_) std::cout << "   hybrid " << line << "\n";
   if (!h) {
     std::cout << "   refused: " << f.lastError() << "\n";
     return 0;
@@ -475,7 +479,7 @@ static void file(ExtrudoFacade& f, const std::string& path, double tolerance) {
   const int ok = f.meshRegions(tolerance);
   std::cout << "   regions " << (ok ? std::to_string(f.meshRegionCount()) : std::string("failed: ") + f.lastError()) << " ("
             << now() - t0 << " ms)";
-  if (ok && f.meshReport_.size() == 10) {
+  if (ok && f.meshReport_.size() >= 10) {
     const auto& r = f.meshReport_;
     std::cout << " pl/cy/co/sp/to " << r[1] << "/" << r[2] << "/" << r[3] << "/" << r[4] << "/" << r[5] << ", unfit " << r[6];
   }
@@ -483,8 +487,33 @@ static void file(ExtrudoFacade& f, const std::string& path, double tolerance) {
   f.clearMeshRegions();
   stage();
   t0 = now();
+  f.keepHybridFaces_ = getenv("FACES") && *getenv("FACES");
   const int h = f.meshToSolid(1, tolerance);
   const double ms = now() - t0;
+  if (f.keepHybridFaces_)
+    for (const auto& line : f.hybridFaces_) std::cout << "   hybrid " << line << std::endl;
+  if (f.keepHybridFaces_ && !f.hybridInvalid_.IsNull()) {
+    // What BRepCheck says about the unified result that failed.
+    BRepCheck_Analyzer analyzer(f.hybridInvalid_);
+    std::map<std::string, int> counts;
+    const std::pair<TopAbs_ShapeEnum, const char*> types[] = {{TopAbs_VERTEX, "vertex"}, {TopAbs_EDGE, "edge"}, {TopAbs_WIRE, "wire"},
+                                                             {TopAbs_FACE, "face"}, {TopAbs_SHELL, "shell"}, {TopAbs_SOLID, "solid"}};
+    for (const auto& [type, name] : types) {
+      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> shapes;
+      TopExp::MapShapes(f.hybridInvalid_, type, shapes);
+      for (int i = 1; i <= shapes.Extent(); ++i) {
+        Handle(BRepCheck_Result) r = analyzer.Result(shapes(i));
+        if (r.IsNull()) continue;
+        for (BRepCheck_Status st : r->Status())
+          if (st != BRepCheck_NoError) counts[std::string(name) + " " + std::to_string(int(st))]++;
+        for (r->InitContextIterator(); r->MoreShapeInContext(); r->NextShapeInContext())
+          for (BRepCheck_Status st : r->StatusOnShape())
+            if (st != BRepCheck_NoError) counts[std::string(name) + " in context " + std::to_string(int(st))]++;
+      }
+    }
+    for (const auto& [k, n] : counts) std::cout << "   invalid after unify: " << k << " x" << n << std::endl;
+    f.hybridInvalid_.Nullify();
+  }
   if (getenv("TIMES") && *getenv("TIMES")) {
     double rebuild = 0;
     for (const auto& [name, stageMs] : f.rebuildTimes_) rebuild += stageMs;
@@ -492,6 +521,8 @@ static void file(ExtrudoFacade& f, const std::string& path, double tolerance) {
     for (const auto& [name, stageMs] : f.rebuildTimes_) std::cout << ", " << name << " " << stageMs;
     std::cout << " ms" << std::endl;
     if (!h && !f.rebuildRefusal_.empty()) std::cout << "   rebuild refused at: " << f.rebuildRefusal_ << std::endl;
+    if (!h && !f.hybridRefusal_.empty()) std::cout << "   hybrid refused at: " << f.hybridRefusal_ << std::endl;
+    std::cout << "   hybrid exploded regions: " << f.hybridExploded_ << std::endl;
   }
   if (!h) {
     std::cout << "   prismatic refused (" << ms << " ms): " << f.lastError() << std::endl;
@@ -506,6 +537,9 @@ static void file(ExtrudoFacade& f, const std::string& path, double tolerance) {
   }
   const TopoDS_Shape& s = *f.find(h);
   const double v = ExtrudoFacade::volumeOf(s);
+  const auto& rep = f.meshReport_;
+  if (rep.size() >= 12) std::cout << "   rebuild " << (rep[10] == 1 ? "hybrid" : "exact") << ", facets " << rep[11] << ", exploded " << f.hybridExploded_
+                                  << ", pl/cy/co/sp/to " << rep[1] << "/" << rep[2] << "/" << rep[3] << "/" << rep[4] << "/" << rep[5] << std::endl;
   std::cout << "   prismatic " << f.count(h, 0) << " faces:" << kinds(s) << ", valid " << BRepCheck_Analyzer(s).IsValid() << ", volume "
             << v << " / mesh " << meshVolume << " = " << v / meshVolume << " (" << ms << " ms)" << std::endl;
   f.release(h);
@@ -515,8 +549,9 @@ static double noise32(int ring, int i) { return 0.005 * (ring == 0 ? std::sin(1.
 
 int main(int argc, char** argv) {
   ExtrudoFacade f;
-  // BUDGET=ms lowers the rebuild's budget (PRISMATIC_REBUILD_BUDGET_MS), to see it hit.
+  // BUDGET=ms lowers the rebuild's budget (PRISMATIC_REBUILD_BUDGET_MS), to see it hit; HYBRID_BUDGET=ms the hybrid's.
   if (getenv("BUDGET") && *getenv("BUDGET")) f.prismaticBudgetMs_ = std::atof(getenv("BUDGET"));
+  if (getenv("HYBRID_BUDGET") && *getenv("HYBRID_BUDGET")) f.hybridBudgetMs_ = std::atof(getenv("HYBRID_BUDGET"));
   const std::string only = argc > 1 ? argv[1] : "";
   const double envTol = getenv("TOL") && *getenv("TOL") ? std::atof(getenv("TOL")) : 0.01;
   if (only == "f") {

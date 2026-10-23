@@ -83,6 +83,9 @@
 #include <Law_Linear.hxx>
 #include <Geom_ConicalSurface.hxx>
 #include <Geom_CylindricalSurface.hxx>
+#include <Geom_SphericalSurface.hxx>
+#include <Geom_ToroidalSurface.hxx>
+#include <TopTools_ListOfShape.hxx>
 #include <Geom2d_Line.hxx>
 #include <Geom2d_Circle.hxx>
 #include <Geom2d_Ellipse.hxx>
@@ -229,6 +232,7 @@
 #include <cstdlib>
 #include <exception>
 #include <map>
+#include <set>
 #include <chrono>
 #include <memory>
 #include <array>
@@ -2670,7 +2674,52 @@ public:
     meshRegionKinds_.shrink_to_fit();
   }
 
-  /** Mesh to Solid's report, 10 doubles: faces, planes, cylinders, cones, spheres, tori, unfit regions, unfit triangles, unfit fraction, suggested tolerance (-1 = none). */
+  /**
+   * Mesh to Solid's loops for tests (ADR-0097, slice D1): prismatic's
+   * segmentation over the staged mesh, then the hybrid rebuild's regions and
+   * their boundary loops, no solid. Fills meshLoopsPtr/Size (int32): per
+   * region its kind (-1 unfit), its surface, its loop count (0 when it is
+   * exploded or unfit), then each loop's edge count, the outer loop first.
+   * Frees the input buffers. Returns the region count, or 0 with lastError.
+   */
+  int meshLoopsDebug(double tolerance) {
+    beginOp();
+    meshReport_.clear();
+    meshLoops_.clear();
+    int count = 0;
+    try {
+      MeshSegmentation seg;
+      if (segmentMesh(tolerance, seg)) {
+        std::vector<int> hybridOf;
+        const std::vector<MeshHybridRegion> regions = hybridRegions(seg, hybridOf);
+        for (const MeshHybridRegion& r : regions) {
+          const bool built = r.kind >= 0 && r.why.empty();
+          meshLoops_.push_back(r.kind);
+          meshLoops_.push_back(r.surface);
+          meshLoops_.push_back(built ? static_cast<int32_t>(r.loops.size()) : 0);
+          if (built)
+            for (const auto& loop : r.loops) meshLoops_.push_back(static_cast<int32_t>(loop.size()));
+        }
+        count = static_cast<int>(regions.size());
+      }
+    } catch (...) {
+      count = failFromException("Mesh to Solid failed");
+    }
+    meshNodes_.clear();
+    meshNodes_.shrink_to_fit();
+    meshTriangles_.clear();
+    meshTriangles_.shrink_to_fit();
+    return count;
+  }
+  uintptr_t meshLoopsPtr() const { return reinterpret_cast<uintptr_t>(meshLoops_.data()); }
+  int meshLoopsSize() const { return static_cast<int>(meshLoops_.size()); }
+
+  /**
+   * Mesh to Solid's report, 12 doubles: faces, planes, cylinders, cones,
+   * spheres, tori, unfit regions, unfit triangles, unfit fraction, suggested
+   * tolerance (-1 = none), rebuild (0 exact, 1 hybrid, -1 none: faceted or
+   * no solid), facets (the hybrid result's facet faces).
+   */
   uintptr_t meshReportPtr() const { return reinterpret_cast<uintptr_t>(meshReport_.data()); }
   int meshReportSize() const { return static_cast<int>(meshReport_.size()); }
 
@@ -5772,7 +5821,7 @@ private:
       for (int i = 1; i <= faces.Extent(); ++i) {
         if (BRepAdaptor_Surface(TopoDS::Face(faces(i))).GetType() == GeomAbs_Plane) ++planes;
       }
-      meshReport_ = {static_cast<double>(faces.Extent()), static_cast<double>(planes), 0, 0, 0, 0, 0, 0, 0, -1};
+      meshReport_ = {static_cast<double>(faces.Extent()), static_cast<double>(planes), 0, 0, 0, 0, 0, 0, 0, -1, -1, 0};
       return store(result);
     } catch (...) {
       return failFromException("Mesh to Solid failed");
@@ -6558,6 +6607,8 @@ private:
     std::vector<MeshRegion> regions;
     std::vector<std::vector<int>> regionNeighbours;
     std::vector<MeshSurface> surfaces;
+    /** neighbour[3t + k]: the triangle across triangle t's edge from corner k to k + 1, or -1. */
+    std::vector<int> neighbour;
     int planes = 0, cylinders = 0, cones = 0, spheres = 0, tori = 0, unfitRegions = 0;
     double unfitFraction = 0, suggested = -1;
   };
@@ -6605,7 +6656,8 @@ private:
 
       // Adjacency by shared edge: neighbour[3t + k] is the triangle across
       // the edge from corner k to corner k + 1, or -1.
-      std::vector<int> neighbour(3 * static_cast<size_t>(triangleCount), -1);
+      std::vector<int>& neighbour = out.neighbour;
+      neighbour.assign(3 * static_cast<size_t>(triangleCount), -1);
       {
         std::vector<std::pair<uint64_t, int>> edges(3 * static_cast<size_t>(triangleCount));
         for (int t = 0; t < triangleCount; ++t) {
@@ -7283,7 +7335,9 @@ private:
                      static_cast<double>(unfitRegions),
                      static_cast<double>(unfitTriangles),
                      unfitFraction,
-                     suggested};
+                     suggested,
+                     -1,
+                     0};
       out.meshArea = meshArea;
       out.meshVolume = meshVolume;
       out.planes = planes;
@@ -7299,14 +7353,379 @@ private:
   }
 
   /**
-   * meshToSolid's prismatic method (ADR-0097 §3 and its 2026-10-21
-   * amendment), over the staged buffers: segmentMesh, then one oversized face
-   * per surface, BOPAlgo_MakerVolume, the cells inside the mesh kept, and the
-   * result checked against the mesh. Fills meshReport_ before a refusal too.
+   * A surface's parameters for the hybrid rebuild (ADR-0097, slice D1): its
+   * frame and numbers, and the centres its periodic parameters are taken
+   * near (within half a turn), so that a region's pcurves never wrap. A
+   * sphere's frame puts its poles as far from the region's nodes as it can
+   * (a cap's pole would otherwise be a node of its loops).
+   */
+  struct MeshChart {
+    int kind = -1;
+    gp_Ax3 frame;
+    double radius = 0, majorRadius = 0, semiAngle = 0;
+    double uCentre = 0, vCentre = 0;
+
+    bool uPeriodic() const { return kind >= 1; }
+    bool vPeriodic() const { return kind == 4; }
+    /** ElSLib's parameters of `p`, angles in [0, 2π). */
+    void raw(const gp_Pnt& p, double& u, double& v) const {
+      switch (kind) {
+        case 1:
+          ElSLib::Parameters(gp_Cylinder(frame, radius), p, u, v);
+          break;
+        case 2:
+          ElSLib::Parameters(gp_Cone(frame, semiAngle, 0), p, u, v);
+          break;
+        case 3:
+          ElSLib::Parameters(gp_Sphere(frame, radius), p, u, v);
+          break;
+        case 4:
+          ElSLib::Parameters(gp_Torus(frame, majorRadius, radius), p, u, v);
+          break;
+        default:
+          ElSLib::Parameters(gp_Pln(frame), p, u, v);
+      }
+    }
+    /** `p`'s parameters, a periodic one moved by whole turns to within half a turn of its centre. */
+    gp_Pnt2d uv(const gp_Pnt& p) const {
+      double u = 0, v = 0;
+      raw(p, u, v);
+      if (uPeriodic()) u += 2 * M_PI * std::round((uCentre - u) / (2 * M_PI));
+      if (vPeriodic()) v += 2 * M_PI * std::round((vCentre - v) / (2 * M_PI));
+      return gp_Pnt2d(u, v);
+    }
+    gp_Pnt value(double u, double v) const {
+      switch (kind) {
+        case 1:
+          return ElSLib::Value(u, v, gp_Cylinder(frame, radius));
+        case 2:
+          return ElSLib::Value(u, v, gp_Cone(frame, semiAngle, 0));
+        case 3:
+          return ElSLib::Value(u, v, gp_Sphere(frame, radius));
+        case 4:
+          return ElSLib::Value(u, v, gp_Torus(frame, majorRadius, radius));
+        default:
+          return ElSLib::Value(u, v, gp_Pln(frame));
+      }
+    }
+    /** The surface's natural normal (∂u × ∂v) at (u, v). */
+    gp_Vec normal(double u, double v) const {
+      gp_Pnt p;
+      gp_Vec du, dv;
+      switch (kind) {
+        case 1:
+          ElSLib::D1(u, v, gp_Cylinder(frame, radius), p, du, dv);
+          break;
+        case 2:
+          ElSLib::D1(u, v, gp_Cone(frame, semiAngle, 0), p, du, dv);
+          break;
+        case 3:
+          ElSLib::D1(u, v, gp_Sphere(frame, radius), p, du, dv);
+          break;
+        case 4:
+          ElSLib::D1(u, v, gp_Torus(frame, majorRadius, radius), p, du, dv);
+          break;
+        default:
+          ElSLib::D1(u, v, gp_Pln(frame), p, du, dv);
+      }
+      return du.Crossed(dv);
+    }
+    Handle(Geom_Surface) surface() const {
+      switch (kind) {
+        case 1:
+          return new Geom_CylindricalSurface(frame, radius);
+        case 2:
+          return new Geom_ConicalSurface(frame, semiAngle, 0);
+        case 3:
+          return new Geom_SphericalSurface(frame, radius);
+        case 4:
+          return new Geom_ToroidalSurface(frame, majorRadius, radius);
+        default:
+          return new Geom_Plane(frame);
+      }
+    }
+  };
+
+  /**
+   * One region of the hybrid rebuild (ADR-0097, slice D1): a connected piece
+   * of one recognised surface's triangles (kinds 0–4), or of the unfit
+   * triangles (kind -1, always facets). `loops` are its boundary's node
+   * lists in order, the region on the left seen from outside; the outer one
+   * first (the largest area in the chart's parameters). `why` set: the
+   * region is exploded, its triangles become facets.
+   */
+  struct MeshHybridRegion {
+    int surface = -1;
+    int kind = -1;
+    MeshChart chart;
+    std::vector<int> triangles;
+    std::vector<std::vector<int>> loops;
+    double area = 0;
+    std::string why;
+  };
+
+  /** The angles' range past their largest gap: its start, its span (radians). */
+  static void angularSpan(std::vector<double> angles, double& start, double& span) {
+    start = 0;
+    span = 0;
+    if (angles.empty()) return;
+    std::sort(angles.begin(), angles.end());
+    double gap = angles.front() + 2 * M_PI - angles.back(), gapEnd = angles.front();
+    for (size_t k = 1; k < angles.size(); ++k) {
+      if (angles[k] - angles[k - 1] > gap) {
+        gap = angles[k] - angles[k - 1];
+        gapEnd = angles[k];
+      }
+    }
+    start = gapEnd;
+    span = 2 * M_PI - gap;
+  }
+
+  /**
+   * The hybrid rebuild's regions and loops (ADR-0097, slice D1), from the
+   * segmentation: every surface's triangles by connected piece (over the
+   * mesh's edges), a periodic surface spanning more than 3/4 of a turn split
+   * by its triangles' centroid angle into halves (u; a torus's v too, so
+   * quarters when both are closed), each piece's chart centred on its own
+   * angles, and each region's boundary ordered into loops (`meshLoops`).
+   * `hybridOf` gets each triangle's region.
+   */
+  std::vector<MeshHybridRegion> hybridRegions(const MeshSegmentation& seg, std::vector<int>& hybridOf) const {
+    const int triangleCount = static_cast<int>(seg.regionOf.size());
+    auto corner = [&](int t, int k) { return static_cast<int>(meshTriangles_[3 * t + k]); };
+    std::vector<int> surfaceOf(triangleCount, -1);
+    for (size_t s = 0; s < seg.surfaces.size(); ++s)
+      for (int r : seg.surfaces[s].regions)
+        for (int t : seg.regions[r].triangles) surfaceOf[t] = static_cast<int>(s);
+    // Connected pieces of one label over the mesh's edges.
+    auto pieces = [&](const std::vector<int>& label) {
+      std::vector<std::vector<int>> out;
+      std::vector<char> seen(triangleCount, 0);
+      std::vector<int> queue;
+      for (int seed = 0; seed < triangleCount; ++seed) {
+        if (seen[seed]) continue;
+        seen[seed] = 1;
+        queue.assign(1, seed);
+        for (size_t head = 0; head < queue.size(); ++head) {
+          const int t = queue[head];
+          for (int k = 0; k < 3; ++k) {
+            const int u = seg.neighbour[3 * t + k];
+            if (u < 0 || seen[u] || label[u] != label[t]) continue;
+            seen[u] = 1;
+            queue.push_back(u);
+          }
+        }
+        out.push_back(queue);
+      }
+      return out;
+    };
+    auto centroid = [&](int t) {
+      return gp_Pnt((meshNode(corner(t, 0)) + meshNode(corner(t, 1)) + meshNode(corner(t, 2))) / 3);
+    };
+    // A chart per connected piece of a surface; a periodic one spanning more
+    // than 3/4 of a turn is split into pieces.
+    std::vector<int> label(triangleCount);
+    for (int t = 0; t < triangleCount; ++t) label[t] = 4 * (surfaceOf[t] + 1);
+    std::vector<MeshChart> chartOf;
+    std::vector<int> chartIndex(triangleCount, -1);
+    for (const std::vector<int>& piece : pieces(label)) {
+      const int s = surfaceOf[piece.front()];
+      MeshChart chart;
+      if (s >= 0 && seg.surfaces[s].kind >= 0) {
+        const MeshSurface& surface = seg.surfaces[s];
+        chart.kind = surface.kind;
+        chart.radius = surface.radius;
+        chart.majorRadius = surface.majorRadius;
+        chart.semiAngle = surface.semiAngle;
+        chart.frame = gp_Ax3(surface.origin, surface.direction);
+        if (surface.kind == 3) {
+          // The poles away from the nodes: the mean normal, or one of six
+          // directions square to it, whichever is farthest from every node.
+          std::vector<gp_XYZ> directions;
+          for (int t : piece)
+            for (int k = 0; k < 3; ++k) {
+              const gp_XYZ d = meshNode(corner(t, k)) - surface.origin.XYZ();
+              if (d.Modulus() > 0) directions.push_back(d.Normalized());
+            }
+          const gp_Ax3 base(surface.origin, surface.direction);
+          double best = -1;
+          for (int c = 0; c < 7; ++c) {
+            const double a = M_PI * (c - 1) / 6;
+            const gp_XYZ z = c == 0 ? surface.direction.XYZ()
+                                    : std::cos(a) * base.XDirection().XYZ() + std::sin(a) * base.YDirection().XYZ();
+            double clearance = 1;
+            for (const gp_XYZ& d : directions) clearance = std::min(clearance, 1 - std::fabs(d.Dot(z)));
+            if (clearance > best + 1e-12) {
+              best = clearance;
+              chart.frame = gp_Ax3(surface.origin, gp_Dir(z));
+            }
+          }
+        }
+        if (chart.uPeriodic()) {
+          std::vector<double> us, vs;
+          for (int t : piece) {
+            double u = 0, v = 0;
+            chart.raw(centroid(t), u, v);
+            us.push_back(u);
+            vs.push_back(v);
+          }
+          double uStart, uSpan, vStart = 0, vSpan = 0;
+          angularSpan(us, uStart, uSpan);
+          if (chart.vPeriodic()) angularSpan(vs, vStart, vSpan);
+          const bool splitU = uSpan > 1.5 * M_PI, splitV = chart.vPeriodic() && vSpan > 1.5 * M_PI;
+          for (size_t i = 0; i < piece.size(); ++i) {
+            int part = 0;
+            if (splitU && std::fmod(us[i] - uStart + 4 * M_PI, 2 * M_PI) >= uSpan / 2) part += 1;
+            if (splitV && std::fmod(vs[i] - vStart + 4 * M_PI, 2 * M_PI) >= vSpan / 2) part += 2;
+            label[piece[i]] += part;
+          }
+        }
+      }
+      for (int t : piece) chartIndex[t] = static_cast<int>(chartOf.size());
+      chartOf.push_back(chart);
+    }
+    // The regions: connected pieces of each label, centred on their own angles.
+    std::vector<MeshHybridRegion> out;
+    hybridOf.assign(triangleCount, -1);
+    for (std::vector<int>& piece : pieces(label)) {
+      MeshHybridRegion region;
+      region.surface = surfaceOf[piece.front()];
+      region.chart = chartOf[chartIndex[piece.front()]];
+      region.kind = region.chart.kind;
+      for (int t : piece) {
+        region.area += seg.areas[t];
+        hybridOf[t] = static_cast<int>(out.size());
+      }
+      if (region.chart.uPeriodic()) {
+        std::vector<double> us, vs;
+        for (int t : piece) {
+          double u = 0, v = 0;
+          region.chart.raw(centroid(t), u, v);
+          us.push_back(u);
+          vs.push_back(v);
+        }
+        double start, span;
+        angularSpan(us, start, span);
+        region.chart.uCentre = start + span / 2;
+        if (region.chart.vPeriodic()) {
+          angularSpan(vs, start, span);
+          region.chart.vCentre = start + span / 2;
+        }
+      }
+      region.triangles = std::move(piece);
+      out.push_back(std::move(region));
+    }
+    for (size_t i = 0; i < out.size(); ++i)
+      if (out[i].kind >= 0) meshLoops(out[i], static_cast<int>(i), hybridOf, seg.neighbour);
+    return out;
+  }
+
+  /**
+   * A hybrid region's boundary loops (ADR-0097, slice D1): its triangles'
+   * edges whose other triangle is in another region (or none), each from
+   * corner k to k + 1 (the region on its left seen from outside), chained
+   * node to node into closed loops, then the outer one first (the largest
+   * area in the chart's parameters; its sign must say the region is on its
+   * left, every inner loop's the opposite). A node two boundary edges leave
+   * (the region touches itself there) or a loop that doesn't close explodes
+   * the region (`why`). Where three or more regions meet is just a node of
+   * the loop: every mesh edge is its own B-rep edge, so chains between two
+   * regions aren't needed here.
+   */
+  void meshLoops(MeshHybridRegion& region, int id, const std::vector<int>& hybridOf,
+                 const std::vector<int>& neighbour) const {
+    std::map<int, int> next;
+    for (int t : region.triangles) {
+      for (int k = 0; k < 3; ++k) {
+        const int u = neighbour[3 * t + k];
+        if (u >= 0 && hybridOf[u] == id) continue;
+        const int a = static_cast<int>(meshTriangles_[3 * t + k]), b = static_cast<int>(meshTriangles_[3 * t + (k + 1) % 3]);
+        if (!next.emplace(a, b).second) {
+          region.why = "touches itself at node " + std::to_string(a);
+          return;
+        }
+      }
+    }
+    while (!next.empty()) {
+      const int start = next.begin()->first;
+      std::vector<int> loop;
+      int node = start;
+      do {
+        const auto it = next.find(node);
+        if (it == next.end()) {
+          region.why = "a loop that doesn't close";
+          region.loops.clear();
+          return;
+        }
+        loop.push_back(node);
+        node = it->second;
+        next.erase(it);
+      } while (node != start);
+      region.loops.push_back(std::move(loop));
+    }
+    if (region.loops.empty()) {
+      region.why = "no boundary";
+      return;
+    }
+    // The outer loop: the largest area in the chart's parameters.
+    std::vector<double> signedArea;
+    for (const std::vector<int>& loop : region.loops) {
+      double a = 0;
+      gp_Pnt2d previous = region.chart.uv(gp_Pnt(meshNode(loop.back())));
+      for (int n : loop) {
+        const gp_Pnt2d p = region.chart.uv(gp_Pnt(meshNode(n)));
+        a += previous.X() * p.Y() - p.X() * previous.Y();
+        previous = p;
+      }
+      signedArea.push_back(a / 2);
+    }
+    size_t outer = 0;
+    for (size_t i = 1; i < signedArea.size(); ++i)
+      if (std::fabs(signedArea[i]) > std::fabs(signedArea[outer])) outer = i;
+    std::swap(region.loops[0], region.loops[outer]);
+    std::swap(signedArea[0], signedArea[outer]);
+    // The region's side: does the chart's normal agree with its triangles'?
+    int largest = region.triangles.front();
+    for (int t : region.triangles)
+      if (triangleArea(t) > triangleArea(largest)) largest = t;
+    const gp_Pnt2d c = region.chart.uv(gp_Pnt((meshNode(meshTriangles_[3 * largest]) + meshNode(meshTriangles_[3 * largest + 1]) +
+                                               meshNode(meshTriangles_[3 * largest + 2])) /
+                                              3));
+    const gp_XYZ a = meshNode(meshTriangles_[3 * largest]), b = meshNode(meshTriangles_[3 * largest + 1]),
+                 d = meshNode(meshTriangles_[3 * largest + 2]);
+    const double side = region.chart.normal(c.X(), c.Y()).XYZ().Dot((b - a).Crossed(d - a)) < 0 ? -1 : 1;
+    for (size_t i = 0; i < signedArea.size(); ++i) {
+      if ((i == 0) != (side * signedArea[i] > 0)) {
+        region.why = i == 0 ? "its outer loop runs the wrong way" : "an inner loop runs the wrong way";
+        return;
+      }
+    }
+  }
+
+  double triangleArea(int t) const {
+    const gp_XYZ a = meshNode(meshTriangles_[3 * t]), b = meshNode(meshTriangles_[3 * t + 1]), c = meshNode(meshTriangles_[3 * t + 2]);
+    return (b - a).Crossed(c - a).Modulus() / 2;
+  }
+
+  /** The hybrid regions' loops for tests (ADR-0097, slice D1): see meshLoopsDebug. */
+  std::vector<int32_t> meshLoops_;
+
+  /**
+   * meshToSolid's prismatic method (ADR-0097 §3 and its amendments), over
+   * the staged buffers, in two stages: segmentMesh, then the exact rebuild
+   * (rebuildPrismatic: one oversized face per surface, BOPAlgo_MakerVolume,
+   * the cells inside the mesh kept, the result checked against the mesh),
+   * skipped when the segmentation already rules it out (unfit regions over
+   * PRISMATIC_UNFIT_ALLOWED, surfaces over PRISMATIC_SURFACE_CAP); then,
+   * when it was skipped or refused, the hybrid rebuild (rebuildHybrid, slice
+   * D1) on a deadline of its own. The tolerance retries run only when both
+   * refused. Fills meshReport_ before a refusal too.
    */
   int prismaticFromMesh(double tolerance) {
     rebuildTimes_.clear();
     rebuildRefusal_.clear();
+    hybridRefusal_.clear();
+    hybridExploded_ = 0;
     try {
       MeshSegmentation seg;
       if (!segmentMesh(tolerance, seg)) return 0;
@@ -7324,22 +7743,18 @@ private:
         unfitFailed = "Mesh to Solid couldn't close the body: " + regionsText +
                       (suggested > 0 ? "Raise the tolerance to " + millimetres(suggested) + " mm, or use Faceted."
                                      : std::string("Use Faceted, or simplify the mesh in your slicer."));
-        // Small unfit regions (a sliver, a blend, text) are left out of the
-        // rebuild; more refuses (ADR-0097's 2026-10-22 amendment, slice C).
-        if (unfitFraction > PRISMATIC_UNFIT_ALLOWED) return fail(unfitFailed.c_str());
       }
-      if (planes + cylinders + cones + spheres + tori > PRISMATIC_SURFACE_CAP) {
-        const std::string message = "This mesh has " + std::to_string(planes + cylinders + cones + spheres + tori) +
-                                    " surfaces; Extrudo rebuilds up to " + std::to_string(PRISMATIC_SURFACE_CAP) +
-                                    ". Use Faceted, or simplify the mesh in your slicer.";
-        return fail(message.c_str());
-      }
+      // Small unfit regions (a sliver, a blend, text) are left out of the
+      // exact rebuild (slice C); more, or more surfaces than MakerVolume can
+      // take, skip it: the hybrid rebuild keeps them as facets.
+      const bool exactSkipped = unfitFraction > PRISMATIC_UNFIT_ALLOWED ||
+                                planes + cylinders + cones + spheres + tori > PRISMATIC_SURFACE_CAP;
       // An exception in the booleans is a failed rebuild like any other;
       // past the budget, the rebuild gives up (a refusal, never a trap).
       static const char* const gaveUp =
           "Mesh to Solid gave up after 30 s: this mesh has too many surfaces to rebuild exactly. Use Faceted, or "
           "simplify the mesh in your slicer.";
-      Handle(MeshDeadline) deadline = new MeshDeadline(nowMs() + prismaticBudgetMs_);
+      Handle(MeshDeadline) deadline;
       auto rebuild = [&](double t, MeshSegmentation& s, const std::string& failed) {
         try {
           return rebuildPrismatic(t, s.surfaces, s.regions, s.regionOf, s.regionNeighbours, s.normals, s.areas,
@@ -7352,18 +7767,51 @@ private:
           return fail(failed.c_str());
         }
       };
-      const int handle = rebuild(tolerance, seg, rebuildFailed);
-      if (handle) return handle;
-      if (deadline->expired()) return fail(gaveUp);
-      // A tolerance to suggest: the rebuild (segmentation included) at 2 and
-      // 5 x the tolerance, within what is left of the budget. The result
-      // there is dropped (the user chose this tolerance); the report and the
-      // stage times stay this tolerance's. With regions left out, the unfit
-      // refusal is the one the user can act on: it names the regions, and
-      // the tolerance that converted when there is one.
+      // The exact rebuild snaps and merges the surfaces in place; the hybrid takes them as fitted.
+      const std::vector<MeshSurface> fitted = seg.surfaces;
+      bool exactExpired = false;
+      if (!exactSkipped) {
+        deadline = new MeshDeadline(nowMs() + prismaticBudgetMs_);
+        const int handle = rebuild(tolerance, seg, rebuildFailed);
+        if (handle) return handle;
+        exactExpired = deadline->expired();
+      }
       const std::vector<double> report = meshReport_;
+      seg.surfaces = fitted;
+      std::string capMessage;
+      bool hybridExpired = false, hybridThrew = false;
+      {
+        const std::string exactWhy = rebuildRefusal_;
+        Handle(MeshDeadline) hybridDeadline = new MeshDeadline(nowMs() + hybridBudgetMs_);
+        try {
+          const int handle = rebuildHybrid(tolerance, seg, rebuildFailed, hybridDeadline, capMessage);
+          if (handle) return handle;
+        } catch (const HybridOutOfTime&) {
+          hybridExpired = true;
+          hybridRefusal_ = "past the budget";
+        } catch (...) {
+          hybridThrew = true;
+          failFromException("an exception");
+          hybridRefusal_ = lastError_ + (rebuildTimes_.empty() ? "" : " after " + rebuildTimes_.back().first);
+        }
+        rebuildRefusal_ = exactWhy;
+      }
+      meshReport_ = report;
+      if (!capMessage.empty()) return fail(capMessage.c_str());
+      if (hybridExpired) {
+        const std::string message = "Mesh to Solid gave up after " + std::to_string(static_cast<int>(hybridBudgetMs_ / 1000)) +
+                                    " s: this mesh is too large to rebuild. Use Faceted, or simplify the mesh in your slicer.";
+        return fail(message.c_str());
+      }
+      if (exactExpired) return fail(exactSkipped ? rebuildFailed.c_str() : gaveUp);
+      // A tolerance to suggest: the exact rebuild (segmentation included) at
+      // 2 and 5 x the tolerance, within what is left of its budget (a budget
+      // of its own when it was skipped). The result there is dropped (the
+      // user chose this tolerance); the report and the stage times stay this
+      // tolerance's.
+      if (deadline.IsNull()) deadline = new MeshDeadline(nowMs() + prismaticBudgetMs_);
       const auto times = rebuildTimes_;
-      const std::string why = rebuildRefusal_;
+      const std::string why = rebuildRefusal_, hybridWhy = hybridRefusal_;
       double works = -1;
       for (double factor : {2.0, 5.0}) {
         if (deadline->expired()) break;
@@ -7385,7 +7833,10 @@ private:
       meshReport_ = report;
       rebuildTimes_ = times;
       rebuildRefusal_ = why;
-      if (unfitRegions > 0) {
+      hybridRefusal_ = hybridWhy;
+      // The hybrid's own refusal (validity, the checks) wins over the unfit
+      // message: its unfit regions were facets there. An exception keeps it.
+      if (hybridThrew && unfitRegions > 0) {
         if (works > 0) {
           unfitFailed = unfitFailed.substr(0, unfitFailed.find(" torus. ") + 8) + "Raise the tolerance to " +
                         millimetres(works) + " mm, or use Faceted.";
@@ -8233,7 +8684,571 @@ private:
     meshReport_[3] = static_cast<double>(resultCones);
     meshReport_[4] = static_cast<double>(resultSpheres);
     meshReport_[5] = static_cast<double>(resultTori);
+    meshReport_[10] = 0;
+    meshReport_[11] = 0;
     return store(result);
+  }
+
+  /** The hybrid rebuild gives up after this much wall-clock time, a deadline of its own (ADR-0097, slice D1). */
+  static constexpr double HYBRID_BUDGET_MS = 90000;
+  /** The hybrid rebuild refuses a result with more facet faces than this (slice D1). */
+  static constexpr int HYBRID_FACET_CAP = 4000;
+  /** A recognised region whose edges would need a larger tolerance (mm) is built as facets (slice D1). */
+  static constexpr double HYBRID_EDGE_TOLERANCE_MAX = 1.0;
+  /** The budget the next hybrid rebuild gets: HYBRID_BUDGET_MS, lowered only by the spike harness. */
+  double hybridBudgetMs_ = HYBRID_BUDGET_MS;
+  /** The last hybrid rebuild's exploded regions, and why it refused (the spike harness prints them). */
+  int hybridExploded_ = 0;
+  std::string hybridRefusal_;
+  /** Per recognised region of the last hybrid rebuild, when the spike harness asks (FACES=1). */
+  bool keepHybridFaces_ = false;
+  std::vector<std::string> hybridFaces_;
+  /** The last unified result that failed the check, kept with keepHybridFaces_. */
+  TopoDS_Shape hybridInvalid_;
+
+  /** "5,120". */
+  static std::string thousands(long n) {
+    std::string digits = std::to_string(n < 0 ? -n : n), out;
+    for (size_t i = 0; i < digits.size(); ++i) {
+      if (i > 0 && (digits.size() - i) % 3 == 0) out += ',';
+      out += digits[i];
+    }
+    return (n < 0 ? "-" : "") + out;
+  }
+
+  /**
+   * Prismatic's second stage, the hybrid rebuild (ADR-0097, slice D1): the
+   * solid built from the mesh itself with shared topology. Every recognised
+   * region (`hybridRegions`) is one face on its surface, bounded by its own
+   * mesh boundary (one B-rep edge per mesh edge, a line between two shared
+   * vertices, so the two faces of an edge share it and the shell closes
+   * without sewing); every unfit triangle, and every triangle of a region
+   * whose face won't build, is a planar facet on the same edges. An edge's
+   * pcurve on a curved face is the straight line between its nodes'
+   * parameters, so the edge's tolerance is how far that line's image is from
+   * the chord (the sag, plus the nodes' distance from the surface). Then the
+   * solid per shell, UnifySameDomain (coplanar facets merge, split periodic
+   * pieces merge back), the validity (a face that fails explodes its regions
+   * and the build runs once more), the facet cap, the volume and the nodes.
+   * Returns a handle, or 0: `capMessage` set when the facet cap refused (the
+   * message to show), else lastError is `rebuildFailed` and hybridRefusal_
+   * says why. Throws OutOfTime past the deadline.
+   */
+  struct HybridOutOfTime {};
+  int rebuildHybrid(double tolerance, const MeshSegmentation& seg, const std::string& rebuildFailed,
+                    const Handle(MeshDeadline)& deadline, std::string& capMessage) {
+    hybridRefusal_.clear();
+    hybridExploded_ = 0;
+    hybridFaces_.clear();
+    capMessage.clear();
+    auto refuse = [&](const std::string& why) {
+      hybridRefusal_ = why;
+      return fail(rebuildFailed.c_str());
+    };
+    double stageStart = nowMs();
+    auto stage = [&](const std::string& name) {
+      const double t = nowMs();
+      rebuildTimes_.push_back({"hybrid " + name, t - stageStart});
+      stageStart = t;
+    };
+    auto check = [&] {
+      if (deadline->expired()) throw HybridOutOfTime();
+    };
+    const int nodeCount = static_cast<int>(meshNodes_.size() / 3);
+    const int triangleCount = static_cast<int>(meshTriangles_.size() / 3);
+    auto corner = [&](int t, int k) { return static_cast<int>(meshTriangles_[3 * t + k]); };
+    std::vector<int> hybridOf;
+    std::vector<MeshHybridRegion> regions = hybridRegions(seg, hybridOf);
+    const int regionCount = static_cast<int>(regions.size());
+    stage("loops");
+    check();
+
+    // The mesh's shells: the faces of one connected piece of the mesh are one shell.
+    std::vector<int> shellOf(triangleCount, -1);
+    {
+      int shells = 0;
+      std::vector<int> queue;
+      for (int seed = 0; seed < triangleCount; ++seed) {
+        if (shellOf[seed] >= 0) continue;
+        shellOf[seed] = shells;
+        queue.assign(1, seed);
+        for (size_t head = 0; head < queue.size(); ++head) {
+          for (int k = 0; k < 3; ++k) {
+            const int u = seg.neighbour[3 * queue[head] + k];
+            if (u >= 0 && shellOf[u] < 0) {
+              shellOf[u] = shells;
+              queue.push_back(u);
+            }
+          }
+        }
+        ++shells;
+      }
+    }
+
+    // Facets estimated before anything is built (the faceted pre-count's
+    // rule over the facet triangles): coplanar neighbours are one face.
+    auto facetEstimate = [&] {
+      std::vector<int> parent(triangleCount);
+      for (int t = 0; t < triangleCount; ++t) parent[t] = t;
+      auto find = [&](int x) {
+        while (parent[x] != x) x = parent[x] = parent[parent[x]];
+        return x;
+      };
+      auto facet = [&](int t) { return regions[hybridOf[t]].kind < 0 || !regions[hybridOf[t]].why.empty(); };
+      const double cosTolerance = std::cos(1e-3);
+      int count = 0;
+      for (int t = 0; t < triangleCount; ++t) {
+        if (!facet(t)) continue;
+        for (int k = 0; k < 3; ++k) {
+          const int u = seg.neighbour[3 * t + k];
+          if (u < 0 || u < t || !facet(u)) continue;
+          const bool flat = seg.normals[t].Modulus() < 0.5 || seg.normals[u].Modulus() < 0.5;
+          if (!flat && seg.normals[t].Dot(seg.normals[u]) < cosTolerance) continue;
+          bool near = true;
+          for (int c = 0; c < 3 && near && !flat; ++c)
+            near = std::fabs((meshNode(corner(u, c)) - meshNode(corner(t, 0))).Dot(seg.normals[t])) <= 1e-3;
+          if (!near) continue;
+          const int a = find(t), b = find(u);
+          if (a != b) parent[a] = b;
+        }
+      }
+      for (int t = 0; t < triangleCount; ++t)
+        if (facet(t) && find(t) == t) ++count;
+      return count;
+    };
+    auto exactShare = [&] {
+      double area = 0;
+      for (const MeshHybridRegion& r : regions)
+        if (r.kind >= 0 && r.why.empty()) area += r.area;
+      return seg.meshArea > 0 ? area / seg.meshArea : 0;
+    };
+    auto capRefusal = [&](int facets, bool estimated) {
+      capMessage = "Mesh to Solid could rebuild only " + std::to_string(static_cast<int>(std::floor(exactShare() * 100))) +
+                   " % of this mesh as exact surfaces; the rest would be " + (estimated ? "about " : "") +
+                   thousands(facets) + " facets (Extrudo keeps up to " + thousands(HYBRID_FACET_CAP) +
+                   "). Raise the tolerance, or simplify the mesh in your slicer.";
+      hybridRefusal_ = "facet cap";
+      return fail(capMessage.c_str());
+    };
+
+    for (int attempt = 0; attempt < 2; ++attempt) {
+      {
+        const int estimate = facetEstimate();
+        if (estimate > HYBRID_FACET_CAP * FACETED_ESTIMATE_MARGIN) return capRefusal(estimate, true);
+      }
+      BRep_Builder builder;
+      std::vector<TopoDS_Vertex> vertices(nodeCount);
+      std::unordered_map<uint64_t, TopoDS_Edge> edges;
+      auto vertexOf = [&](int n) -> const TopoDS_Vertex& {
+        if (vertices[n].IsNull()) builder.MakeVertex(vertices[n], gp_Pnt(meshNode(n)), Precision::Confusion());
+        return vertices[n];
+      };
+      auto keyOf = [](int a, int b) {
+        return static_cast<uint64_t>(std::min(a, b)) << 32 | static_cast<uint64_t>(std::max(a, b));
+      };
+      // The edge between two nodes, forward from the lower node to the higher.
+      auto edgeOf = [&](int a, int b) -> const TopoDS_Edge& {
+        const int lo = std::min(a, b), hi = std::max(a, b);
+        TopoDS_Edge& e = edges[keyOf(a, b)];
+        if (e.IsNull()) {
+          const gp_Pnt p(meshNode(lo)), q(meshNode(hi));
+          const Handle(Geom_Curve) line = new Geom_Line(p, gp_Dir(q.XYZ() - p.XYZ()));
+          builder.MakeEdge(e, line, Precision::Confusion());
+          builder.Add(e, vertexOf(lo).Oriented(TopAbs_FORWARD));
+          builder.Add(e, vertexOf(hi).Oriented(TopAbs_REVERSED));
+          builder.Range(e, 0, p.Distance(q));
+        }
+        return e;
+      };
+      // A straight pcurve from the lower node's parameters to the higher's, on the edge's own range.
+      auto pcurveOf = [](const gp_Pnt2d& from, const gp_Pnt2d& to, double length) {
+        NCollection_Array1<gp_Pnt2d> poles(1, 2);
+        poles(1) = from;
+        poles(2) = to;
+        NCollection_Array1<double> knots(1, 2);
+        knots(1) = 0;
+        knots(2) = length;
+        NCollection_Array1<int> mults(1, 2);
+        mults(1) = mults(2) = 2;
+        return Handle(Geom2d_Curve)(new Geom2d_BSplineCurve(poles, knots, mults, 1));
+      };
+      // How far the pcurve's image strays from the chord, sampled at the ends and 9 points between.
+      auto deviation = [&](const MeshChart& chart, int lo, int hi, const gp_Pnt2d& from, const gp_Pnt2d& to) {
+        const gp_XYZ p = meshNode(lo), q = meshNode(hi);
+        double worst = 0;
+        for (int i = 0; i <= 10; ++i) {
+          const double s = i / 10.0;
+          const gp_Pnt image = chart.value(from.X() + s * (to.X() - from.X()), from.Y() + s * (to.Y() - from.Y()));
+          worst = std::max(worst, image.Distance(gp_Pnt(p + s * (q - p))));
+        }
+        return worst;
+      };
+      struct HybridFace {
+        TopoDS_Face face;
+        int region;
+        bool facet;
+      };
+      std::vector<HybridFace> faces;
+      // One face on `chart` bounded by `loops` (node lists, the region on the
+      // left seen from outside); `side` -1 when the chart's normal points
+      // into the material. Null when an edge would need more than the
+      // largest tolerance; `worstTolerance` says how much.
+      struct EdgeUse {
+        TopoDS_Edge edge;
+        Handle(Geom2d_Curve) pcurve;
+        double tolerance;
+        int lo, hi;
+        bool forward;
+      };
+      auto makeFace = [&](const MeshChart& chart, const Handle(Geom_Surface)& surface,
+                          const std::vector<std::vector<int>>& loops, bool flip, double& worstTolerance,
+                          std::vector<EdgeUse>& used) {
+        worstTolerance = 0;
+        used.clear();
+        std::vector<std::vector<EdgeUse>> wires;
+        for (const std::vector<int>& loop : loops) {
+          wires.emplace_back();
+          for (size_t i = 0; i < loop.size(); ++i) {
+            const int a = loop[i], b = loop[(i + 1) % loop.size()];
+            const int lo = std::min(a, b), hi = std::max(a, b);
+            const gp_Pnt2d from = chart.uv(gp_Pnt(meshNode(lo))), to = chart.uv(gp_Pnt(meshNode(hi)));
+            const double off = deviation(chart, lo, hi, from, to);
+            const double tol = std::max(off * 1.1, Precision::Confusion());
+            worstTolerance = std::max(worstTolerance, tol);
+            wires.back().push_back({TopoDS_Edge(), Handle(Geom2d_Curve)(), tol, lo, hi, a == lo});
+            wires.back().back().pcurve = pcurveOf(from, to, meshNode(lo).Subtracted(meshNode(hi)).Modulus());
+          }
+        }
+        TopoDS_Face face;
+        if (worstTolerance > HYBRID_EDGE_TOLERANCE_MAX) return face;
+        builder.MakeFace(face, surface, Precision::Confusion());
+        for (std::vector<EdgeUse>& wireUses : wires) {
+          TopoDS_Wire wire;
+          builder.MakeWire(wire);
+          if (flip) std::reverse(wireUses.begin(), wireUses.end());
+          for (EdgeUse& use : wireUses) {
+            use.edge = edgeOf(use.lo, use.hi);
+            builder.UpdateEdge(use.edge, use.pcurve, surface, TopLoc_Location(), use.tolerance);
+            builder.UpdateVertex(vertexOf(use.lo), use.tolerance);
+            builder.UpdateVertex(vertexOf(use.hi), use.tolerance);
+            builder.Add(wire, use.forward != flip ? use.edge : TopoDS::Edge(use.edge.Reversed()));
+            used.push_back(use);
+          }
+          wire.Closed(true);
+          builder.Add(face, wire);
+        }
+        if (flip) face.Orientation(TopAbs_REVERSED);
+        return face;
+      };
+
+      // The recognised regions, one face each; a face that won't build or
+      // check explodes its region (its pcurves come off the shared edges).
+      for (int i = 0; i < regionCount; ++i) {
+        MeshHybridRegion& region = regions[i];
+        if (region.kind < 0) continue;
+        double worst = 0;
+        if (region.why.empty()) {
+          try {
+            const Handle(Geom_Surface) surface = region.chart.surface();
+            int largest = region.triangles[0];
+            for (int t : region.triangles)
+              if (seg.areas[t] > seg.areas[largest]) largest = t;
+            const gp_XYZ centre = (meshNode(corner(largest, 0)) + meshNode(corner(largest, 1)) + meshNode(corner(largest, 2))) / 3;
+            const gp_Pnt2d at = region.chart.uv(gp_Pnt(centre));
+            const bool flip = region.chart.normal(at.X(), at.Y()).XYZ().Dot(seg.normals[largest]) < 0;
+            std::vector<EdgeUse> used;
+            const TopoDS_Face face = makeFace(region.chart, surface, region.loops, flip, worst, used);
+            if (face.IsNull()) {
+              region.why = "edge tolerance " + std::to_string(worst) + " mm";
+            } else if (!BRepCheck_Analyzer(face).IsValid()) {
+              region.why = "invalid face";
+              for (const EdgeUse& use : used)
+                builder.UpdateEdge(use.edge, Handle(Geom2d_Curve)(), surface, TopLoc_Location(), 0);
+            } else {
+              faces.push_back({face, i, false});
+            }
+          } catch (const Standard_Failure& e) {
+            region.why = std::string("threw ") + e.GetMessageString();
+          }
+        }
+        if (keepHybridFaces_ && (attempt == 0 || !region.why.empty())) {
+          size_t edgeCount = 0;
+          for (const auto& loop : region.loops) edgeCount += loop.size();
+          hybridFaces_.push_back("region " + std::to_string(i) + " surface " + std::to_string(region.surface) + " kind " +
+                                 std::to_string(region.kind) + " triangles " + std::to_string(region.triangles.size()) +
+                                 " loops " + std::to_string(region.loops.size()) + " edges " + std::to_string(edgeCount) +
+                                 " tolerance " + std::to_string(worst) + (region.why.empty() ? " built" : " exploded: " + region.why));
+        }
+        if (i % 64 == 0) check();
+      }
+      stage("faces");
+
+      // Facets: every triangle of an unfit or exploded region, a plane through its corners.
+      for (int t = 0; t < triangleCount; ++t) {
+        const MeshHybridRegion& region = regions[hybridOf[t]];
+        if (region.kind >= 0 && region.why.empty()) continue;
+        const gp_XYZ a = meshNode(corner(t, 0)), b = meshNode(corner(t, 1)), c = meshNode(corner(t, 2));
+        gp_XYZ normal = (b - a).Crossed(c - a);
+        if (normal.Modulus() <= 1e-300 || (b - a).Modulus() <= 1e-300) {
+          // A sliver: a neighbour's normal, square to its longest side.
+          gp_XYZ along = (b - a).Modulus() >= (c - a).Modulus() ? b - a : c - a;
+          if (along.Modulus() <= 1e-300) along = c - b;
+          normal = gp_XYZ(0, 0, 0);
+          for (int k = 0; k < 3 && normal.Modulus() <= 1e-9; ++k) {
+            const int u = seg.neighbour[3 * t + k];
+            if (u >= 0 && along.Modulus() > 0)
+              normal = seg.normals[u] - (seg.normals[u].Dot(along) / along.SquareModulus()) * along;
+          }
+        }
+        MeshChart chart;
+        chart.kind = 0;
+        const gp_XYZ x = (b - a).Modulus() > 1e-300 ? b - a : c - a;
+        chart.frame = gp_Ax3(gp_Pnt(a), gp_Dir(normal), gp_Dir(x - (x.Dot(normal) / normal.SquareModulus()) * normal));
+        double worst = 0;
+        std::vector<EdgeUse> used;
+        const TopoDS_Face face =
+            makeFace(chart, chart.surface(), {{corner(t, 0), corner(t, 1), corner(t, 2)}}, false, worst, used);
+        if (face.IsNull()) return refuse("a facet's edge tolerance " + std::to_string(worst));
+        faces.push_back({face, hybridOf[t], true});
+        if (t % 1024 == 0) check();
+      }
+      stage("facets");
+
+      // One solid per shell of the mesh, unified.
+      std::map<int, std::vector<int>> byShell;
+      for (size_t f = 0; f < faces.size(); ++f)
+        byShell[shellOf[regions[faces[f].region].triangles[0]]].push_back(static_cast<int>(f));
+      std::vector<TopoDS_Shape> solids, unified;
+      std::vector<Handle(BRepTools_History)> histories;
+      for (auto& [shellIndex, members] : byShell) {
+        TopoDS_Shell shell;
+        builder.MakeShell(shell);
+        for (int f : members) builder.Add(shell, faces[f].face);
+        shell.Closed(BRep_Tool::IsClosed(shell));
+        BRepBuilderAPI_MakeSolid makeSolid(shell);
+        if (!makeSolid.IsDone()) return refuse("MakeSolid failed");
+        TopoDS_Shape solid = makeSolid.Solid();
+        if (!BRepCheck_Analyzer(solid).IsValid()) {
+          ShapeFix_Solid fixSolid(TopoDS::Solid(solid));
+          fixSolid.Perform(deadline->Start());
+          solid = fixSolid.Solid();
+        }
+        check();
+        if (volumeOf(solid) < 0) solid.Reverse();
+        solids.push_back(solid);
+      }
+      stage("solid");
+      for (const TopoDS_Shape& solid : solids) {
+        ShapeUpgrade_UnifySameDomain unify(solid, true, true, true);
+        unify.SetLinearTolerance(1e-3);
+        unify.SetAngularTolerance(1e-3);
+        unify.Build();
+        unified.push_back(unify.Shape());
+        histories.push_back(unify.History());
+        check();
+      }
+      stage("unified");
+
+      // Where each face of the result came from: facets, recognised regions or both.
+      auto assemble = [&](const std::vector<TopoDS_Shape>& pieces) {
+        if (pieces.size() == 1) return pieces[0];
+        TopoDS_Compound compound;
+        builder.MakeCompound(compound);
+        for (const TopoDS_Shape& piece : pieces) builder.Add(compound, piece);
+        return TopoDS_Shape(compound);
+      };
+      bool undone = false;
+      TopoDS_Shape result = assemble(unified);
+      bool healed = false;
+      if (!BRepCheck_Analyzer(result).IsValid()) {
+        // Unify moves edges onto merged faces whose plane is up to its
+        // linear tolerance off their own: ShapeFix raises their tolerances.
+        if (keepHybridFaces_) hybridInvalid_ = result;
+        try {
+          for (size_t s = 0; s < unified.size(); ++s) {
+            if (BRepCheck_Analyzer(unified[s]).IsValid()) continue;
+            ShapeFix_Shape healer(unified[s]);
+            healer.Perform(deadline->Start());
+            check();
+            // The healer's own history, onto unify's: what it replaced, the region map follows.
+            unified[s] = healer.Shape();
+            if (!histories[s].IsNull()) histories[s]->Merge(healer.Context()->History());
+          }
+          result = assemble(unified);
+          healed = true;
+        } catch (const Standard_Failure&) {
+        }
+        stage("healed");
+      }
+      if (!healed || !BRepCheck_Analyzer(result).IsValid()) {
+        // The faces that fail, back to their regions: those explode, once.
+        std::set<int> culprits;
+        NCollection_DataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher> regionOfFace;
+        for (const HybridFace& hf : faces)
+          if (!hf.facet) regionOfFace.Bind(hf.face, hf.region);
+        NCollection_DataMap<TopoDS_Shape, std::vector<int>, TopTools_ShapeMapHasher> origins;
+        for (size_t s = 0; s < solids.size(); ++s) {
+          for (TopExp_Explorer e(solids[s], TopAbs_FACE); e.More(); e.Next()) {
+            const TopoDS_Shape& f = e.Current();
+            TopTools_ListOfShape images;
+            if (!histories[s].IsNull()) images = histories[s]->Modified(f);
+            if (images.IsEmpty() && (histories[s].IsNull() || !histories[s]->IsRemoved(f))) images.Append(f);
+            if (!regionOfFace.IsBound(f)) continue;
+            const int region = regionOfFace.Find(f);
+            for (const TopoDS_Shape& image : images) {
+              if (!origins.IsBound(image)) origins.Bind(image, {});
+              origins.ChangeFind(image).push_back(region);
+            }
+          }
+        }
+        for (TopExp_Explorer e(result, TopAbs_FACE); e.More(); e.Next()) {
+          if (BRepCheck_Analyzer(e.Current()).IsValid() || !origins.IsBound(e.Current())) continue;
+          for (int region : origins.Find(e.Current())) culprits.insert(region);
+        }
+        check();
+        if (attempt == 0 && !culprits.empty()) {
+          for (int region : culprits) regions[region].why = "invalid after unify";
+          stage("validity, exploding " + std::to_string(culprits.size()));
+          continue;
+        }
+        bool valid = true;
+        for (const TopoDS_Shape& solid : solids) valid = valid && BRepCheck_Analyzer(solid).IsValid();
+        if (!valid) return refuse("invalid");
+        result = assemble(solids);
+        undone = true;
+      }
+      stage(undone ? "validity (unify undone)" : "validity");
+
+      // The result's faces: a facet is a face only facets made.
+      NCollection_DataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher> origin;
+      for (const HybridFace& hf : faces) {
+        TopTools_ListOfShape images;
+        for (size_t s = 0; s < solids.size() && !undone; ++s) {
+          if (histories[s].IsNull()) continue;
+          for (const TopoDS_Shape& image : histories[s]->Modified(hf.face)) images.Append(image);
+        }
+        if (images.IsEmpty()) images.Append(hf.face);
+        for (const TopoDS_Shape& image : images) {
+          const int bit = hf.facet ? 1 : 2;
+          if (origin.IsBound(image)) origin.ChangeFind(image) |= bit;
+          else origin.Bind(image, bit);
+        }
+      }
+      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> resultFaces;
+      TopExp::MapShapes(result, TopAbs_FACE, resultFaces);
+      int facets = 0, counts[5] = {0, 0, 0, 0, 0};
+      std::vector<char> isFacet(resultFaces.Extent() + 1, 0);
+      for (int i = 1; i <= resultFaces.Extent(); ++i) {
+        const GeomAbs_SurfaceType type = BRepAdaptor_Surface(TopoDS::Face(resultFaces(i)), false).GetType();
+        const int bits = origin.IsBound(resultFaces(i)) ? origin.Find(resultFaces(i)) : (type == GeomAbs_Plane ? 1 : 2);
+        if (bits == 1) {
+          isFacet[i] = 1;
+          ++facets;
+          continue;
+        }
+        const int kind = type == GeomAbs_Plane      ? 0
+                         : type == GeomAbs_Cylinder ? 1
+                         : type == GeomAbs_Cone     ? 2
+                         : type == GeomAbs_Sphere   ? 3
+                         : type == GeomAbs_Torus    ? 4
+                                                    : -1;
+        if (kind >= 0) ++counts[kind];
+      }
+      hybridExploded_ = 0;
+      for (const MeshHybridRegion& r : regions) hybridExploded_ += r.kind >= 0 && !r.why.empty();
+      if (facets > HYBRID_FACET_CAP) return capRefusal(facets, false);
+
+      // The checks: the volume within the analytic faces' sag (or 1 %), the
+      // nodes within the tolerance of the solid.
+      double sagSum = 0, exactArea = 0;
+      for (const MeshHybridRegion& r : regions) {
+        if (r.kind < 0 || !r.why.empty()) continue;
+        sagSum += r.area * seg.surfaces[r.surface].sag;
+        exactArea += r.area;
+      }
+      const double allowed = std::max(0.01 * std::fabs(seg.meshVolume), 2 * sagSum + tolerance * exactArea);
+      const double volume = volumeOf(result);
+      if (std::fabs(volume - seg.meshVolume) > allowed)
+        return refuse("volume off: " + std::to_string(volume) + " against " + std::to_string(seg.meshVolume) +
+                      ", allowed " + std::to_string(allowed));
+      {
+        std::vector<MeshCheckedFace> checked;
+        for (int i = 1; i <= resultFaces.Extent(); ++i) {
+          MeshCheckedFace c;
+          c.face = TopoDS::Face(resultFaces(i));
+          const BRepAdaptor_Surface surface(c.face, false);
+          const GeomAbs_SurfaceType type = surface.GetType();
+          c.kind = type == GeomAbs_Plane      ? 0
+                   : type == GeomAbs_Cylinder ? 1
+                   : type == GeomAbs_Cone     ? 2
+                   : type == GeomAbs_Sphere   ? 3
+                   : type == GeomAbs_Torus    ? 4
+                                              : -1;
+          if (c.kind < 0) continue;
+          if (c.kind == 0) c.plane = surface.Plane();
+          if (c.kind == 1) c.cylinder = surface.Cylinder();
+          if (c.kind == 2) c.cone = surface.Cone();
+          if (c.kind == 3) c.sphere = surface.Sphere();
+          if (c.kind == 4) c.torus = surface.Torus();
+          double u1 = 0, v1 = 0;
+          BRepTools::UVBounds(c.face, c.u0, u1, c.v0, v1);
+          BRepBndLib::Add(c.face, c.box);
+          c.box.Enlarge(tolerance * 1.01);
+          checked.push_back(std::move(c));
+        }
+        const int nodeStride = std::max(1, nodeCount / 2000);
+        const double reach = tolerance * 1.01 + 1e-7;
+        for (int n = 0; n < nodeCount; n += nodeStride) {
+          check();
+          const gp_Pnt p(meshNode(n));
+          bool near = false;
+          for (MeshCheckedFace& c : checked) {
+            if (c.box.IsOut(p)) continue;
+            double u = 0, v = 0;
+            gp_Pnt q;
+            if (c.kind == 0) {
+              ElSLib::Parameters(c.plane, p, u, v);
+              q = ElSLib::Value(u, v, c.plane);
+            } else if (c.kind == 1) {
+              ElSLib::Parameters(c.cylinder, p, u, v);
+              q = ElSLib::Value(u, v, c.cylinder);
+            } else if (c.kind == 2) {
+              ElSLib::Parameters(c.cone, p, u, v);
+              q = ElSLib::Value(u, v, c.cone);
+            } else if (c.kind == 3) {
+              ElSLib::Parameters(c.sphere, p, u, v);
+              q = ElSLib::Value(u, v, c.sphere);
+            } else {
+              ElSLib::Parameters(c.torus, p, u, v);
+              q = ElSLib::Value(u, v, c.torus);
+            }
+            if (p.Distance(q) > reach) continue;
+            const double turn = 2 * M_PI, slack = 1e-9;
+            if (c.kind > 0) u += turn * std::ceil((c.u0 - slack - u) / turn);
+            if (c.kind == 4) v += turn * std::ceil((c.v0 - slack - v) / turn);
+            if (!c.inside) c.inside.reset(new BRepTopAdaptor_FClass2d(c.face, 1e-7));
+            if (c.inside->Perform(gp_Pnt2d(u, v)) != TopAbs_OUT) {
+              near = true;
+              break;
+            }
+          }
+          if (!near) {
+            BRepExtrema_DistShapeShape distance(BRepBuilderAPI_MakeVertex(p).Vertex(), result, Extrema_ExtFlag_MINMAX,
+                                                Extrema_ExtAlgo_Grad, deadline->Start());
+            if (!distance.IsDone() || distance.Value() > reach)
+              return refuse("node " + std::to_string(n) + " off the solid by " +
+                            std::to_string(distance.IsDone() ? distance.Value() : -1.0));
+          }
+        }
+      }
+      stage("checked against the mesh");
+      meshReport_[0] = static_cast<double>(resultFaces.Extent());
+      for (int k = 0; k < 5; ++k) meshReport_[1 + k] = static_cast<double>(counts[k]);
+      meshReport_[10] = 1;
+      meshReport_[11] = static_cast<double>(facets);
+      return store(result);
+    }
+    return refuse("invalid after exploding");
   }
 
   /** Staged path pieces (pathLine and friends). */
