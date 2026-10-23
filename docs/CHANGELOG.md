@@ -2,6 +2,13 @@
 
 One line per completed roadmap task, newest first. Dates are absolute.
 
+## v0.8.3 (2026-10-23)
+
+- 2026-10-22 · **.f3d import**: files saved with the newest B-rep stream format (32-bit) now get their fillets, face offsets and file bodies like older ones; Combine (join) and Move (along a line) are imported, and an extrude whose sketch was deleted says so (#93).
+- 2026-10-22 · **Agents (MCP)**: sketch points and slot widths take expressions, kept as dimensions so the shapes follow their parameters (#103); a three-point arc is drawn on its through point's side, which also fixes the document API's `arc` (#104); new `rename_design` tool names the open design (#105).
+- 2026-10-21 · **Assemblies are easier to find** (#74): the Solid tab's Component group is now Assemble, search finds New Component and Joint by "assembly", the browser suggests New Component when a design has several bodies and no component, and the guide page is "Assemblies: components and joints" with a "Where is the assembly?" section.
+- 2026-10-21 · **.f3d import**: text in Arial, Arial Narrow and DIN Condensed is drawn in new bundled fonts with the same (or about the same) widths, Arimo, Archivo Narrow and Sofia Sans Extra Condensed, in bold where the file's text is bold, so imported text cuts come out closer to the file's; the fonts are in the font picker too.
+
 ## v0.8.2 (2026-10-21)
 
 - 2026-10-20 · **.f3d import**: files whose parameter records are of a newer version (9) now keep their dimensions and extrude distances, and records Extrudo cannot read are reported in the import notices instead of passing silently (#93).
