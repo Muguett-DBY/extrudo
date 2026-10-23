@@ -9388,6 +9388,9 @@ private:
       if (chains[c].right >= 0) chainsOfRegion[chains[c].right].push_back(static_cast<int>(c));
     }
     std::vector<char> chainUndone(chains.size(), 0);
+    std::vector<int> regionsOnSurface(seg.surfaces.size(), 0);
+    for (const MeshHybridRegion& r : regions)
+      if (r.surface >= 0) ++regionsOnSurface[r.surface];
     std::map<std::pair<int, int>, std::pair<std::vector<MeshChainCurve>, std::string>> curveCache;
     std::map<std::pair<int, int>, bool> coaxialPairs;
     stage("loops");
@@ -9462,8 +9465,26 @@ private:
     };
 
     // Up to three builds: a face that fails the validity or the node check
-    // explodes its region, and the build runs again.
-    for (int attempt = 0; attempt < 3; ++attempt) {
+    // explodes its region, and the build runs again. Where such a region has
+    // collapsed chains, those become polylines first, in a build of its own
+    // (up to two of those, slice D3).
+    int undoBuilds = 0;
+    // A failing region's collapsed chains back to polylines for the next build; false when it has none.
+    auto undoCollapses = [&](const std::set<int>& failing, const std::vector<char>& collapsed) {
+      if (undoBuilds >= 2) return false;
+      int undone = 0;
+      for (int region : failing)
+        for (int c : chainsOfRegion[region])
+          if (collapsed[c] && !chainUndone[c]) {
+            chainUndone[c] = 1;
+            ++undone;
+          }
+      if (undone == 0) return false;
+      ++undoBuilds;
+      return true;
+    };
+    std::vector<char> collapsedNow(chains.size(), 0);
+    for (int attempt = 0; attempt < 3 + undoBuilds; ++attempt) {
       {
         const int estimate = facetEstimate();
         if (estimate > HYBRID_FACET_CAP * FACETED_ESTIMATE_MARGIN) return capRefusal(estimate, true);
@@ -9602,6 +9623,12 @@ private:
           why = "undone";
         } else if (!chainBuilt(chain.left) || !chainBuilt(chain.right)) {
           why = "not a candidate";
+        } else if ((regions[chain.left].kind == 3 && regionsOnSurface[regions[chain.left].surface] > 1) ||
+                   (regions[chain.right].kind == 3 && regionsOnSurface[regions[chain.right].surface] > 1)) {
+          // A sphere's pieces each have their own frame (their poles away
+          // from their own nodes): unify merges them back only across
+          // straight edges, so their chains stay the mesh's.
+          why = "a sphere in pieces";
         } else {
           try {
             const MeshChainFit fit = chainCurve(chain, regions, seg, tolerance, curveCache, coaxialPairs);
@@ -9645,6 +9672,13 @@ private:
                 ce.pcurve[1] = onRight;
                 ce.tolerance = tol;
                 ce.type = fit.curve.type;
+                if (keepHybridFaces_)
+                  hybridFaces_.push_back("chain " + std::to_string(c) + " " +
+                                         pairName(regions[chain.left].kind, regions[chain.right].kind) + ": " +
+                                         (ce.type == 0 ? "line" : ce.type == 1 ? "circle" : "ellipse") + ", regions " +
+                                         std::to_string(chain.left) + "|" + std::to_string(chain.right) + ", " +
+                                         std::to_string(chain.closed ? chain.nodes.size() : chain.nodes.size() - 1) +
+                                         " mesh edges, tolerance " + std::to_string(tol));
               }
             }
           } catch (const Standard_Failure& e) {
@@ -9831,6 +9865,7 @@ private:
       }
       stage("faces");
       rebuildTimes_.push_back({"hybrid " + hybridChains_, 0});
+      for (size_t c = 0; c < chains.size(); ++c) collapsedNow[c] = !chainEdges[c].edge.IsNull();
 
       // Facets: every triangle of an unfit or exploded region, a plane through its corners.
       for (int t = 0; t < triangleCount; ++t) {
@@ -9968,7 +10003,11 @@ private:
           for (int region : origins.Find(e.Current())) culprits.insert(region);
         }
         check();
-        if (attempt < 2 && !culprits.empty()) {
+        if (undoCollapses(culprits, collapsedNow)) {
+          stage("validity, undoing the collapses of " + std::to_string(culprits.size()));
+          continue;
+        }
+        if (attempt - undoBuilds < 2 && !culprits.empty()) {
           for (int region : culprits) regions[region].why = "invalid after unify";
           stage("validity, exploding " + std::to_string(culprits.size()));
           continue;
@@ -10109,7 +10148,7 @@ private:
             if (!distance.IsDone() || distance.Value() > reach) {
               // A node a recognised face doesn't cover (its parameters outside
               // the face's straight-edged domain): that region explodes.
-              if (region >= 0 && attempt < 2) {
+              if (region >= 0 && attempt - undoBuilds < 2) {
                 offRegions.insert(region);
                 continue;
               }
@@ -10120,6 +10159,10 @@ private:
             }
           }
         }
+      }
+      if (undoCollapses(offRegions, collapsedNow)) {
+        stage("checked against the mesh, undoing the collapses of " + std::to_string(offRegions.size()));
+        continue;
       }
       if (!offRegions.empty()) {
         for (int region : offRegions) regions[region].why = "a node off its face";
