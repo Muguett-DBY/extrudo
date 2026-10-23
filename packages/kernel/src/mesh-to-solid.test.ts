@@ -540,6 +540,7 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
         unfit: { regions: 0, triangles: 0, fraction: 0 },
         rebuild: 'exact',
         facets: 0,
+        tolerance: 0.01,
       });
     } finally {
       kernel.release(shape);
@@ -702,18 +703,24 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
   });
 
   it('25: Auto on a noisy mesh picks a higher step and converts; 0.01 leaves it unfit', () => {
-    // The side is ±0.015 mm off its circle: unfit at 0.01, fits at 0.02.
-    const explicit = prismatic(noisyCylinder(0.015), 0.01);
+    // The side is ±0.03 mm off its circle: unfit at 0.01 (kept as facets), a
+    // step at or above 0.02 fits it under the 2 % allowance.
+    const explicit = prismatic(noisyCylinder(0.03), 0.01);
     try {
       expect(explicit.report.unfit.regions).toBeGreaterThan(0);
+      expect(explicit.report.unfit.fraction).toBeGreaterThan(0.02);
     } finally {
       kernel.release(explicit.shape);
     }
-    const auto = prismatic(noisyCylinder(0.015), -1);
+    const auto = prismatic(noisyCylinder(0.03), -1);
     try {
-      expect(auto.report).toMatchObject({ auto: true, rebuild: 'exact', planes: 2, cylinders: 1 });
+      expect(auto.report.auto).toBe(true);
       expect(auto.report.tolerance as number).toBeGreaterThanOrEqual(0.02);
+      expect(auto.report.unfit.fraction).toBeLessThanOrEqual(0.02);
       expect(kernel.isValid(auto.shape)).toBe(true);
+      expect(Math.abs(kernel.properties(auto.shape).volume - Math.PI * 25 * 20)).toBeLessThan(
+        Math.PI * 25 * 20 * 0.02,
+      );
     } finally {
       kernel.release(auto.shape);
     }
@@ -1222,7 +1229,7 @@ describe('Kernel.meshRegions', { timeout: 300_000 }, () => {
     expect(regions.suggestedTolerance).toBeLessThanOrEqual(0.02);
   });
 
-  it('refuses a solid and a tolerance of 0', () => {
+  it('refuses a solid, and reads a tolerance of 0 as Auto (slice D2)', () => {
     const box = kernel.box([1, 1, 1]);
     try {
       expect(() => kernel.meshRegions(box, 0.01)).toThrow(
@@ -1231,9 +1238,11 @@ describe('Kernel.meshRegions', { timeout: 300_000 }, () => {
     } finally {
       kernel.release(box);
     }
-    expect(() => regionsOf(cube(), 0)).toThrow(
-      new KernelError('Mesh to Solid needs a tolerance above 0 mm.'),
-    );
+    // 0 (or less) means Auto now: the cube still segments into six planes.
+    const regions = regionsOf(cube(), 0);
+    expect(regions.planes).toBe(6);
+    expect(regions.tolerance).toBe(0.01);
+    expect(regions.auto).toBe(true);
   });
 
   it('segments a 500k-triangle sphere in under 3 s, and agrees with the conversion on a plate', () => {

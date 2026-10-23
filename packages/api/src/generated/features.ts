@@ -1339,7 +1339,7 @@ export interface FeatureMethods {
    *
    * @param inputs.body The mesh body to convert. Required.
    * @param inputs.method prismatic recognises planes, cylinders, cones, spheres and tori within the tolerance and rebuilds exact faces; what fits nothing stays as facets. faceted keeps every flat facet as a face. Default prismatic.
-   * @param inputs.tolerance How far a facet may sit from a fitted surface, in mm (prismatic only). Default 0.01.
+   * @param inputs.tolerance How far a facet may sit from a fitted surface, in mm (prismatic only). Absent: Auto, the kernel picks 0.01-0.1 mm from the mesh.
    *
    * The faces it makes, as `handle.face(role)` takes them:
    * - `face:<n>` — Face n of the converted body, in the result's own order (1-based).

@@ -212,19 +212,20 @@ describe('the mesh to solid dialog: regions and the Result line (ADR-0097 ยง4, ย
 
   it('asks again when the tolerance changes, and drops the late answer', async () => {
     const t = started();
-    // Custom 0.05 mm: a second, different region request.
+    // Auto (-1), then Custom's default 0.01 mm, then 0.05 mm.
     t.controller.setChoice('toleranceMode', 'custom');
     t.controller.setExpr('tolerance', '0.05 mm');
-    expect(t.kernel.regions.map((r) => r.tolerance)).toEqual([-1, 0.05]);
-    t.kernel.regions[0]?.resolve(sixPlanes());
+    expect(t.kernel.regions.map((r) => r.tolerance)).toEqual([-1, 0.01, 0.05]);
+    // The late 0.01 mm answer is dropped: the current request is 0.05 mm.
+    t.kernel.regions[1]?.resolve(sixPlanes());
     await settle();
     expect(t.open()?.preview.regions).toBeUndefined();
-    t.kernel.regions[1]?.resolve({ ...sixPlanes(), planes: 5 });
+    t.kernel.regions[2]?.resolve({ ...sixPlanes(), planes: 5 });
     await settle();
     expect(t.open()?.preview.regions?.planes).toBe(5);
     // The same request again asks nothing.
     t.controller.setExpr('tolerance', '0.05 mm');
-    expect(t.kernel.regions).toHaveLength(2);
+    expect(t.kernel.regions).toHaveLength(3);
   });
 
   it('clears the regions for Faceted, whose line is the report: "6 faces"', async () => {
