@@ -9048,7 +9048,8 @@ private:
         builder.MakeShell(shell);
         for (int f : members) builder.Add(shell, faces[f].face);
         shell.Closed(BRep_Tool::IsClosed(shell));
-        if (shellVolume[shellIndex] < 0) {
+        // A real void (a sliver's rounding of ±1e-17 mm³ is no cavity).
+        if (shellVolume[shellIndex] < -1e-6 * std::max(1.0, std::fabs(seg.meshVolume))) {
           cavities.push_back({shell, members.front()});
           continue;
         }
