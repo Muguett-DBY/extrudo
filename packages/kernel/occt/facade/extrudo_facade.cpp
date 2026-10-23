@@ -9606,6 +9606,22 @@ private:
           try {
             const MeshChainFit fit = chainCurve(chain, regions, seg, tolerance, curveCache, coaxialPairs);
             why = fit.why;
+            // Slice D1's limit holds for the mesh edges a collapse replaces:
+            // where a chord strays from its straight pcurve's image by more
+            // than the largest edge tolerance, the surface bulges past the
+            // mesh between the nodes (a curved fit over a few flat
+            // triangles) and the chain stays the mesh's, so that region
+            // still explodes.
+            for (size_t i = 0; why.empty() && i + 1 < chain.nodes.size() + (chain.closed ? 1 : 0); ++i) {
+              const int a = chain.nodes[i], b = chain.nodes[(i + 1) % chain.nodes.size()];
+              const int lo = std::min(a, b), hi = std::max(a, b);
+              for (const int r : {chain.left, chain.right}) {
+                const MeshChart& chart = regions[r].chart;
+                if (deviation(chart, lo, hi, chart.uv(gp_Pnt(meshNode(lo))), chart.uv(gp_Pnt(meshNode(hi)))) * 1.1 >
+                    HYBRID_EDGE_TOLERANCE_MAX)
+                  why = "a chord off its surface";
+              }
+            }
             if (why.empty()) {
               const Handle(Geom_Curve) curve = curveGeom(fit.curve);
               double offLeft = 0, offRight = 0;

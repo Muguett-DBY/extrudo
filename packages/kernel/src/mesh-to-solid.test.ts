@@ -655,6 +655,7 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
     try {
       console.log(`prismatic: the staircase converted in ${ms.toFixed(0)} ms`);
       expect(report).toMatchObject({ rebuild: 'hybrid', faces: 602, planes: 602, facets: 0 });
+      console.log(`D3: staircase ${kernel.count(shape, 'edge')} edges`);
       expect(kernel.isValid(shape)).toBe(true);
       expect(kernel.properties(shape).volume).toBeCloseTo(224250, 3);
       expect(ms).toBeLessThan(10000);
@@ -1003,12 +1004,21 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
   });
 });
 
+/** A boundary chain (slice D3): its regions, closed or not, its mesh edges, its curve (0 line, 1 circle, 2 ellipse; -1 none, -2 not a candidate). */
+interface Chain {
+  left: number;
+  right: number;
+  closed: boolean;
+  edges: number;
+  curve: number;
+}
+
 /**
  * The hybrid rebuild's regions and loops through the raw facade (ADR-0097
  * slice D1): per region its kind, surface and loops' edge counts, the outer
- * loop first.
+ * loop first; and the boundary chains between them (slice D3).
  */
-function loopsOf(positions: ArrayLike<number>, indices: Uint32Array, tolerance = 0.01) {
+function chainsAndLoopsOf(positions: ArrayLike<number>, indices: Uint32Array, tolerance = 0.01) {
   const facade = new occt.ExtrudoFacade();
   stageMesh(facade, positions, indices);
   const count = facade.meshLoopsDebug(tolerance);
@@ -1019,7 +1029,8 @@ function loopsOf(positions: ArrayLike<number>, indices: Uint32Array, tolerance =
     facade.meshLoopsSize(),
   ).slice();
   const regions: { kind: number; surface: number; loops: number[] }[] = [];
-  for (let i = 0; i < data.length; ) {
+  let i = 0;
+  while (regions.length < count) {
     const loops = data[i + 2] as number;
     regions.push({
       kind: data[i] as number,
@@ -1028,8 +1039,32 @@ function loopsOf(positions: ArrayLike<number>, indices: Uint32Array, tolerance =
     });
     i += 3 + loops;
   }
-  expect(regions).toHaveLength(count);
-  return regions;
+  const chains: Chain[] = [];
+  for (let c = 0, n = data[i++] as number; c < n; c++, i += 5) {
+    chains.push({
+      left: data[i] as number,
+      right: data[i + 1] as number,
+      closed: data[i + 2] === 1,
+      edges: data[i + 3] as number,
+      curve: data[i + 4] as number,
+    });
+  }
+  expect(i).toBe(data.length);
+  return { regions, chains };
+}
+
+function loopsOf(positions: ArrayLike<number>, indices: Uint32Array, tolerance = 0.01) {
+  return chainsAndLoopsOf(positions, indices, tolerance).regions;
+}
+
+/** Every edge's curve type (line, circle, ellipse, other) and, for circles, the conic. */
+function edgesOf(shape: ShapeHandle) {
+  return Array.from({ length: kernel.count(shape, 'edge') }, (_, i) => {
+    const g = kernel.edgeGeometry(shape, i, 2);
+    return g.type === 'degenerate'
+      ? { index: i, type: g.type, points: [] }
+      : { index: i, type: g.type, conic: g.conic, points: g.points };
+  });
 }
 
 /** A manifold solid's welded triangles (the manifold is freed). */
@@ -1138,6 +1173,122 @@ describe('Mesh to Solid, the hybrid rebuild (ADR-0097 slice D1)', { timeout: 300
       expect(kernel.isValid(shape)).toBe(true);
       // The cavity's 400 mm3 stay out (filled, the volume would be 800 off).
       expect(Math.abs(kernel.properties(shape).volume / volume - 1)).toBeLessThan(0.01);
+    } finally {
+      kernel.release(shape);
+    }
+  });
+});
+
+describe('Mesh to Solid, the hybrid’s chains (ADR-0097 slice D3)', { timeout: 300_000 }, () => {
+  it('splits a box’s boundaries into 12 chains, each a line', () => {
+    const { mesh } = readStl(bytesOf(cubeStl));
+    const { chains } = chainsAndLoopsOf(mesh.positions, mesh.indices);
+    expect(chains).toHaveLength(12);
+    for (const chain of chains) expect(chain).toMatchObject({ closed: false, edges: 1, curve: 0 });
+  });
+
+  it('gives a through hole’s rims as circle chains, and keeps the split wall’s seams', () => {
+    const solid = plate();
+    const exported = kernel.exportMesh(solid, { linearDeflection: 0.01, angularDeflection: 0.2 });
+    kernel.release(solid);
+    const { positions, indices } = weldByPosition(exported);
+    const { regions, chains } = chainsAndLoopsOf(positions, indices);
+    const kindOf = (r: number) => regions[r]?.kind;
+    const pairs = chains.map((c) => [kindOf(c.left), kindOf(c.right)].sort().join('|'));
+    // The box's 12 edges, the two rims (one chain per half of the wall on each
+    // face) and the two seams between the halves (one surface: no curve).
+    expect(pairs.filter((p) => p === '0|0')).toHaveLength(12);
+    expect(chains.filter((c, i) => pairs[i] === '0|0' && c.curve === 0)).toHaveLength(12);
+    const rims = chains.filter((_, i) => pairs[i] === '0|1');
+    expect(rims).toHaveLength(4);
+    for (const rim of rims) expect(rim).toMatchObject({ closed: false, curve: 1 });
+    const seams = chains.filter((_, i) => pairs[i] === '1|1');
+    expect(seams).toHaveLength(2);
+    for (const seam of seams) expect(seam.curve).toBe(-1);
+  });
+
+  it('closes a cap’s rim chain when one region is on each side', () => {
+    // A plate whose 32-gon boss stands on a box: the cylinder is split, so
+    // its rims are two arcs each; a sphere cap (one region, under 3/4 of a
+    // turn) on a plane is one closed circle chain.
+    const box = manifold.Manifold.cube([30, 30, 10]);
+    const ball = manifold.Manifold.sphere(6, 96).translate([15, 15, 8]);
+    const part = box.add(ball);
+    box.delete();
+    ball.delete();
+    const { positions, indices } = trianglesOf(part);
+    const { regions, chains } = chainsAndLoopsOf(positions, indices);
+    const closed = chains.filter((c) => c.closed);
+    expect(closed).toHaveLength(1);
+    const [cap] = closed;
+    expect([regions[cap?.left ?? -1]?.kind, regions[cap?.right ?? -1]?.kind].sort()).toEqual([
+      0, 3,
+    ]);
+    expect(cap?.curve).toBe(1);
+  });
+
+  it('collapses a through hole’s rims into circles that take a fillet', () => {
+    // The boss's freeform top makes the exact stage skip: the hybrid runs.
+    const part = bossWithBump();
+    const hole = manifold.Manifold.cylinder(12, 3, 3, 32).translate([6, 6, -1]);
+    const holed = part.subtract(hole);
+    part.delete();
+    hole.delete();
+    const volume = holed.volume();
+    const { shape, report } = prismatic(meshOf(holed));
+    try {
+      expect(report.rebuild).toBe('hybrid');
+      expect(kernel.isValid(shape)).toBe(true);
+      expect(Math.abs(kernel.properties(shape).volume / volume - 1)).toBeLessThan(0.01);
+      // The wall: one cylinder of r 3 (its halves merged back), its rims circles.
+      expect(radii(shape).filter((r) => Math.abs(r - 3) < 0.02)).toHaveLength(1);
+      const edges = edgesOf(shape);
+      const rims = edges.filter(
+        (e) => e.type === 'circle' && Math.abs((e.conic?.radius ?? 0) - 3) < 0.02,
+      );
+      const top = rims.find((e) => Math.abs((e.conic?.center[2] ?? 0) - 10) < 0.02);
+      expect(top).toBeDefined();
+      expect(rims.filter((e) => Math.abs(e.conic?.center[2] ?? 1) < 0.02).length).toBeGreaterThan(
+        0,
+      );
+      // The polygon's 32 sides per rim are gone: a circle or two arcs.
+      expect(rims.length).toBeLessThanOrEqual(4);
+      const filleted = kernel.fillet(shape, [top?.index ?? -1], 0.5).shape;
+      try {
+        expect(kernel.isValid(filleted)).toBe(true);
+        expect(kinds(filleted)).toContain('torus');
+        expect(kernel.count(filleted, 'face')).toBe(kernel.count(shape, 'face') + 1);
+      } finally {
+        kernel.release(filleted);
+      }
+    } finally {
+      kernel.release(shape);
+    }
+  });
+
+  it('gives the boss with a freeform top one line per box edge and one circle round the boss', () => {
+    const part = bossWithBump();
+    const { shape, report } = prismatic(meshOf(part));
+    try {
+      expect(report.rebuild).toBe('hybrid');
+      const edges = edgesOf(shape);
+      // The box's edges: lines from corner to corner (the bump's facets add
+      // their own triangle sides, lines too).
+      const corner = (p: readonly number[] | undefined) =>
+        p !== undefined &&
+        [30, 30, 10].every(
+          (size, k) => Math.abs(p[k] as number) < 1e-6 || Math.abs((p[k] as number) - size) < 1e-6,
+        );
+      const boxEdges = edges.filter(
+        (e) => e.type === 'line' && corner(e.points[0]) && corner(e.points[e.points.length - 1]),
+      );
+      expect(boxEdges).toHaveLength(12);
+      // The boss's rim on the box: the two halves' arcs, one circle after unify.
+      const rims = edges.filter(
+        (e) => e.type === 'circle' && Math.abs((e.conic?.radius ?? 0) - 5) < 0.02,
+      );
+      expect(rims).toHaveLength(1);
+      expect(rims[0]?.conic?.center[2]).toBeCloseTo(10, 6);
     } finally {
       kernel.release(shape);
     }
