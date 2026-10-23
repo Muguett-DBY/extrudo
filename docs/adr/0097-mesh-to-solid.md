@@ -1098,8 +1098,60 @@ kuglbahn-pillar-base about 13,926, gear-bearing-5 about 14,644,
 makita-vacuum-holder about 10,511), desk-organizer and whiteboard-tray-v5 on
 the volume (+2.7 %, +1.3 %), grass-for-flower and mms-m5-nut invalid (the
 first is open). At 0.05 mm only desk-organizer (volume) and grass-for-flower
-are refused. The kernel over `STL_DIR` gives the same outcomes (the
-tables below). Times: most conversions take under 20 s; the slow ones spend
+are refused.
+
+The kernel over `STL_DIR` (`mesh-to-solid-files.test.ts`, CI's WASM, this
+machine; the importer refuses the four open meshes) converts **29 of the 37
+at 0.01 mm** (10 exact, 19 hybrid) and **36 at 0.05 mm** (10 exact, 26
+hybrid); kernel and harness order a mesh differently, so a few counts
+differ (spool-screw 4,953 facets against 4,698). Faces as
+planes/cylinders/cones/spheres/tori (recognised faces), volume against the
+mesh's; desk-organizer's 0.01 mm "gave up" is the build before the hybrid's
+refusal took precedence (now the rebuild message, as at 0.05 mm):
+
+| file | 0.01 mm | 0.05 mm |
+|---|---|---|
+| own/ball | exact 1 (0/0/0/1/0), 1.0018, 0.1 s | exact 1 (0/0/0/1/0), 1.0018, 0.1 s |
+| own/battery-holder | hybrid 131 (61/33/37/0/0), 0 facets, 0.9991, 11.2 s | hybrid 131 (61/33/37/0/0), 0 facets, 0.9990, 11.2 s |
+| own/battery-power-adapter | ✗ cap 4,109, 7.0 s | hybrid 2061 (356/162/3/0/3), 1537 facets, 0.9996, 3.8 s |
+| own/desk-organizer-module-small | ✗ gave up, 32.8 s | ✗ rebuild, 31.4 s |
+| own/drill-block | exact 93 (77/12/0/0/4), 1.0014, 4.2 s | exact 168 (137/30/0/1/0), 1.0003, 3.1 s |
+| own/grass-for-flower | open (importer) | open (importer) |
+| own/hole-filler-35mm | exact 6 (3/2/0/0/1), 1.0013, 0.4 s | exact 6 (3/2/0/0/1), 1.0013, 15.8 s |
+| own/hole-filler-5mm | exact 6 (3/2/1/0/0), 1.0003, 0.0 s | exact 6 (3/2/1/0/0), 1.0003, 0.0 s |
+| own/kuglbahn-pillar-base | ✗ cap 13,915, 0.5 s | hybrid 3898 (289/231/0/5/11), 3362 facets, 1.0001, 9.8 s |
+| own/mirna-doodle-1 | hybrid 168 (77/26/0/0/0), 65 facets, 1.0070, 0.3 s | hybrid 141 (65/11/0/0/0), 65 facets, 1.0017, 0.2 s |
+| own/numbers-base-top | exact 471 (471/0/0/0/0), 1.0000, 1.1 s | exact 471 (471/0/0/0/0), 1.0000, 1.0 s |
+| own/object-permanence-base | hybrid 1985 (333/25/5/2/0), 1620 facets, 0.9998, 13.7 s | hybrid 1892 (302/29/5/0/2), 1554 facets, 1.0000, 4.9 s |
+| own/peg-perego-button | hybrid 892 (108/94/8/10/2), 670 facets, 1.0041, 1.9 s | hybrid 261 (162/45/2/2/2), 48 facets, 1.0038, 11.9 s |
+| own/phone-stand-foldable | hybrid 3654 (587/211/0/3/12), 2841 facets, 1.0001, 16.8 s | hybrid 2166 (680/93/0/1/1), 1391 facets, 1.0007, 8.8 s |
+| own/puzzle-base-circle | exact 37 (35/1/0/0/1), 0.9999, 0.3 s | exact 37 (35/1/0/0/1), 0.9999, 0.2 s |
+| own/puzzle-insert-circle | ✗ cap 4,678, 2.7 s | hybrid 1609 (318/59/1/0/1), 1230 facets, 0.9982, 33.8 s |
+| own/remove-before-flight-cover | hybrid 438 (252/62/4/0/0), 120 facets, 1.0000, 10.0 s | hybrid 318 (252/46/0/0/0), 20 facets, 1.0000, 9.0 s |
+| own/scrap-plate | hybrid 326 (66/67/12/8/0), 173 facets, 1.0001, 2.4 s | hybrid 274 (46/39/16/0/0), 173 facets, 1.0003, 1.0 s |
+| own/shower-holder | hybrid 901 (201/224/4/0/0), 472 facets, 0.9999, 69.4 s | hybrid 369 (190/98/2/1/4), 74 facets, 0.9996, 31.3 s |
+| own/spool-nut-v4.1 | hybrid 718 (654/63/1/0/0), 0 facets, 0.9995, 14.7 s | hybrid 680 (643/36/1/0/0), 0 facets, 0.9989, 14.6 s |
+| own/spool-screw-v4.1 | ✗ cap 4,953, 16.4 s | hybrid 3197 (975/95/4/0/0), 2123 facets, 1.0004, 25.8 s |
+| own/track-straight-100mm | hybrid 306 (65/2/2/0/0), 237 facets, 1.0000, 0.9 s | exact 107 (89/12/3/0/3), 1.0002, 1.5 s |
+| own/trashcan-repair-foot | exact 16 (12/4/0/0/0), 0.9989, 0.1 s | hybrid 106 (29/5/0/0/0), 72 facets, 0.9975, 0.4 s |
+| own/trashcan-spacer | hybrid 419 (2/0/0/4/4), 409 facets, 1.0001, 0.8 s | hybrid 78 (56/14/0/4/4), 0 facets, 1.0000, 1.9 s |
+| own/whiteboard-tray-v5 | ✗ rebuild, 29.6 s | hybrid 1218 (518/140/2/2/5), 551 facets, 1.0126, 20.9 s |
+| third-party/chip-bag-clip-small | open (importer) | open (importer) |
+| third-party/door-stopper-top | hybrid 147 (5/142/0/0/0), 0 facets, 1.0001, 17.8 s | hybrid 274 (264/10/0/0/0), 0 facets, 0.9997, 11.5 s |
+| third-party/gardena-end | hybrid 17 (5/5/2/1/4), 0 facets, 1.0038, 3.4 s | hybrid 15 (3/6/2/0/4), 0 facets, 1.0029, 0.6 s |
+| third-party/gear-bearing-5 | ✗ cap 14,648, 1.4 s | hybrid 3896 (513/927/0/34/0), 2422 facets, 1.0050, 9.6 s |
+| third-party/hex-key-cap-3mm | open (importer) | open (importer) |
+| third-party/hot-wheels-connector | hybrid 2015 (173/9/0/0/0), 1833 facets, 1.0000, 18.4 s | hybrid 682 (228/15/0/0/0), 439 facets, 0.9995, 32.9 s |
+| third-party/makita-vacuum-holder | ✗ cap 10,512, 0.3 s | hybrid 3480 (557/237/8/12/4), 2662 facets, 0.9999, 7.9 s |
+| third-party/micro-sd-keyring-inner | hybrid 66 (28/16/0/4/0), 18 facets, 0.9953, 4.7 s | exact 97 (91/6/0/0/0), 1.0006, 0.7 s |
+| third-party/micro-sd-keyring-outer | exact 41 (23/18/0/0/0), 1.0000, 0.4 s | exact 59 (59/0/0/0/0), 1.0000, 0.3 s |
+| third-party/mms-camera-mount | exact 11 (9/1/1/0/0), 1.0000, 0.0 s | exact 11 (9/1/1/0/0), 1.0000, 0.0 s |
+| third-party/mms-flat-stand | exact 44 (37/6/1/0/0), 1.0000, 0.3 s | exact 44 (37/6/1/0/0), 1.0000, 0.3 s |
+| third-party/mms-m5-nut | open (importer) | open (importer) |
+| third-party/sock-clips-6x | hybrid 161 (34/31/0/0/6), 90 facets, 1.0035, 34.0 s | hybrid 85 (46/39/0/0/0), 0 facets, 1.0007, 5.5 s |
+| third-party/spaghetti-measure | hybrid 165 (48/61/0/1/0), 55 facets, 1.0000, 22.5 s | hybrid 95 (66/29/0/0/0), 0 facets, 1.0003, 21.7 s |
+| third-party/vented-funnel | hybrid 1910 (522/187/10/13/5), 1173 facets, 0.9994, 8.7 s | hybrid 439 (354/69/10/0/6), 0 facets, 0.9979, 35.1 s |
+| third-party/wyze-garage-bracket | hybrid 84 (55/27/2/0/0), 0 facets, 1.0001, 1.1 s | exact 84 (55/27/2/0/0), 1.0002, 8.7 s | Times: most conversions take under 20 s; the slow ones spend
 their time in the exact stage first (shower-holder 72 s, hot-wheels-connector
 77 s: MakerVolume overruns its 30 s inside a step, slice A), which is where a
 later slice could skip the exact stage sooner.
