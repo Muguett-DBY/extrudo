@@ -1635,3 +1635,251 @@ explodes (shower-holder, hot-wheels-connector); and the node check skips a
 collapsed chain's nodes (its time, above). (6) `meshLoopsDebug`'s chain
 curve type applies the acceptance test but not the build's sphere and chord
 rules.
+
+### Amendment, 2026-10-23: the exact stage only where it can win, Faceted's cap, browser timings (slice D4)
+
+The D2/D3 sweeps (their own tables) show where the time went. On the files the
+exact stage can't rebuild it still ran first and burned its budget, and
+`BOPAlgo_MakerVolume` overruns its deadline inside one long step: on
+hot-wheels-connector `MakerVolume` ran **91.8 s against the 30 s budget**
+(+61.8 s), the file taking 96.0 s in all where the hybrid alone is ~3 s. On
+shower-holder `MakerVolume` was 14.4 s (inside the budget), but the exact
+stage then spent another **58.8 s** between "cells classified" and the
+un-recorded "merged and unified" — the kept-cell merge, `BRepCheck` and
+`ShapeUpgrade_UnifySameDomain`, none of which takes the `MeshDeadline` — so
+its exact stage overran as well (78.6 s in all, the hybrid ~3 s). The files
+the exact stage converts are small and clean (at most 471 surfaces, under 5 s
+each), and every file where the hybrid would do still paid for the exact
+stage first. Four things change here, the owner's decisions of 2026-10-23 (the
+first three) and the browser measurement the brief asked for.
+
+- **The exact stage runs only on a clean segmentation.** `prismaticFromMesh`
+  skips it whenever the segmentation has **any unfit region**
+  (`unfitRegions > 0`), where slice C ran it with up to 2 % and left the unfit
+  regions out. Leaving a region out **changes the geometry** (its triangles
+  are dropped and the neighbouring surfaces' faces extended to meet), where the
+  hybrid keeps it as facets (D1–D3), which is more faithful and is where such a
+  file lands anyway when the exact stage fails; skipping also spares the
+  overrun above. `PRISMATIC_UNFIT_ALLOWED` stays: it is `rebuildPrismatic`'s
+  own leaving-out rule and the Auto ladder's stopping rule. The surface cap
+  stays `PRISMATIC_SURFACE_CAP` = 500.
+- **The budget is 12 s.** `PRISMATIC_REBUILD_BUDGET_MS` 30,000 → 12,000 (the
+  exact files finish in under 5 s, so this leaves headroom), and the "gave up
+  after N s" message takes N from the constant. **No surface-count gate:**
+  `SetRunParallel(false)` and `maker.Perform(deadline->Start())` are already
+  there, so the overrun is inside one `MakerVolume` step that doesn't check the
+  progress indicator; a gate that keeps numbers-base-top (the exact stage's
+  largest, 471 surfaces, 1.0 s) out must sit above 471, but the overrunning
+  hot-wheels-connector has only 202 surfaces and shower-holder 430 — a surface
+  count cannot separate them, and both are skipped by the unfit-region rule
+  anyway. Left as an open item.
+- **Faceted's cap is 5,000.** `FACETED_FACE_CAP` 2,000 → 5,000;
+  `FACETED_ESTIMATE_MARGIN` stays 1.5 and **both** cap messages take the number
+  from the constant through `thousands()`. Every file whose coplanar-facet
+  count is between 2,000 and 5,000 converts now (timings below);
+  desk-organizer-module-small (about 15,635 faces) and whiteboard-tray-v5
+  (about 7,944) stay over it, so the Faceted cavity rule (D2) is still
+  unreachable on them, as before.
+- **Browser timings.** `e2e/mesh-to-solid-timing.spec.ts` (skipped unless
+  `MESH_TIMING` is set, so CI ignores it; run by
+  `spikes/stl-to-solid/browser-timing.sh` with `PLAYWRIGHT_CHROMIUM_PATH` and
+  `E2E_GPU=1`) imports each STL ("As solid" off) through the Import dialog,
+  opens the browser row's Convert to Solid… (Prismatic, Auto) and times the
+  body's status turning done. **The conversion runs in the dialog's own draft
+  preview, not on OK**: the measured confirm-to-done span is 0.2–0.4 s on every
+  file, and the conversion — the dialog-open-to-done span, the user's wait — is
+  what the ratio below uses.
+
+#### The real files (slice D4)
+
+The kernel sweeps over `STL_DIR` (`mesh-to-solid-files.test.ts`) on the owner's
+41 STLs (the importer refuses the four open meshes), the same machine, the new
+WASM `occt-66e41e5c997c`. The "before" times are D3's own table (the same
+head); the machine had other jobs on it for both (load average 4.8–2.6 during
+the Auto sweep, 2.6–2.1 during 0.01), so the small differences are noise. Faces
+by kind count recognised faces, facets apart; edges and circles are unchanged
+from D3 (checked in the comparison) except where the outcome changed.
+**At Auto** the sweep converts **36 of 37** (whiteboard-tray-v5 refused, as
+before); **at 0.01 mm 33 of 37** (kuglbahn-pillar-base, gear-bearing-5 and
+makita-vacuum-holder over the facet cap, whiteboard-tray-v5 the rebuild), the
+same sets as D3.
+**At Auto** (D4 vs D3's own table, s before → after):
+
+| file | tolerance | outcome | faces (pl/cy/co/sp/to) | facets | s before → after |
+|---|---|---|---|---|---|
+| own/ball | 0.01 | exact | 1 (0/0/0/1/0) | 0 | 0.1 → 0.0 |
+| own/battery-holder | 0.01 | hybrid | 131 (61/33/37/0/0) | 0 | 2.5 → 1.4 |
+| own/battery-power-adapter | 0.1 | hybrid | 994 (505/70/3/0/1) | 415 | 2.6 → 2.3 |
+| own/desk-organizer-module-small | 0.01 | hybrid | 418 (198/166/0/0/12) | 42 | 35.1 → 17.0 |
+| own/drill-block | 0.01 | hybrid | 388 (108/65/0/3/4) | 208 | 4.2 → 1.4 |
+| own/hole-filler-35mm | 0.01 | exact | 6 (3/2/0/0/1) | 0 | 0.4 → 0.4 |
+| own/hole-filler-5mm | 0.01 | exact | 6 (3/2/1/0/0) | 0 | 0.0 → 0.0 |
+| own/kuglbahn-pillar-base | 0.1 | hybrid | 3941 (430/86/0/6/10) | 3409 | 9.2 → 9.9 |
+| own/mirna-doodle-1 | 0.1 | hybrid | 120 (63/14/0/0/0) | 43 | 0.2 → 0.2 |
+| own/numbers-base-top | 0.01 | exact | 471 (471/0/0/0/0) | 0 | 1.0 → 1.1 |
+| own/object-permanence-base | 0.01 | hybrid | 1985 (333/25/5/2/0) | 1620 | 13.4 → 2.3 |
+| own/peg-perego-button | 0.02 | hybrid | 212 (99/103/2/5/3) | 0 | 24.5 → 13.2 |
+| own/phone-stand-foldable | 0.1 | hybrid | 2325 (458/10/0/0/10) | 1847 | 36.2 → 18.9 |
+| own/puzzle-base-circle | 0.01 | exact | 37 (35/1/0/0/1) | 0 | 0.3 → 0.3 |
+| own/puzzle-insert-circle | 0.05 | hybrid | 1609 (318/59/1/0/1) | 1230 | 34.4 → 14.6 |
+| own/remove-before-flight-cover | 0.01 | hybrid | 438 (252/62/4/0/0) | 120 | 7.3 → 0.7 |
+| own/scrap-plate | 0.02 | hybrid | 154 (61/77/16/0/0) | 0 | 17.6 → 12.9 |
+| own/shower-holder | 0.01 | hybrid | 901 (201/224/4/0/0) | 472 | 69.4 → 3.1 |
+| own/spool-nut-v4.1 | 0.01 | hybrid | 718 (654/63/1/0/0) | 0 | 6.2 → 6.3 |
+| own/spool-screw-v4.1 | 0.05 | hybrid | 3197 (975/95/4/0/0) | 2123 | 20.2 → 20.5 |
+| own/track-straight-100mm | 0.01 | hybrid | 306 (65/2/2/0/0) | 237 | 0.6 → 0.3 |
+| own/trashcan-repair-foot | 0.01 | exact | 16 (12/4/0/0/0) | 0 | 0.1 → 0.1 |
+| own/trashcan-spacer | 0.05 | hybrid | 78 (56/14/0/4/4) | 0 | 1.9 → 2.1 |
+| own/whiteboard-tray-v5 | – | ✗ refused | – | – | – → 44.8 |
+| third-party/door-stopper-top | 0.01 | hybrid | 147 (5/142/0/0/0) | 0 | 14.4 → 14.6 |
+| third-party/gardena-end | 0.01 | hybrid | 17 (5/5/2/1/4) | 0 | 3.2 → 3.2 |
+| third-party/gear-bearing-5 | 0.1 | hybrid | 2308 (291/581/0/10/8) | 1418 | 10.3 → 10.5 |
+| third-party/hot-wheels-connector | 0.01 | hybrid | 2015 (173/9/0/0/0) | 1833 | 17.1 → 2.5 |
+| third-party/makita-vacuum-holder | 0.05 | hybrid | 3480 (557/237/8/12/4) | 2662 | 4.7 → 4.9 |
+| third-party/micro-sd-keyring-inner | 0.01 | hybrid | 66 (28/16/0/4/0) | 18 | 2.4 → 2.4 |
+| third-party/micro-sd-keyring-outer | 0.01 | exact | 41 (23/18/0/0/0) | 0 | 0.4 → 0.4 |
+| third-party/mms-camera-mount | 0.01 | exact | 11 (9/1/1/0/0) | 0 | 0.0 → 0.0 |
+| third-party/mms-flat-stand | 0.01 | exact | 44 (37/6/1/0/0) | 0 | 0.3 → 0.3 |
+| third-party/sock-clips-6x | 0.01 | hybrid | 161 (34/31/0/0/6) | 90 | 30.5 → 12.5 |
+| third-party/spaghetti-measure | 0.01 | hybrid | 165 (48/61/0/1/0) | 55 | 1.2 → 1.3 |
+| third-party/vented-funnel | 0.02 | hybrid | 715 (452/150/10/11/6) | 86 | 5.3 → 5.5 |
+| third-party/wyze-garage-bracket | 0.01 | hybrid | 84 (55/27/2/0/0) | 0 | 0.7 → 0.7 |
+
+**At a fixed 0.01 mm:**
+
+| file | tolerance | outcome | faces (pl/cy/co/sp/to) | facets | s before → after |
+|---|---|---|---|---|---|
+| own/ball | 0.01 | exact | 1 (0/0/0/1/0) | 0 | 0.1 → 0.0 |
+| own/battery-holder | 0.01 | hybrid | 131 (61/33/37/0/0) | 0 | 1.6 → 1.3 |
+| own/battery-power-adapter | 0.01 | hybrid | 4506 (253/136/3/5/0) | 4109 | 8.1 → 7.9 |
+| own/desk-organizer-module-small | 0.01 | hybrid | 418 (198/166/0/0/12) | 42 | 34.9 → 16.9 |
+| own/drill-block | 0.01 | hybrid | 388 (108/65/0/3/4) | 208 | 4.1 → 1.3 |
+| own/hole-filler-35mm | 0.01 | exact | 6 (3/2/0/0/1) | 0 | 0.4 → 0.4 |
+| own/hole-filler-5mm | 0.01 | exact | 6 (3/2/1/0/0) | 0 | 0.0 → 0.0 |
+| own/kuglbahn-pillar-base | – | ✗ refused | – | – | – → 0.5 |
+| own/mirna-doodle-1 | 0.01 | hybrid | 168 (77/26/0/0/0) | 65 | 0.2 → 0.3 |
+| own/numbers-base-top | 0.01 | exact | 471 (471/0/0/0/0) | 0 | 1.0 → 1.1 |
+| own/object-permanence-base | 0.01 | hybrid | 1985 (333/25/5/2/0) | 1620 | 13.3 → 2.3 |
+| own/peg-perego-button | 0.01 | hybrid | 892 (108/94/8/10/2) | 670 | 1.6 → 1.6 |
+| own/phone-stand-foldable | 0.01 | hybrid | 3654 (587/211/0/3/12) | 2841 | 16.5 → 16.8 |
+| own/puzzle-base-circle | 0.01 | exact | 37 (35/1/0/0/1) | 0 | 0.3 → 0.3 |
+| own/puzzle-insert-circle | 0.01 | hybrid | 4722 (11/15/1/0/17) | 4678 | 3.9 → 4.0 |
+| own/remove-before-flight-cover | 0.01 | hybrid | 438 (252/62/4/0/0) | 120 | 7.3 → 0.6 |
+| own/scrap-plate | 0.01 | hybrid | 326 (66/67/12/8/0) | 173 | 2.1 → 2.2 |
+| own/shower-holder | 0.01 | hybrid | 901 (201/224/4/0/0) | 472 | 69.0 → 3.1 |
+| own/spool-nut-v4.1 | 0.01 | hybrid | 718 (654/63/1/0/0) | 0 | 6.2 → 6.3 |
+| own/spool-screw-v4.1 | 0.01 | hybrid | 5909 (778/174/4/0/0) | 4953 | 17.3 → 17.8 |
+| own/track-straight-100mm | 0.01 | hybrid | 306 (65/2/2/0/0) | 237 | 0.6 → 0.3 |
+| own/trashcan-repair-foot | 0.01 | exact | 16 (12/4/0/0/0) | 0 | 0.1 → 0.1 |
+| own/trashcan-spacer | 0.01 | hybrid | 419 (2/0/0/4/4) | 409 | 0.8 → 0.8 |
+| own/whiteboard-tray-v5 | – | ✗ refused | – | – | – → 34.4 |
+| third-party/door-stopper-top | 0.01 | hybrid | 147 (5/142/0/0/0) | 0 | 14.4 → 14.7 |
+| third-party/gardena-end | 0.01 | hybrid | 17 (5/5/2/1/4) | 0 | 3.2 → 3.2 |
+| third-party/gear-bearing-5 | – | ✗ refused | – | – | – → 1.5 |
+| third-party/hot-wheels-connector | 0.01 | hybrid | 2015 (173/9/0/0/0) | 1833 | 17.3 → 2.6 |
+| third-party/makita-vacuum-holder | – | ✗ refused | – | – | – → 0.3 |
+| third-party/micro-sd-keyring-inner | 0.01 | hybrid | 66 (28/16/0/4/0) | 18 | 2.3 → 2.4 |
+| third-party/micro-sd-keyring-outer | 0.01 | exact | 41 (23/18/0/0/0) | 0 | 0.4 → 0.4 |
+| third-party/mms-camera-mount | 0.01 | exact | 11 (9/1/1/0/0) | 0 | 0.0 → 0.0 |
+| third-party/mms-flat-stand | 0.01 | exact | 44 (37/6/1/0/0) | 0 | 0.3 → 0.3 |
+| third-party/sock-clips-6x | 0.01 | hybrid | 161 (34/31/0/0/6) | 90 | 30.5 → 12.5 |
+| third-party/spaghetti-measure | 0.01 | hybrid | 165 (48/61/0/1/0) | 55 | 1.2 → 1.3 |
+| third-party/vented-funnel | 0.01 | hybrid | 1910 (522/187/10/13/5) | 1173 | 7.7 → 7.8 |
+| third-party/wyze-garage-bracket | 0.01 | hybrid | 84 (55/27/2/0/0) | 0 | 0.7 → 0.7 |
+
+#### Browser versus node (slice D4)
+
+On the Ubuntu machine (`PLAYWRIGHT_CHROMIUM_PATH=/usr/bin/google-chrome-stable`
+and `E2E_GPU=1`, the built app on the preview server; load average 2.8–5.1
+during the run, so the node column — the Auto sweep under the same external
+load — is itself noisy), two runs per file, median. The browser span is
+dialog-open-to-done (the dialog's draft preview is what converts); the
+`kernel.meshToSolid` column is the temporary `performance.now()` mark the brief
+asked for (not committed).
+
+| file | node Auto s | browser total s | browser kernel.meshToSolid s | total / node |
+|---|---|---|---|---|
+| peg-perego-button | 13.2 | 14.7 | 13.4 | 1.11 |
+| trashcan-spacer | 2.1 | 5.8 | 4.2 | 2.76 |
+| drill-block | 1.4 | 3.5 | 2.2 | 2.50 |
+| hole-filler-35mm | 0.4 | 1.8 | 1.1 | 4.5 |
+| puzzle-base-circle | 0.3 | 2.1 | 1.1 | 7.0 |
+| remove-before-flight-cover | 0.7 | 2.7 | 1.5 | 3.9 |
+| track-straight-100mm | 0.3 | 1.8 | 1.1 | 6.1 |
+| trashcan-repair-foot | 0.1 | 1.9 | 0.9 | 18.6 |
+| own/battery-holder | 1.4 | 5.0 | 3.4 | 3.5 |
+| own/phone-stand-foldable | 18.9 | 12.4 | 10.8 | 0.66 |
+| own/spool-screw-v4.1 | 20.5 | 24.7 | 19.6 | 1.20 |
+
+The median total ratio is **3.5×** — over 1.5×. **Where** it comes from is not
+the kernel: on the large files the browser's `kernel.meshToSolid` matches or
+beats the (loaded) node sweep (phone-stand 10.8 vs 18.9 s, spool-screw 19.6 vs
+20.5, peg-perego 13.4 vs 13.2), and the confirm step is 0.2–1.0 s (the draft
+preview already built the solid). Two fixed costs dominate the small files,
+where node is well under a second: about **0.6–1.6 s of dialog, worker
+round-trip and redraw** around the kernel call (the browser total minus the
+kernel time), and a **cold kernel per run** — the script reloads the page for
+each file, so the worker's WASM starts fresh, where the node sweep reuses one
+warm kernel; that is the ~0.75 s the small fixtures gain inside the kernel call
+itself. A user converting in one open session (a warm kernel, no page reload)
+sits near the large files' ratio. So the kernel is not the problem; the
+per-conversion fixed overhead and the cold start are, and neither is
+browser-specific to Mesh to Solid.
+
+**Acceptance, slice D4.**
+
+1. **Same convert set and outcomes: pass, one intended change.** Both sweeps
+   convert the same files as D3 and keep every file's exact/hybrid outcome,
+   faces by kind, facets, edges and circles, except **drill-block** (exact with
+   3 unfit left out → hybrid, 388 faces, 208 facets) at Auto and 0.01 mm, and
+   **track-straight-100mm at 0.05 mm** in the fixture test (exact with 1 unfit
+   left out → hybrid, 219 faces, 145 facets). Both are Part 1's skip rule: a
+   file the exact stage converted by leaving unfit regions out. whiteboard-tray-v5
+   stays refused. The volume rule holds everywhere (0.9891–1.0105, the same
+   span as D3). The `STL_DIR` comparison script found no other difference.
+2. **Time at Auto: pass.** Over the 36 files D3 timed the total is 377.9 → 143.0 s
+   (**−62 %**); including whiteboard-tray-v5's refusal (untimed in D3, 44.8 s
+   now) 377.9 → 187.8 s (**−50 %**, well over the 25 % asked). At 0.01 mm,
+   267.4 → 96.8 s (−64 %; with whiteboard 131.2, −51 %). The large wins are the
+   files the exact stage used to burn its budget on: shower-holder 69.4 → 3.1 s,
+   desk-organizer-module-small 35.1 → 17.0, phone-stand-foldable 36.2 → 18.9,
+   puzzle-insert-circle 34.4 → 14.6, sock-clips-6x 30.5 → 12.5,
+   hot-wheels-connector 17.1 → 2.5, remove-before-flight-cover 7.3 → 0.7.
+3. **No file slower by more than 10 %: pass with one exception.**
+   Every converted file is within 10 % (the largest real movements are
+   spool-screw 17.3 → 17.8 s at 0.01 mm, +3 %, and kuglbahn +7.6 %; the rest is
+   ~0.1–0.2 s of sweep noise, e.g. trashcan-spacer 1.9 → 2.1 and
+   numbers-base-top 1.0 → 1.1). The exception is **whiteboard-tray-v5**, a
+   refusal: D3 left it untimed, and D2's own table had ~33 s at its 0.02 mm
+   Auto pick, where D4 takes 44.8 s. The exact stage is now skipped (3 unfit
+   regions), so the hybrid alone runs to its refusal (44.8 s at 0.02, 34.4 s at
+   0.01 against D2's ~41) instead of the exact stage's 30 s budget ending it
+   sooner. It stays a refusal either way; not fixed (open item).
+   The three facet-cap refusals are faster: kuglbahn 0.5 s, gear-bearing-5
+   1.5 s, makita 0.3 s at 0.01 mm (the pre-count).
+4. **shower-holder and hot-wheels-connector under 30 s: pass** (3.1 s and 2.5 s
+   at Auto; 3.1 s and 2.6 s at 0.01 mm).
+5. **The exact files still convert exactly: pass, apart from drill-block**
+   (Part 1's list): ball, hole-filler-35mm, hole-filler-5mm, numbers-base-top,
+   puzzle-base-circle, trashcan-repair-foot, micro-sd-keyring-outer,
+   mms-camera-mount and mms-flat-stand keep their exact rebuild and faces.
+6. **Faceted converts every file between 2,000 and 5,000 faces in under 20 s:
+   pass.** In node, valid and single-solid: ball 4,608 (8.0 s),
+   drill-block 2,532 (7.2 s), object-permanence-base 2,968 (7.6 s),
+   peg-perego-button 3,846 (6.2 s), shower-holder 4,504 (5.6 s),
+   spool-nut-v4.1 4,335 (7.8 s), hot-wheels-connector 2,799 (4.2 s). Two of
+   them are repository fixtures and get a test
+   (`mesh-to-solid-files.test.ts`'s Faceted describe).
+7. **The browser ratio is measured: pass** (table above).
+
+**Open items.** (1) whiteboard-tray-v5's refusal is slower at Auto (44.8 s vs
+D2's ~33 s): the hybrid refuses only after ~32 s where the exact stage's full
+30 s budget used to end the conversion sooner. (2) `BOPAlgo_MakerVolume` can
+still overrun the exact budget inside one step for a mesh with no unfit region
+and under 500 surfaces (none in the corpus; hot-wheels-connector's 61.8 s is
+the measured case, now skipped by the unfit rule). (3) The browser conversion
+runs in the dialog's draft preview, so a future UX pass could show the wait
+there; the confirm itself is instant. (4) Faceted's cap stays unreachable for
+desk-organizer-module-small and whiteboard-tray-v5 (their coplanar counts are
+~15,600 and ~7,900), so a faceted cavity still needs Faceted to fit under the
+cap.

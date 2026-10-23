@@ -3089,6 +3089,10 @@ is 12,000 (was 30,000) and the "gave up after N s" message takes N from it
 (`e2e/mesh-to-solid-timing.spec.ts`, `MESH_TIMING=1`, run by
 `spikes/stl-to-solid/browser-timing.sh`; skipped in CI) times the Convert to
 Solid confirm → body done span and pairs it with the kernel sweep's time. The
-unfit-region rule changes outcomes on meshes that converted exactly with unfit
-regions left out (drill-block) and on ones the exact stage refused: the file
-list and the before/after sweep tables are in the amendment.
+unfit-region rule changes outcomes only on files the exact stage converted by
+leaving unfit regions out: drill-block (exact with 3 unfit left out → hybrid,
+388 faces, at Auto and 0.01 mm) and track-straight-100mm at 0.05 mm (→ hybrid
+219 faces); whiteboard-tray-v5 stays refused but slower (44.8 s at Auto, the
+hybrid alone). The before/after sweep tables (Auto total 377.9 → 187.8 s) and
+the browser/node ratio (median 3.5×, the fixed per-conversion overhead and a
+cold kernel, not the kernel call) are in the amendment.

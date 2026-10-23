@@ -311,7 +311,9 @@ describe('Mesh to Solid, prismatic on the fixtures at Auto', { timeout: 120_000 
   }
 });
 
-describe('Mesh to Solid, faceted on the fixtures the 5,000 cap allows', { timeout: 120_000 }, () => {
+describe('Mesh to Solid, faceted on the fixtures the 5,000 cap allows', {
+  timeout: 120_000,
+}, () => {
   // Slice D4 raised FACETED_FACE_CAP from 2,000 to 5,000: these two fixtures'
   // coplanar-facet counts are between the old and new cap, so Faceted converts
   // them now (each in under 20 s in node; the measured times are in the ADR).

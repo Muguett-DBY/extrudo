@@ -44,23 +44,34 @@ async function importMesh(page: Page, name: string, buffer: Buffer) {
   await expect(bodyRow(page)).toHaveAttribute('data-body-mesh', 'true', { timeout: 120_000 });
 }
 
-/** The body row's "Convert to Solid…", Prismatic/Auto, and the time from OK to done. */
-async function convertTimed(page: Page): Promise<number> {
+/** The body row's "Convert to Solid…", Prismatic/Auto, and the conversion times. */
+async function convertTimed(page: Page): Promise<{ previewMs: number; confirmMs: number }> {
+  const opened = Date.now();
   await bodyRow(page).click({ button: 'right' });
   await page.getByRole('menuitem', { name: 'Convert to Solid…' }).click();
   const dialog = page.getByRole('region', { name: 'Mesh to Solid dialog' });
   await expect(dialog).toBeVisible();
   await expect(dialog.getByRole('combobox', { name: 'Method' })).toHaveValue('prismatic');
   await expect(dialog.getByRole('combobox', { name: 'Tolerance' })).toHaveValue('auto');
-  // The dialog's own region preview first (not part of the measured span).
-  await expect(dialog).toHaveAttribute('data-preview-status', 'ok', { timeout: 180_000 });
-  const start = Date.now();
+  // The dialog's draft preview runs the conversion itself (its status goes ok
+  // when the draft computed); the user's wait is opening → done.
+  await expect(dialog).toHaveAttribute('data-preview-status', 'ok', { timeout: 300_000 });
+  const previewMs = Date.now() - opened;
+  const confirmStart = Date.now();
   await ok(page, dialog);
-  await expect(bodyRow(page)).not.toHaveAttribute('data-body-mesh', { timeout: 300_000 });
-  const ms = Date.now() - start;
-  // The result is a plain solid and the chip exists.
-  await expect(viewport(page)).toHaveAttribute('data-bodies', /./, { timeout: 60_000 });
-  return ms;
+  // Done = the drawn body has more than one face (a mesh body shows one); the
+  // row's mesh flag alone flips during the recompute, not at the end.
+  const faces = () =>
+    viewport(page)
+      .getAttribute('data-bodies')
+      .then((drawn) => {
+        const m = drawn ? /^Body1:(\d+):/.exec(drawn) : null;
+        return m ? Number(m[1]) : 0;
+      });
+  await expect.poll(faces, { timeout: 300_000 }).toBeGreaterThan(1);
+  const confirmMs = Date.now() - confirmStart;
+  await expect(bodyRow(page)).not.toHaveAttribute('data-body-mesh', { timeout: 60_000 });
+  return { previewMs, confirmMs };
 }
 
 test('browser Mesh to Solid timings', async ({ page }) => {
@@ -72,7 +83,13 @@ test('browser Mesh to Solid timings', async ({ page }) => {
   ]);
   for (const name of OWN_FILES) jobs.push([name, readFileSync(`${OWN_DIR}/${name}`)]);
 
-  const results: { file: string; run: number; ms: number }[] = [];
+  const results: {
+    file: string;
+    run: number;
+    totalMs: number;
+    previewMs: number;
+    confirmMs: number;
+  }[] = [];
   for (const [name, buffer] of jobs) {
     for (const run of [1, 2]) {
       // A fresh blank design each time: each import adds a body and one undo
@@ -80,9 +97,10 @@ test('browser Mesh to Solid timings', async ({ page }) => {
       await openProject(page);
       await kernelReady(page);
       await importMesh(page, name, buffer);
-      const ms = await convertTimed(page);
-      results.push({ file: name, run, ms });
-      console.log(`TIMING ${JSON.stringify({ file: name, run, ms })}`);
+      const { previewMs, confirmMs } = await convertTimed(page);
+      const totalMs = previewMs + confirmMs;
+      results.push({ file: name, run, totalMs, previewMs, confirmMs });
+      console.log(`TIMING ${JSON.stringify({ file: name, run, totalMs, previewMs, confirmMs })}`);
     }
   }
   console.log(`TIMINGS ${JSON.stringify(results)}`);
