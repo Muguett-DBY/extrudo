@@ -2822,8 +2822,9 @@ and segmentation + plane/cylinder/cone/sphere/torus fits + `BOPAlgo_MakerVolume`
 verification for `prismatic`. **Rules:** never fall back from one method to
 the other (the user's choice runs or is refused); refuse faceted above
 `FACETED_FACE_CAP` (2,000 faces after unify, counted before the heavy fix)
-and prismatic above `PRISMATIC_SURFACE_CAP` (500) or with unfit regions over
-2 % of the surface (slice C),
+and prismatic's exact rebuild above `PRISMATIC_SURFACE_CAP` (500) or with
+unfit regions over 2 % of the surface (slice C; since slice D1 these skip to
+the hybrid rebuild instead of refusing),
 each message naming the count and the way out (the other method, a higher
 tolerance, the slicer); `MAX_MESH_TRIANGLES` stays the input cap; the report
 (`kind: 'meshToSolid'`: faces, planes, cylinders, cones, spheres, tori, unfit
@@ -2954,3 +2955,52 @@ a multi-part STL converts instead of failing with `BRepCheck_NotConnected`.
 (edges shared by more than two triangles / edges used by one / vertices
 joining shells that only touch at a point, in the house style); single-shell
 meshes keep the same face counts, validity and volume.
+**The hybrid rebuild** (2026-10-23 amendment, slice D1; `prismaticFromMesh`,
+`hybridRegions`/`meshLoops`/`MeshChart`, `rebuildHybrid` in the facade):
+prismatic is two stages. The exact rebuild (`rebuildPrismatic`, unchanged)
+runs unless the segmentation rules it out (unfit share over
+`PRISMATIC_UNFIT_ALLOWED`, surfaces over `PRISMATIC_SURFACE_CAP`); when it is
+skipped or refuses (its refusal, an exception, its budget), the hybrid builds
+the solid **from the mesh itself**, on the surfaces **as fitted** (the exact
+stage snaps them in place: keep the copy), with a fresh `MeshDeadline` of
+`HYBRID_BUDGET_MS` (90 s). **Rules:** a hybrid region is a connected piece of
+one surface's triangles (or of the unfit ones); a cylinder, cone, sphere or
+torus region spanning more than 3/4 of a turn (u; a torus's v too) is split
+by triangle-centroid angle, and every piece's periodic parameters are taken
+within half a turn of its own centre (no pcurve wraps); a sphere's frame puts
+its poles away from the nodes. Loops are the boundary mesh edges walked with
+the region on the left, the outer first by parameter-space area, signs
+checked; a node two boundary edges leave explodes the region. **One
+`TopoDS_Vertex` per mesh node, one `TopoDS_Edge` per mesh edge** (a line from
+the lower node to the higher, shared by both faces: never sew); a pcurve per
+(edge, face), the straight (u,v) segment on the edge's own range (a degree-1
+B-spline); the edge tolerance is the sampled distance between its image and
+the chord (× 1.1, at least `HYBRID_EDGE_TOLERANCE_MIN` = 2e-3 mm), its
+vertices raised with it. Each recognised region is one face (its own
+`Geom_Surface`, reversed when the chart's normal disagrees with its
+triangles'), checked alone with `BRepCheck_Analyzer` **right after it is
+built** (an invalid one takes its pcurves off the shared edges); an edge
+tolerance over `HYBRID_EDGE_TOLERANCE_MAX` (1 mm), an invalid face or a throw
+explodes the region; unfit and exploded triangles are planar facets on the
+same edges. Then a solid per mesh shell, `UnifySameDomain(true, true, true)`
+at 1e-3 (coplanar facets merge, split pieces merge back), `ShapeFix_Shape`
+only when that is invalid; a face still invalid explodes its regions (unify's
+history), and so does a mesh node no face covers: up to three builds. The
+checks are the exact stage's (validity, every n-th node within the
+tolerance), the volume within max(1 %, 2 Σ area·sag + tolerance × area) over
+the recognised regions. Facets (result faces that only facets made, by
+unify's history) over `HYBRID_FACET_CAP` (4,000; pre-estimated with
+faceted's coplanar rule and refused at once past 1.5 ×) refuse with the share
+rebuilt exactly and the facet count; past its budget it "gave up after 90 s";
+any other hybrid refusal gives the rebuild message (it wins over the unfit
+one; an exception keeps the unfit one), and the 2 T / 5 T retries (exact
+only) run only then. `meshReport_` is 12 doubles, the last two `rebuild` (0
+exact, 1 hybrid, −1 none) and `facets`; core's `MeshToSolidReport` has
+`rebuild?: 'exact' | 'hybrid'` and `facets` (0 for faceted and exact),
+`Kernel.meshRegions` drops both; a hybrid result's summary is "12 planes,
+4 cylinders · 3 unfit regions kept as 318 facets" (kinds count recognised
+faces only), and the dialog's Result line shows a hybrid draft's report in
+place of the region counts. Not the rejected silent faceted fallback: the
+recognised faces are real surfaces and the line says what stayed facets.
+Harness: `FACES=1`, `TIMES=1`, `HYBRID_BUDGET`; tests read the loops through
+the facade's `meshLoopsDebug` (never on `Kernel`).

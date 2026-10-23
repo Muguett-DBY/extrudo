@@ -30,7 +30,7 @@ pick, so a fillet, shell or sketch on a face can't use it. **Mesh to Solid** (So
 or **Convert to Solid…** in the body's right-click menu) turns it into a solid with real faces
 under the same name. *Faceted* keeps every flat facet as a face and is exact for parts made of
 flat faces; *Prismatic* finds planes, cylinders, cones, spheres and tori within a tolerance and
-rebuilds them as exact surfaces. A mesh of more faces than Extrudo can convert is refused with the
+rebuilds them as exact surfaces, keeping what fits none of them as flat facets. A mesh of more faces than Extrudo can convert is refused with the
 count: simplify it in your slicer and try again.
 
 Two things can turn one body into several. A cut that severs a part gives you one body per

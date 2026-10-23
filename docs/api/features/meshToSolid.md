@@ -21,7 +21,7 @@ a valid feature.
 | Input | Type | Required or default | What it does |
 | --- | --- | --- | --- |
 | `body` | `GeomRef \| GeomRef[]` (`body`) | **required** | The mesh body to convert. |
-| `method` | `'prismatic' \| 'faceted'` | default `prismatic` | prismatic recognises planes and cylinders within the tolerance and rebuilds exact faces; faceted keeps every flat facet as a face. |
+| `method` | `'prismatic' \| 'faceted'` | default `prismatic` | prismatic recognises planes, cylinders, cones, spheres and tori within the tolerance and rebuilds exact faces; what fits nothing stays as facets. faceted keeps every flat facet as a face. |
 | `tolerance` | `string \| number \| ParameterHandle` | optional | How far a facet may sit from a fitted surface, in mm (prismatic only). Default 0.01. |
 
 ## Faces

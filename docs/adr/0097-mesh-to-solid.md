@@ -931,3 +931,184 @@ pre-count now refuses only past `FACETED_FACE_CAP * FACETED_ESTIMATE_MARGIN`
 the build runs and the exact count decides, as before slice B. For the user:
 refusals of meshes with 2,000–3,000 faces take the build's time again
 (2–4 s); estimates over 3,000 are still refused at once.
+
+### Amendment, 2026-10-23: the hybrid rebuild (slice D1)
+
+On the owner's 41 STLs (the 2026-10-22 benchmark) prismatic converted 10,
+faceted 18, either 20. The MIT tool stl2step (its `trueform` engine,
+`docs/references.md`) converted 20 exactly, 11 of them closed meshes we
+converted with neither method. Its trick is not better fitting: it never
+rebuilds the whole solid from surfaces. It starts from the triangles,
+replaces each recognised region by one analytic face bounded by that
+region's own mesh boundary (shared edges, no sewing), leaves the rest as
+planar facets, and turns a region back into facets when its face won't
+build. The owner chose (2026-10-23) to bring that idea into prismatic as a
+second stage behind the exact rebuild. We took the method from stl2step's
+documentation and source (`docs/METHOD.md`, `refit.hpp`'s region and loop
+contracts, `refit_build.cpp`'s per-edge tolerances and its facet fallback);
+the code is our own, in the facade's style, on our segmentation.
+
+- **Two stages.** `prismaticFromMesh` segments as before, then runs the
+  exact rebuild (`rebuildPrismatic`, unchanged) unless the segmentation
+  already rules it out: unfit regions over `PRISMATIC_UNFIT_ALLOWED` or more
+  than `PRISMATIC_SURFACE_CAP` surfaces (those refused before; now they skip
+  straight to the hybrid and don't spend the 30 s budget first). When the
+  exact stage is skipped or refuses (its refusal, an exception, its budget),
+  `rebuildHybrid` runs on the surfaces **as fitted** (the exact stage snaps
+  and merges them in place, so prismatic keeps a copy), with a fresh
+  `MeshDeadline` of `HYBRID_BUDGET_MS` = 90,000. The 2 T / 5 T tolerance
+  retries (exact rebuilds, their messages unchanged) run only when the hybrid
+  refused too.
+- **Regions, loops, charts** (`hybridRegions`, `meshLoops`, `MeshChart`).
+  A hybrid region is a connected piece (over mesh edges) of one surface's
+  triangles, or of the unfit ones. Its boundary is the mesh edges whose other
+  triangle is in another region, each taken from corner k to k + 1 so the
+  region is on its left seen from outside, chained node to node into closed
+  loops; the outer loop is the one with the largest area in the surface's
+  parameters, and its sign (inner loops the opposite) is checked against the
+  triangles' side. A node two boundary edges leave (the region touches
+  itself) explodes the region. A node where three or more regions meet is
+  just a loop node here: every mesh edge is its own B-rep edge, so the chains
+  between two regions (stl2step's invariant I8) aren't needed until slice D2
+  collapses them. **Periodic surfaces:** a cylinder, cone, sphere or torus
+  region whose triangles' centroids span more than 3/4 of a turn in u (a
+  torus also in v) is split by centroid angle into halves (quarters when a
+  torus is closed both ways); each piece takes its periodic parameters within
+  half a turn of its own centre, so no pcurve wraps. A sphere's frame puts its
+  poles as far from the region's nodes as it can (the mean normal or one of
+  six directions square to it), so a cap or a dome has no pole on its loops;
+  a whole sphere still converts exactly in the first stage.
+- **Shared topology, no sewing.** One `TopoDS_Vertex` per mesh node and one
+  `TopoDS_Edge` per mesh edge (a `Geom_Line` from the lower node to the
+  higher), built lazily and keyed by the sorted node pair; the two faces of a
+  mesh edge use the same edge, forward and reversed, so the shell is closed by
+  construction. Interior edges of a region are never built. Each recognised
+  region is one face on its own `Geom_Surface` (the `MeshSurface`'s frame),
+  reversed when the surface's normal disagrees with its largest triangle's;
+  each edge gets a pcurve per face, the straight segment between its nodes'
+  parameters on the edge's own range (a degree-1 B-spline), set with
+  `BRep_Builder::UpdateEdge(edge, pcurve, surface, loc, tol)`. **The edge's
+  tolerance is the gap between that pcurve's image and the chord** (sampled
+  at 11 points, × 1.1): the nodes are within the tolerance of the surface and
+  the surface bulges past the chord by up to the sag, so that is the
+  distance the edge really spans; its vertices are raised with it. Every edge
+  has at least `HYBRID_EDGE_TOLERANCE_MIN` = 2e-3 mm, twice unify's linear
+  tolerance (below). We computed the tolerance ourselves rather than calling
+  `BRepLib::SameParameter`: the sampled distance is the definition
+  `BRepCheck` checks.
+- **Per-region fallback.** A face is checked alone (`BRepCheck_Analyzer`)
+  right after it is built, before other faces add their pcurves; when it is
+  invalid, threw, or needs an edge tolerance over
+  `HYBRID_EDGE_TOLERANCE_MAX` = 1 mm, the region is **exploded**: its pcurves
+  come off the shared edges and its triangles become facets. Facets (unfit
+  and exploded triangles) are planes through their three nodes on the same
+  shared edges.
+- **Assembly.** One shell per connected piece of the mesh, `MakeSolid`,
+  `ShapeFix_Solid` only when invalid, oriented by the volume's sign, then
+  `ShapeUpgrade_UnifySameDomain(solid, true, true, true)` at 1e-3 (coplanar
+  facets merge, split periodic pieces merge back into one face with a seam).
+  Unify moves a facet edge onto a recognised plane its far node may be up to
+  the tolerance from, so the result can fail `BRepCheck`
+  (`InvalidCurveOnSurface`); `ShapeFix_Shape` then heals it (its history
+  merged into unify's). A face still invalid maps back to its regions
+  (unify's history), which explode, and the build runs again; a sampled mesh
+  node that no face covers (its parameters outside its region's
+  straight-edged face, measured on a 16-triangle torus patch of
+  phone-stand-foldable whose edges needed 0.6 mm) explodes its region the
+  same way: up to three builds.
+- **Checks and cap.** Validity; every n-th mesh node (up to 2,000) within the
+  tolerance of the solid (the exact stage's check); the volume within
+  max(1 % of the mesh's, 2 × Σ area·sag + tolerance × area) over the
+  recognised regions (the exact stage's rule; the brief's version lacked the
+  tolerance term, which the nodes' offset from their surfaces needs). The
+  result's **facets** are its faces that only facet faces made (unify's
+  history); over `HYBRID_FACET_CAP` = 4,000 the hybrid refuses: "Mesh to
+  Solid could rebuild only 93 % of this mesh as exact surfaces; the rest would
+  be 4,678 facets (Extrudo keeps up to 4,000). Raise the tolerance, or simplify
+  the mesh in your slicer." (the share is the recognised regions' area that
+  got faces). Before anything is built the facets are estimated with
+  faceted's coplanar rule; past 1.5 × the cap the same message says "about"
+  and comes at once (kuglbahn-pillar-base: 0.5 s). Past its budget: "Mesh to
+  Solid gave up after 90 s: this mesh is too large to rebuild. Use Faceted, or
+  simplify the mesh in your slicer." Any other hybrid refusal gives the rebuild
+  message ("couldn't rebuild this mesh as an exact solid within …", with a
+  retry's tolerance when one converted); it wins over the unfit message, since
+  the unfit regions were facets there (an exception keeps the unfit one).
+- **The report and the line.** `meshReport_` gains `rebuild` (0 exact, 1
+  hybrid, −1 none) and `facets`; core's `MeshToSolidReport` gains `rebuild?:
+  'exact' | 'hybrid'` and `facets` (0 for faceted and exact; not stored, so
+  the schema and `docs/file-format.md` are untouched). A hybrid result's kinds
+  count its recognised faces only, and its summary is "12 planes, 4 cylinders,
+  2 tori · 3 unfit regions kept as 318 facets" ("· 48 facets" when only
+  exploded regions made them). The dialog's Result line shows that once a
+  hybrid draft's report is in (the region counts before), and the method hint
+  says "…; what fits nothing stays as facets." So this is **not** the rejected
+  silent faceted fallback: the recognised faces are real surfaces (a hole is
+  a cylinder for Remove Faces), the facets are only where nothing fitted, and
+  the line says how many.
+- **Tried and rejected.** (1) Raising just the edges `BRepCheck` flags after
+  unify to their sampled pcurve distance, instead of `ShapeFix_Shape`: the
+  result stayed invalid and the extra analysis cost as much as the heal
+  (phone-stand-foldable 2.4 s). (2) Exploding a region whose pcurve strays
+  far (the brief's 1 mm cap alone lets a 0.6 mm torus patch through): the
+  node check catches the one case measured, so the cap stays as the brief
+  set it.
+
+The eleven target files (closed meshes stl2step converts exactly and we
+converted with neither method), the native harness at 0.01 mm (`run.sh
+prismatic F`, one process, this machine); faces by kind
+planes/cylinders/cones/spheres/tori count recognised faces, facets apart:
+
+| file | outcome | faces | facets | exploded | volume | s |
+|---|---|---|---|---|---|---|
+| own/battery-holder | hybrid | 131 (61/33/37/0/0) | 0 | 0 | −0.09 % | 9.2 |
+| own/object-permanence-base | hybrid | 1,985 (333/25/5/2/0) | 1,620 | 0 | −0.02 % | 13.6 |
+| own/peg-perego-button | hybrid | 894 (108/94/8/10/2) | 672 | 0 | +0.41 % | 1.4 |
+| own/phone-stand-foldable | hybrid | 3,642 (587/211/0/3/13) | 2,828 | 2 | +0.00 % | 18.8 |
+| own/puzzle-insert-circle | refused: facet cap (93 % exact, 4,678 facets) | – | – | – | – | 3.0 |
+| own/spool-screw-v4.1 | refused: facet cap (94 % exact, 4,698 facets) | – | – | – | – | 17.2 |
+| own/trashcan-spacer | hybrid | 419 (2/0/0/4/4) | 409 | 0 | +0.01 % | 0.6 |
+| third-party/door-stopper-top | hybrid | 147 (5/142/0/0/0) | 0 | 0 | +0.01 % | 15.0 |
+| third-party/gardena-end | hybrid | 17 (5/5/2/1/4) | 0 | 0 | +0.38 % | 3.2 |
+| third-party/micro-sd-keyring-inner | hybrid | 66 (28/16/0/4/0) | 18 | 34 | −0.47 % | 4.4 |
+| third-party/wyze-garage-bracket | hybrid | 84 (55/27/2/0/0) | 0 | 0 | +0.01 % | 1.0 |
+
+Nine of eleven convert, all valid and within the volume rule. The two
+refused are over the facet cap by 17 %: puzzle-insert-circle's freeform cap
+and spool-screw's helical thread (6 % of the surface each) stay facets.
+The slowest, phone-stand-foldable (exact stage skipped: 48 % unfit), spends
+0.3 s segmenting, then per build 0.7 s on faces, 2.0 s on solids, 0.7 s
+unifying, 3.3 s healing and 1.9 s on the node check, twice (one torus patch
+exploded). own/track-straight-100mm converts at 0.01 mm (306 faces, 237
+facets, 0.8 s), own/desk-organizer-module-small is refused in 38 s (the exact
+stage's 30 s, then the hybrid's volume check: +2.7 %, which stl2step's
+volume check also refused). The ten files that converted exactly still do,
+with the same faces (ball 1, drill-block 93, hole-filler-35mm 6,
+hole-filler-5mm 6, numbers-base-top 471, puzzle-base-circle 37,
+trashcan-repair-foot 16, micro-sd-keyring-outer 41, mms-camera-mount 11,
+mms-flat-stand 44).
+
+Over all 41 files (native, one process per tolerance): **31 convert at
+0.01 mm** (10 exact, 21 hybrid; before: 10) and **39 at 0.05 mm** (11 exact,
+28 hybrid; before: 12). Two of the hybrids, hex-key-cap-3mm and
+sock-clips-6x, are among the meshes the importer refuses as open (the
+harness doesn't check). Refused at 0.01 mm: six over the facet cap
+(battery-power-adapter 4,107, puzzle-insert-circle, spool-screw,
+kuglbahn-pillar-base about 13,926, gear-bearing-5 about 14,644,
+makita-vacuum-holder about 10,511), desk-organizer and whiteboard-tray-v5 on
+the volume (+2.7 %, +1.3 %), grass-for-flower and mms-m5-nut invalid (the
+first is open). At 0.05 mm only desk-organizer (volume) and grass-for-flower
+are refused. The kernel over `STL_DIR` gives the same outcomes (the
+tables below). Times: most conversions take under 20 s; the slow ones spend
+their time in the exact stage first (shower-holder 72 s, hot-wheels-connector
+77 s: MakerVolume overruns its 30 s inside a step, slice A), which is where a
+later slice could skip the exact stage sooner.
+
+**Open for D2 and later.** Polyline edges collapsed to lines and arcs where
+they provably are one (stl2step's tier-1 chains; today a hole's rim is its
+mesh polygon of line edges on an exact cylinder); fillet-strip detection
+(stl2step's law-based strips) so a fillet network fits instead of staying
+facets; the facet cap (5,000 would convert puzzle-insert-circle,
+spool-screw-v4.1 and battery-power-adapter at 0.01 mm in 3–18 s); skipping
+the exact stage when the hybrid would do (it costs up to 30 s, more when
+MakerVolume overruns).

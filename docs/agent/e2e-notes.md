@@ -1090,10 +1090,11 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
   Method is a native select: `selectOption('faceted')`. The second test's
   shape is an **ellipsoid** (`sphereStl(0.6)`, a UV sphere with its z scaled
   by 0.6: 12 rings × 22 segments, 484 triangles, r 10 in x/y): it fits no
-  sphere, so `data-regions="0 planes, 0 cylinders, 1 unfit"`, the preview
-  `error` with "Mesh to Solid couldn't close the body: 1 region
-  (100 % of the surface)" in the region "Feature status" and OK
-  `aria-disabled="true"`; the regions stay drawn while the draft is refused.
+  sphere, so `data-regions="0 planes, 0 cylinders, 1 unfit"`; since slice D1
+  (ADR-0097, the hybrid rebuild) the preview is `ok` and the summary turns
+  from "1 unfit" to "1 unfit region kept as N facets" once the draft's
+  report is in (match it with a regex: N is the merged facet count); the
+  regions stay drawn while the method is prismatic.
   The report on the status shows in the chip's tooltip: hover
   `Mesh to Solid1`, `getByRole('tooltip')` contains "6 planes · 0 unfit".
   Two screenshots go to the test's output folder (`ellipsoid-regions.png`,

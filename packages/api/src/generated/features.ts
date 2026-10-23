@@ -1338,7 +1338,7 @@ export interface FeatureMethods {
    * Mesh to Solid (modify): one feature of the timeline.
    *
    * @param inputs.body The mesh body to convert. Required.
-   * @param inputs.method prismatic recognises planes and cylinders within the tolerance and rebuilds exact faces; faceted keeps every flat facet as a face. Default prismatic.
+   * @param inputs.method prismatic recognises planes, cylinders, cones, spheres and tori within the tolerance and rebuilds exact faces; what fits nothing stays as facets. faceted keeps every flat facet as a face. Default prismatic.
    * @param inputs.tolerance How far a facet may sit from a fitted surface, in mm (prismatic only). Default 0.01.
    *
    * The faces it makes, as `handle.face(role)` takes them:

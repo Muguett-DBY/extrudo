@@ -117,7 +117,7 @@ test('the cube shows six planes before it converts; Faceted says six faces', asy
   });
 });
 
-test('an ellipsoid fits nothing: all red, refused, and Cancel leaves the mesh', async ({
+test('an ellipsoid fits nothing: all red, kept as facets, and Cancel leaves the mesh', async ({
   page,
 }) => {
   await openProject(page);
@@ -128,16 +128,14 @@ test('an ellipsoid fits nothing: all red, refused, and Cancel leaves the mesh', 
   await expect(dialog).toHaveAttribute('data-regions', '0 planes, 0 cylinders, 1 unfit', {
     timeout: 60_000,
   });
-  await expect(dialog.locator('[data-info="summary"]')).toHaveText('1 unfit');
-  await expect(dialog).toHaveAttribute('data-preview-status', 'error', { timeout: 90_000 });
-  await expect(dialog.getByRole('status', { name: 'Feature status' })).toContainText(
-    "Mesh to Solid couldn't close the body: 1 region (100 % of the surface)",
+  // The hybrid rebuild (ADR-0097 slice D1) keeps what fits nothing as
+  // facets, and the Result line says so once the draft's report is in.
+  await expect(dialog).toHaveAttribute('data-preview-status', 'ok', { timeout: 90_000 });
+  await expect(dialog.locator('[data-info="summary"]')).toHaveText(
+    /^1 unfit region kept as \d+ facets$/,
+    { timeout: 90_000 },
   );
-  await expect(dialog.getByRole('button', { name: /^OK/ })).toHaveAttribute(
-    'aria-disabled',
-    'true',
-  );
-  // The regions stay drawn while the draft is refused.
+  // The regions stay drawn while the method is prismatic.
   await expect(viewport(page)).toHaveAttribute('data-preview-regions', /.+/);
   await viewport(page).screenshot({ path: test.info().outputPath('ellipsoid-regions.png') });
 
