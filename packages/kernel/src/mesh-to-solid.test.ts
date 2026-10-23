@@ -655,7 +655,9 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
     try {
       console.log(`prismatic: the staircase converted in ${ms.toFixed(0)} ms`);
       expect(report).toMatchObject({ rebuild: 'hybrid', faces: 602, planes: 602, facets: 0 });
-      console.log(`D3: staircase ${kernel.count(shape, 'edge')} edges`);
+      // Slice D3 collapses nothing here: every chain is one mesh edge
+      // between two corners (1,800 edges before and after).
+      expect(kernel.count(shape, 'edge')).toBe(1800);
       expect(kernel.isValid(shape)).toBe(true);
       expect(kernel.properties(shape).volume).toBeCloseTo(224250, 3);
       expect(ms).toBeLessThan(10000);
@@ -1253,6 +1255,8 @@ describe('Mesh to Solid, the hybrid’s chains (ADR-0097 slice D3)', { timeout: 
       );
       // The polygon's 32 sides per rim are gone: a circle or two arcs.
       expect(rims.length).toBeLessThanOrEqual(4);
+      // STEP carries them as circles.
+      expect(kernel.writeStep([{ shape, name: 'Holed' }])).toMatch(/= CIRCLE\(/);
       const filleted = kernel.fillet(shape, [top?.index ?? -1], 0.5).shape;
       try {
         expect(kernel.isValid(filleted)).toBe(true);

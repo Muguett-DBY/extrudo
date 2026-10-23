@@ -3034,3 +3034,40 @@ volume is below −1e-6 × max(1, |mesh volume|) is an inner shell of the solid
 that holds one of its nodes, never a solid of its own (none holds it:
 faceted's "a hollow lies in no solid."). Harness: `TOL=auto` (or `AUTO=1` in
 the kernel sweep); `TIMES=1` prints the ladder's `auto <tol>: unfit <share> %`.
+
+**ADR-0097 slice D3 (2026-10-23): the hybrid's boundary chains collapsed.**
+`rebuildHybrid` builds `meshChains` once after `hybridRegions`: runs of
+boundary mesh edges with the same two regions, in the left region's loop
+order, ending at **break nodes** (three or more regions around, an unfit or
+exploded region counting as one, or other than two boundary edges:
+stl2step's I8); a loop with none is one closed chain. Per build, a chain
+between two built recognised regions collapses into one `TopoDS_Edge` on the
+two surfaces' own curve (`surfaceCurves`, `IntAna_QuadQuadGeo` at 1° and the
+tolerance, cached per surface pair; curved|curved pairs only when coaxial
+within 1° and the tolerance, the second moved onto the first's axis;
+coaxial cylinders: the circle through the nodes' mean height; parabola,
+hyperbola, off-axis and more than two curves: none) when **every node is
+within 1.5 × the tolerance** of it, the parameters run strictly one way, a
+circle's or ellipse's span is under a turn (closed: one), and no replaced
+chord's straight pcurve strays past `HYBRID_EDGE_TOLERANCE_MAX` (D1's limit,
+so such regions still explode). Never collapsed: facet islands, two pieces of
+one surface (the split's seam), a chain touching a sphere whose surface is in
+pieces (unify won't merge the pieces across arcs). The edge joins the
+existing end vertices (they never move; inner nodes get none), trimmed to the
+end nodes' parameters; tolerance 1.1 × max(node distances, both pcurves'
+11-point sampled distance), floor `HYBRID_EDGE_TOLERANCE_MIN`, vertices
+raised to it; no `BRepLib::SameParameter`. Pcurves: straight in the chart
+(`Geom2d_Line`, degree-1 B-spline when the speed isn't 1) when that image
+stays within 1.5 × the tolerance, else `GeomProjLib::Curve2d` shifted by
+whole turns into the chart, its ends checked. `makeFace(…, region)` walks
+each loop from a break node and adds a collapsed chain's edge once, forward
+for the left region. Fallbacks: a face that fails is rebuilt with its chains
+as polylines (built neighbours across them stripped and rebuilt) before its
+region explodes; after unify and in the node check, failing regions with
+collapsed chains get them undone in an extra build (≤ 2) before D1's
+explode; the node check skips collapsed chains' nodes. `hybridChains_` /
+`hybridChainsKept_` and `TIMES=1`'s "hybrid chains: N collapsed (lines,
+circles, ellipses), M polylines"; `FACES=1` a line per chain;
+`meshLoopsDebug` appends the chains (count, then left, right, closed, mesh
+edges, curve type: 0 line, 1 circle, 2 ellipse, −1 none, −2 not a
+candidate). The report is unchanged.

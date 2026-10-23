@@ -104,3 +104,21 @@ HYBRID_BUDGET=ms … # a lower budget than HYBRID_BUDGET_MS (90 s)
 The report line gains `rebuild exact|hybrid, facets N`; a converted file
 prints `rebuild hybrid, facets N, exploded N, pl/cy/co/sp/to …` (the
 recognised faces by kind, facets not counted).
+
+## Boundary chains (slice D3, 2026-10-23)
+
+The hybrid's boundary chains between two recognised regions collapse into one
+line, circle or ellipse edge where the nodes lie on the surfaces' curve
+(ADR-0097's slice D3 amendment). The same `f`/`F` cases show them:
+
+```sh
+TIMES=1 …   # also "hybrid chain curves <ms>" and "hybrid chains: 293 collapsed (64 lines, 229 circles, 0 ellipses), 148 polylines"
+FACES=1 …   # one line per chain: collapsed ("chain 17 cylinder|plane: circle, regions 6|154, 11 mesh edges, tolerance 0.002")
+            # or kept as the mesh's polyline and why ("chain 33 sphere|plane: node 0 off by 0.01893"; "(build 2)" on a rebuild)
+```
+
+A converted hybrid file also prints
+`chains: … ; kept as polylines: a node off 8, no curve: off axis 8, …` (the
+reasons counted) and, for every converted file, `edges N (lines, circles,
+ellipses)`: the result's edges by curve type. An older facade lacks
+`hybridChains_`: build it with its own `run.sh` and `prismatic.cpp` (`FACADE=`).

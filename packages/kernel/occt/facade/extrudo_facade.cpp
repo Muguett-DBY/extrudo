@@ -87,7 +87,7 @@
 #include <Geom_ToroidalSurface.hxx>
 #include <TopTools_ListOfShape.hxx>
 #include <Geom2d_Line.hxx>
-#include <GeomProjLib.hxx>
+#include <Geom2dAPI_Interpolate.hxx>
 #include <IntAna_QuadQuadGeo.hxx>
 #include <Extrema_ExtPElC.hxx>
 #include <Geom2d_Circle.hxx>
@@ -9513,14 +9513,14 @@ private:
         }
         return e;
       };
-      // A straight pcurve from the lower node's parameters to the higher's, on the edge's own range.
-      auto pcurveOf = [](const gp_Pnt2d& from, const gp_Pnt2d& to, double length) {
+      // A straight pcurve from one node's parameters to another's, over [first, last].
+      auto pcurveOf = [](const gp_Pnt2d& from, const gp_Pnt2d& to, double first, double last) {
         NCollection_Array1<gp_Pnt2d> poles(1, 2);
         poles(1) = from;
         poles(2) = to;
         NCollection_Array1<double> knots(1, 2);
-        knots(1) = 0;
-        knots(2) = length;
+        knots(1) = first;
+        knots(2) = last;
         NCollection_Array1<int> mults(1, 2);
         mults(1) = mults(2) = 2;
         return Handle(Geom2d_Curve)(new Geom2d_BSplineCurve(poles, knots, mults, 1));
@@ -9569,10 +9569,19 @@ private:
       std::vector<ChainEdge> chainEdges(chains.size());
       std::map<std::string, int> keptWhy;
       int collapsedBy[3] = {0, 0, 0}, collapsesUndone = 0;
+      // A collapsed edge's pcurve on `chart`, over the edge's range, from
+      // `from` to `to`: the chart parameters of the chain's end nodes, where
+      // the face's other edges' pcurves end too (pcurves that end at the
+      // curve's own ends, up to 1.5 × the tolerance away, leave the face's
+      // domain open, and its area and volume integrals drift with the
+      // chart's origin: phone-stand-foldable +1.8 %). Straight in the chart
+      // where that stays within 1.5 × the tolerance of the curve (a line on
+      // a plane, an iso curve); else through the curve's chart parameters at
+      // samples, the ends' offsets blended along it. Null when the image
+      // strays further.
       auto pcurveFor = [&](const MeshChart& chart, const Handle(Geom_Curve)& curve, double first, double last,
-                           double& off) -> Handle(Geom2d_Curve) {
+                           const gp_Pnt2d& from, const gp_Pnt2d& to, double& off) -> Handle(Geom2d_Curve) {
         const double reach = 1.5 * tolerance;
-        const gp_Pnt2d a = chart.uv(curve->Value(first)), b = chart.uv(curve->Value(last));
         auto measure = [&](const Handle(Geom2d_Curve)& pcurve) {
           double worst = 0;
           for (int i = 0; i <= 10; ++i) {
@@ -9582,38 +9591,38 @@ private:
           }
           return worst;
         };
-        if (a.Distance(b) > 1e-12) {
-          const gp_XY d = (b.XY() - a.XY()) / (last - first);
-          Handle(Geom2d_Curve) straight;
-          if (std::fabs(d.Modulus() - 1) < 1e-9) {
-            straight = new Geom2d_Line(gp_Pnt2d(a.XY() - first * d), gp_Dir2d(d));
-          } else {
-            NCollection_Array1<gp_Pnt2d> poles(1, 2);
-            poles(1) = a;
-            poles(2) = b;
-            NCollection_Array1<double> knots(1, 2);
-            knots(1) = first;
-            knots(2) = last;
-            NCollection_Array1<int> mults(1, 2);
-            mults(1) = mults(2) = 2;
-            straight = new Geom2d_BSplineCurve(poles, knots, mults, 1);
-          }
-          off = measure(straight);
-          if (off <= reach) return straight;
+        if (from.Distance(to) > 1e-12) {
+          off = measure(pcurveOf(from, to, first, last));
+          if (off <= reach) return pcurveOf(from, to, first, last);
         }
-        Handle(Geom2d_Curve) projected = GeomProjLib::Curve2d(curve, first, last, chart.surface());
-        if (projected.IsNull()) return projected;
-        const gp_Pnt2d p0 = projected->Value(first);
-        const double du = chart.uPeriodic() ? 2 * M_PI * std::round((a.X() - p0.X()) / (2 * M_PI)) : 0;
-        const double dv = chart.vPeriodic() ? 2 * M_PI * std::round((a.Y() - p0.Y()) / (2 * M_PI)) : 0;
-        if (du != 0 || dv != 0) projected->Translate(gp_Vec2d(du, dv));
-        // Its ends at the chart's end parameters, its image on the curve.
-        const gp_Pnt2d q0 = projected->Value(first), q1 = projected->Value(last);
-        if (q0.Distance(a) > 0.1 || q1.Distance(b) > 0.1 || chart.value(q0.X(), q0.Y()).Distance(chart.value(a.X(), a.Y())) > reach ||
-            chart.value(q1.X(), q1.Y()).Distance(chart.value(b.X(), b.Y())) > reach)
-          return Handle(Geom2d_Curve)();
-        off = measure(projected);
-        return off <= reach ? projected : Handle(Geom2d_Curve)();
+        const int samples = std::max(8, static_cast<int>(std::ceil((last - first) / (M_PI / 16))));
+        Handle(NCollection_HArray1<gp_Pnt2d>) points = new NCollection_HArray1<gp_Pnt2d>(1, samples + 1);
+        Handle(NCollection_HArray1<double>) parameters = new NCollection_HArray1<double>(1, samples + 1);
+        gp_Pnt2d previous;
+        for (int i = 0; i <= samples; ++i) {
+          const double t = first + (last - first) * i / samples;
+          gp_Pnt2d uv = chart.uv(curve->Value(t));
+          if (i > 0) {
+            // Continuous across the chart's periods.
+            if (chart.uPeriodic()) uv.SetX(uv.X() + 2 * M_PI * std::round((previous.X() - uv.X()) / (2 * M_PI)));
+            if (chart.vPeriodic()) uv.SetY(uv.Y() + 2 * M_PI * std::round((previous.Y() - uv.Y()) / (2 * M_PI)));
+          }
+          previous = uv;
+          points->SetValue(i + 1, uv);
+          parameters->SetValue(i + 1, t);
+        }
+        const gp_XY startOffset = from.XY() - points->Value(1).XY(), endOffset = to.XY() - points->Value(samples + 1).XY();
+        if (startOffset.Modulus() > 0.1 || endOffset.Modulus() > 0.1) return Handle(Geom2d_Curve)();
+        for (int i = 0; i <= samples; ++i) {
+          const double w = static_cast<double>(i) / samples;
+          points->ChangeValue(i + 1).ChangeCoord() += (1 - w) * startOffset + w * endOffset;
+        }
+        Geom2dAPI_Interpolate interpolate(points, parameters, false, 1e-9);
+        interpolate.Perform();
+        if (!interpolate.IsDone()) return Handle(Geom2d_Curve)();
+        const Handle(Geom2d_Curve) through = interpolate.Curve();
+        off = measure(through);
+        return off <= reach ? through : Handle(Geom2d_Curve)();
       };
       auto chainBuilt = [&](int r) { return r >= 0 && regions[r].kind >= 0 && regions[r].why.empty(); };
       for (size_t c = 0; c < chains.size(); ++c) {
@@ -9652,9 +9661,14 @@ private:
             if (why.empty()) {
               const Handle(Geom_Curve) curve = curveGeom(fit.curve);
               double offLeft = 0, offRight = 0;
-              const Handle(Geom2d_Curve) onLeft = pcurveFor(regions[chain.left].chart, curve, fit.first, fit.last, offLeft);
-              const Handle(Geom2d_Curve) onRight =
-                  onLeft.IsNull() ? onLeft : pcurveFor(regions[chain.right].chart, curve, fit.first, fit.last, offRight);
+              const int from = chain.nodes.front(), to = chain.closed ? from : chain.nodes.back();
+              auto onChart = [&](int r, double& off) {
+                const MeshChart& chart = regions[r].chart;
+                return pcurveFor(chart, curve, fit.first, fit.last, chart.uv(gp_Pnt(meshNode(from))),
+                                 chart.uv(gp_Pnt(meshNode(to))), off);
+              };
+              const Handle(Geom2d_Curve) onLeft = onChart(chain.left, offLeft);
+              const Handle(Geom2d_Curve) onRight = onLeft.IsNull() ? onLeft : onChart(chain.right, offRight);
               const double tol = std::max(HYBRID_EDGE_TOLERANCE_MIN, 1.1 * std::max({fit.off, offLeft, offRight}));
               if (onLeft.IsNull() || onRight.IsNull()) {
                 why = "pcurve failed";
@@ -9662,7 +9676,6 @@ private:
                 why = "edge tolerance";
               } else {
                 ChainEdge& ce = chainEdges[c];
-                const int from = chain.nodes.front(), to = chain.closed ? from : chain.nodes.back();
                 builder.MakeEdge(ce.edge, curve, tol);
                 builder.Add(ce.edge, vertexOf(from).Oriented(TopAbs_FORWARD));
                 builder.Add(ce.edge, vertexOf(to).Oriented(TopAbs_REVERSED));
@@ -9736,7 +9749,7 @@ private:
             const double tol = std::max(off * 1.1, HYBRID_EDGE_TOLERANCE_MIN);
             worstTolerance = std::max(worstTolerance, tol);
             wires.back().push_back({TopoDS_Edge(), Handle(Geom2d_Curve)(), tol, lo, hi, a == lo});
-            wires.back().back().pcurve = pcurveOf(from, to, meshNode(lo).Subtracted(meshNode(hi)).Modulus());
+            wires.back().back().pcurve = pcurveOf(from, to, 0, meshNode(lo).Subtracted(meshNode(hi)).Modulus());
           }
         }
         TopoDS_Face face;

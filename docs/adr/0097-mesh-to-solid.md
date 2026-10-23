@@ -1341,3 +1341,119 @@ does not convert desk-organizer-module-small**: its coplanar-facet result is
 about 15,635 faces, over `FACETED_FACE_CAP` (2,000), so the conversion is
 refused before the cavity rule can apply; the same holds for
 whiteboard-tray-v5 (about 7,944). Faceted's cap was not raised in this slice.
+
+### Amendment, 2026-10-23: boundary chains collapsed (slice D3)
+
+Slice D1's hybrid faces are exact surfaces, but their edges were the mesh's
+polylines: the rim of a 32-gon hole on a true cylinder was 32 line edges with
+sag-sized tolerances, not a circle. Remove Faces (#78) and Simplify for print
+(#79) look for a hole as a cylinder bounded by circles, a fillet on such a
+chain refused or made 32 small faces, STEP carried thousands of fat edges, and
+`UnifySameDomain` merges collinear line edges but never chords into an arc.
+stl2step (`docs/references.md`) calls the fix tier 1: a chain between two
+analytic regions becomes one analytic edge when the two surfaces meet in a
+line, circle or ellipse every chain node lies on; anything else stays the
+mesh polyline (its tier 2). We took the method from its `refit.hpp`
+(`BoundaryChain`, invariant I8) and `refit_build.cpp` (its IntAna candidates
+and residuals); the code is our own.
+
+- **Chains** (`MeshChain`, `meshChains`). After `hybridRegions`, once per
+  rebuild: a chain is a maximal run of boundary mesh edges with the same two
+  hybrid regions on its sides, in the left region's loop order, ending at
+  every **break node**: a node with three or more regions around it (an
+  unfit or exploded region counts as one region: its triangles are one facet
+  island) or with other than two boundary edges (stl2step's I8: where a
+  chain of another pair touches). A loop with no break node is one **closed
+  chain** (first node not repeated). An exploded region keeps its chains;
+  they only stop being candidates.
+- **Candidates.** Only a chain between two built recognised regions (kinds
+  0–4, not exploded) and not undone. Facet islands keep every mesh edge;
+  two pieces of one periodic surface (D1's split) keep their seam (unify
+  merges the pieces back across it, as before); a chain touching a **sphere
+  in pieces** (its surface split into several regions) stays a polyline too:
+  each piece has its own frame (D1's poles away from its own nodes), and
+  unify merges such pieces only across straight edges (micro-sd-keyring-inner
+  came out with 80 sphere faces instead of 4).
+- **The candidate curve** comes from the two surfaces (`surfaceCurves`,
+  cached per surface pair), never from the nodes, through
+  `IntAna_QuadQuadGeo` (angular tolerance 1°, distance tolerance the
+  tolerance in use):
+
+  | pair | curve | collapses |
+  |---|---|---|
+  | plane\|plane | line | unless parallel |
+  | plane\|cylinder | circle (square to the axis; IntAna's circle-or-ellipse rule at the tolerance), ellipse (oblique), one or two lines (parallel to the axis, tangent: one) | yes |
+  | plane\|cone | circle, ellipse, lines through the apex | parabola, hyperbola: no |
+  | plane\|sphere | circle | yes |
+  | plane\|torus | circles: plane square to the axis or through it | else no |
+  | cylinder\|cylinder | coaxial (axes within 1°, each origin within the tolerance of the other's axis): the circle square to the axis through the chain nodes' mean height, radius the radii's mean; parallel, not coaxial: IntAna's lines | crossing axes: no |
+  | cylinder\|cone, cylinder\|sphere, cone\|cone, cone\|sphere, sphere\|sphere, any\|torus | coaxial (a sphere: its centre within the tolerance of the other's axis): the second surface moved onto the first's axis, then IntAna's circles | off axis: no |
+
+  IntAna's `Empty`, `Same`, `NoGeometricSolution`, a point, a parabola or
+  hyperbola, or more than two curves: no collapse. Of two curves, the one
+  nearer the chain's nodes (sum of distances).
+- **The acceptance test** (`chainCurve`): every chain node within 1.5 × the
+  tolerance in use of the curve (lines and circles by `gp_Lin`/`gp_Circ`
+  distance and `ElCLib::Parameter`, an ellipse by `Extrema_ExtPElC`), the
+  nodes' parameters strictly **monotone** in chain order (the curve is turned
+  round when they all fall), and a circle's or ellipse's span under a turn
+  (a closed chain: exactly one). Then slice D1's own limit, per mesh edge
+  the collapse replaces: where a chord's straight pcurve image strays more
+  than `HYBRID_EDGE_TOLERANCE_MAX` from it on either face, the surface
+  bulges past the mesh between the nodes (a curved fit over a few flat
+  triangles), the chain stays a polyline and that region still explodes (a
+  4-triangle cylinder of mirna-doodle-1 built as a 1.9 mm bulge, volume
+  +3.7 %, without it).
+- **The collapsed edge.** One `TopoDS_Edge` on a `Geom_Line`,
+  `Geom_Circle` or `Geom_Ellipse` between the chain's two end vertices (the
+  shared D1 vertices; they never move), trimmed to the end nodes'
+  parameters; a closed chain's edge has the start node's vertex at both ends
+  and a full period. Its tolerance is 1.1 × the largest of the nodes'
+  distances to the curve and both pcurves' sampled distance from it (11
+  points), at least `HYBRID_EDGE_TOLERANCE_MIN`, at most
+  `HYBRID_EDGE_TOLERANCE_MAX` (else no collapse); its vertices are raised to
+  it. The inner nodes get no vertex and no edge. Both faces use the same
+  edge, forward on the left region's wire, reversed on the right's.
+- **Pcurves**, one per face, on the edge's own parameter range: where the
+  curve is straight in the face's chart (a line on a plane, a circle square
+  to a cylinder's, cone's or torus's axis, a meridian of a torus, a
+  cylinder's or cone's generator: the chart parameters of the curve's end
+  points joined straight stay within 1.5 × the tolerance of it at 11
+  points) a `Geom2d_Line` (a degree-1 B-spline when the parameter speed
+  isn't 1), from D1's `MeshChart::uv` with its periodic centring; else
+  `GeomProjLib::Curve2d`, moved by whole turns into the chart's periods, and
+  accepted only when its ends are those chart parameters (0.1 in the
+  parameters, 1.5 × the tolerance in space) and its image stays within
+  1.5 × the tolerance of the curve; else no collapse ("pcurve failed").
+  `BRep_Builder::UpdateEdge(edge, pcurve, surface, loc, tol)` as in D1.
+  `BRepLib::SameParameter` is not called (the brief asked for it):
+  OCCT 8.0.1's `SameParameter(edge, tolerance)` skips an edge already
+  flagged same-parameter, as `BRep_Builder` makes them, and the sampled
+  tolerance above is slice D1's own rule for what `BRepCheck` checks.
+- **Wires from chains.** `makeFace` walks each loop from a break node; at a
+  mesh edge of a collapsed chain it adds the chain's edge once and skips
+  the chain's mesh edges. Loop order, the outer and inner loops and the
+  face's orientation stay as D1 computes them from the node lists.
+- **Fallback.** A face that won't build or check is built again with all
+  its collapsed chains as polylines (the regions across them, built
+  already, are stripped and built again too: they share those edges) before
+  its region explodes ("undone"). After unify, a face that fails the
+  validity check, or a region a mesh node misses, first has its regions'
+  collapsed chains undone in a build of their own (up to two such builds,
+  besides D1's three); only a region without collapsed chains explodes as in
+  D1. The node check skips a collapsed chain's nodes: the acceptance test
+  measured them against the edge's curve (within 1.5 × the tolerance; the
+  check's own reach is 1.01 ×), and the B-rep fallback distance it would
+  otherwise take for every node beside an arc cost seconds (peg-perego-button
+  0.5 → 2.4 s, vented-funnel 0.9 → 7.0 s, before this rule).
+- **Counts.** `TIMES=1` adds `hybrid chain curves <ms>` and the line
+  `hybrid chains: 412 collapsed (380 lines, 30 circles, 2 ellipses), 96
+  polylines`; the harness prints the chains and why the rest stayed
+  polylines ("not a candidate", "no curve: …", "a node off", "not
+  monotone", "spans a turn", "a chord off its surface", "a sphere in
+  pieces", "pcurve failed", "edge tolerance", "undone") and the result's
+  edges by curve type; `FACES=1` one line per chain, collapsed ("chain 17
+  cylinder|plane: circle, regions 6|154, 11 mesh edges, tolerance 0.002") or
+  not ("chain 33 sphere|plane: node 0 off by 0.01893"). The report gains
+  nothing the user sees. `meshLoopsDebug` appends the chains (count, then per
+  chain its regions, closed, mesh edges and curve type).
