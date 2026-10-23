@@ -734,6 +734,8 @@ describe('Recomputer', () => {
         spheres: 0,
         tori: 0,
         unfit: { regions: 0, triangles: 0, fraction: 0 },
+        rebuild: 'exact',
+        facets: 0,
       },
     });
     // The solid is no mesh any more: no regions.

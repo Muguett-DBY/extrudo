@@ -1948,7 +1948,11 @@ export class Kernel {
       // An area share: the sums' rounding can put a whole mesh a hair over 1.
       unfit: { regions: at(6), triangles: at(7), fraction: Math.min(1, at(8)) },
       ...(at(9) >= 0 ? { suggestedTolerance: at(9) } : {}),
-      ...(at(10) === 0 ? { rebuild: 'exact' as const } : at(10) === 1 ? { rebuild: 'hybrid' as const } : {}),
+      ...(at(10) === 0
+        ? { rebuild: 'exact' as const }
+        : at(10) === 1
+          ? { rebuild: 'hybrid' as const }
+          : {}),
       facets: at(11) || 0,
     };
   }

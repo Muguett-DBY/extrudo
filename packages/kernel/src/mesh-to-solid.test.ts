@@ -157,6 +157,7 @@ describe('Kernel.meshToSolid, faceted', { timeout: 300_000 }, () => {
           spheres: 0,
           tori: 0,
           unfit: { regions: 0, triangles: 0, fraction: 0 },
+          facets: 0,
         });
         expect(report.suggestedTolerance).toBeUndefined();
       } finally {
@@ -326,18 +327,6 @@ function prismatic(mesh: ShapeHandle, tolerance = 0.01) {
   }
 }
 
-/** Prismatic's refusal of `mesh` (released), with how long it took. */
-function refusal(mesh: ShapeHandle, tolerance = 0.01): { message: string; ms: number } {
-  const start = performance.now();
-  try {
-    kernel.release(prismatic(mesh, tolerance).shape);
-  } catch (error) {
-    expect(error).toBeInstanceOf(KernelError);
-    return { message: (error as Error).message, ms: performance.now() - start };
-  }
-  throw new Error('the mesh converted');
-}
-
 /** The radii of the cylinder faces. */
 function radii(shape: ShapeHandle): number[] {
   return Array.from({ length: kernel.count(shape, 'face') }, (_, i) =>
@@ -504,6 +493,7 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
       expect(kinds(shape)).toEqual(Array(6).fill('plane'));
       expect(kernel.isValid(shape)).toBe(true);
       expect(kernel.properties(shape).volume).toBeCloseTo(8000, 6);
+      // Exact: the hybrid stage never ran (ADR-0097 slice D1).
       expect(report).toEqual({
         method: 'prismatic',
         faces: 6,
@@ -513,6 +503,8 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
         spheres: 0,
         tori: 0,
         unfit: { regions: 0, triangles: 0, fraction: 0 },
+        rebuild: 'exact',
+        facets: 0,
       });
     } finally {
       kernel.release(shape);
@@ -586,17 +578,30 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
     });
   }
 
-  it('7: refuses an ellipsoid: one region fits no plane, cylinder, sphere, cone or torus', () => {
+  it('7: keeps an ellipsoid, which fits no surface, as facets (the hybrid rebuild)', () => {
     const sphere = manifold.Manifold.sphere(10, 48);
     const ellipsoid = sphere.scale([1, 1, 0.6]);
     sphere.delete();
-    const { message } = refusal(meshOf(ellipsoid));
-    expect(message).toBe(
-      "Mesh to Solid couldn't close the body: 1 region (100 % of the surface) fits no plane, cylinder, sphere, cone or torus. Use Faceted, or simplify the mesh in your slicer.",
-    );
+    const triangles = ellipsoid.numTri();
+    const mesh = meshOf(ellipsoid);
+    const { shape, report } = prismatic(mesh);
+    try {
+      expect(report).toMatchObject({
+        rebuild: 'hybrid',
+        planes: 0,
+        cylinders: 0,
+        unfit: { regions: 1, triangles, fraction: 1 },
+      });
+      expect(report.facets).toBe(kernel.count(shape, 'face'));
+      // Coplanar pairs of triangles merge: fewer faces than triangles.
+      expect(report.facets).toBeLessThan(triangles);
+      expect(kernel.isValid(shape)).toBe(true);
+    } finally {
+      kernel.release(shape);
+    }
   });
 
-  it('8: refuses a 602-face staircase over the 500-surface cap, quickly', () => {
+  it('8: rebuilds a 602-face staircase over the 500-surface cap with the hybrid, quickly', () => {
     // 299 steps: the bottom, the back, 299 risers and 299 treads, and the two caps.
     const steps = 299;
     const outline: [number, number][] = [
@@ -607,25 +612,35 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
     const section = new manifold.CrossSection([outline]);
     const solid = section.extrude(5);
     section.delete();
-    const { message, ms } = refusal(meshOf(solid));
-    console.log(`prismatic: the staircase refused in ${ms.toFixed(0)} ms`);
-    expect(message).toBe(
-      'This mesh has 602 surfaces; Extrudo rebuilds up to 500. Use Faceted, or simplify the mesh in your slicer.',
-    );
-    expect(ms).toBeLessThan(3000);
+    // Over the cap the exact rebuild is skipped (MakerVolume's pairs grow
+    // with the square); the hybrid builds every plane from the mesh.
+    const start = performance.now();
+    const { shape, report } = prismatic(meshOf(solid));
+    const ms = performance.now() - start;
+    try {
+      console.log(`prismatic: the staircase converted in ${ms.toFixed(0)} ms`);
+      expect(report).toMatchObject({ rebuild: 'hybrid', faces: 602, planes: 602, facets: 0 });
+      expect(kernel.isValid(shape)).toBe(true);
+      expect(kernel.properties(shape).volume).toBeCloseTo(224250, 3);
+      expect(ms).toBeLessThan(10000);
+    } finally {
+      kernel.release(shape);
+    }
   });
 
-  it('9: suggests a tolerance for a noisy cylinder, and converts at that tolerance', () => {
-    const { message } = refusal(noisyCylinder(), 0.001);
-    console.log(`prismatic: the noisy cylinder at 0.001 mm: ${message}`);
-    const match = /Raise the tolerance to ([0-9.]+) mm, or use Faceted\.$/.exec(message);
-    expect(message).toMatch(
-      /^Mesh to Solid couldn't close the body: 1 region \(\d+ % of the surface\) fits no plane, cylinder, sphere, cone or torus\./,
-    );
-    expect(match).not.toBeNull();
+  it('9: keeps a noisy cylinder’s side as facets, suggests a tolerance, and converts exactly there', () => {
+    // Below the noise the side fits nothing: the hybrid keeps it as facets,
+    // and the report still names the tolerance that would have fitted it.
+    const noisy = prismatic(noisyCylinder(), 0.001);
+    try {
+      expect(noisy.report).toMatchObject({ rebuild: 'hybrid', planes: 2, facets: 64 });
+      expect(kernel.isValid(noisy.shape)).toBe(true);
+    } finally {
+      kernel.release(noisy.shape);
+    }
     // The sphere through two rings a diameter apart also nearly fits the side,
     // so the suggestion is the sphere's deviation, not the cylinder's.
-    const suggested = Number(match?.[1]);
+    const suggested = noisy.report.suggestedTolerance as number;
     expect(suggested).toBeGreaterThanOrEqual(0.002);
     expect(suggested).toBeLessThanOrEqual(0.02);
     const { shape, report } = prismatic(noisyCylinder(), 0.02);
@@ -658,11 +673,20 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
     }
   });
 
-  it('23: refuses the same blend over 2 % of the surface with the unfit message', () => {
-    const { message } = refusal(kernel.meshFrom(twistedChamferMesh(6, 3)));
-    expect(message).toMatch(
-      /^Mesh to Solid couldn't close the body: 1 region \([3-9] % of the surface\) fits no plane, cylinder, sphere, cone or torus\./,
-    );
+  it('23: keeps the same blend over 2 % of the surface as facets (the hybrid rebuild)', () => {
+    const mesh = twistedChamferMesh(6, 3);
+    const { shape, report } = prismatic(kernel.meshFrom(mesh));
+    try {
+      expect(report).toMatchObject({ rebuild: 'hybrid', unfit: { regions: 1 } });
+      expect(report.unfit.fraction).toBeGreaterThan(0.02);
+      expect(report.facets).toBeGreaterThan(0);
+      // The box's planes stay planes; the saddle is facets, the volume the mesh's.
+      expect(report.planes).toBeGreaterThanOrEqual(6);
+      expect(kernel.isValid(shape)).toBe(true);
+      expect(Math.abs(kernel.properties(shape).volume / volumeOfMesh(mesh) - 1)).toBeLessThan(1e-4);
+    } finally {
+      kernel.release(shape);
+    }
   });
 
   it('11: converts a 20k-triangle plate and a 500k-triangle sphere in under 3 s and 10 s', () => {
@@ -899,6 +923,128 @@ describe('Kernel.meshToSolid, prismatic', { timeout: 300_000 }, () => {
       );
       expect(Math.abs(kernel.properties(shape).volume / exact - 1)).toBeLessThan(1e-6);
       expect(report).toMatchObject({ planes: 6, cylinders: 12, spheres: 8, unfit: { regions: 0 } });
+    } finally {
+      kernel.release(shape);
+    }
+  });
+});
+
+/**
+ * The hybrid rebuild's regions and loops through the raw facade (ADR-0097
+ * slice D1): per region its kind, surface and loops' edge counts, the outer
+ * loop first.
+ */
+function loopsOf(positions: ArrayLike<number>, indices: Uint32Array, tolerance = 0.01) {
+  const facade = new occt.ExtrudoFacade();
+  stageMesh(facade, positions, indices);
+  const count = facade.meshLoopsDebug(tolerance);
+  expect(count).toBeGreaterThan(0);
+  const data = new Int32Array(
+    occt.wasmMemory.buffer,
+    facade.meshLoopsPtr(),
+    facade.meshLoopsSize(),
+  ).slice();
+  const regions: { kind: number; surface: number; loops: number[] }[] = [];
+  for (let i = 0; i < data.length; ) {
+    const loops = data[i + 2] as number;
+    regions.push({
+      kind: data[i] as number,
+      surface: data[i + 1] as number,
+      loops: Array.from(data.subarray(i + 3, i + 3 + loops)),
+    });
+    i += 3 + loops;
+  }
+  expect(regions).toHaveLength(count);
+  return regions;
+}
+
+/** A manifold solid's welded triangles (the manifold is freed). */
+function trianglesOf(solid: Manifold): { positions: Float64Array; indices: Uint32Array } {
+  const gl = solid.getMesh();
+  const positions = new Float64Array(gl.numVert * 3);
+  for (let i = 0; i < gl.numVert; i++)
+    for (let k = 0; k < 3; k++)
+      positions[3 * i + k] = gl.vertProperties[gl.numProp * i + k] as number;
+  solid.delete();
+  return { positions, indices: Uint32Array.from(gl.triVerts) };
+}
+
+/**
+ * A 30 x 30 x 10 box with a cylindrical boss r 5 on top whose top is a
+ * lopsided bump (2 mm high, tilted): no plane, cylinder, cone, sphere or
+ * torus fits it, and it covers more than 2 % of the surface.
+ */
+function bossWithBump(): Manifold {
+  const box = manifold.Manifold.cube([30, 30, 10]);
+  const cylinder = manifold.Manifold.cylinder(6, 5, 5, 48).translate([15, 15, 10]);
+  const boss = cylinder.refine(6);
+  cylinder.delete();
+  const bumped = boss.warp((v) => {
+    if (v[2] > 15.999) {
+      const x = v[0] - 15;
+      const y = v[1] - 15;
+      const r2 = (x * x + y * y) / 25;
+      v[2] += 2 * Math.max(0, 1 - r2) * (1 + 0.3 * (x / 5) + 0.2 * (y / 5) ** 2);
+    }
+  });
+  boss.delete();
+  const part = box.add(bumped);
+  box.delete();
+  bumped.delete();
+  return part;
+}
+
+describe('Mesh to Solid, the hybrid rebuild (ADR-0097 slice D1)', { timeout: 300_000 }, () => {
+  it('orders a box’s boundaries: six regions, one loop of four edges each', () => {
+    const { mesh } = readStl(bytesOf(cubeStl));
+    const regions = loopsOf(mesh.positions, mesh.indices);
+    expect(regions).toHaveLength(6);
+    for (const region of regions) expect(region).toMatchObject({ kind: 0, loops: [4] });
+  });
+
+  it('gives the faces a through hole crosses an inner loop, and splits the hole’s wall in two', () => {
+    const solid = plate();
+    const exported = kernel.exportMesh(solid, { linearDeflection: 0.01, angularDeflection: 0.2 });
+    kernel.release(solid);
+    const { positions, indices } = weldByPosition(exported);
+    const regions = loopsOf(positions, indices);
+    const planes = regions.filter((r) => r.kind === 0);
+    const walls = regions.filter((r) => r.kind === 1);
+    expect(planes).toHaveLength(6);
+    // Top and bottom: the box's four edges outside, the hole's polygon inside.
+    const holed = planes.filter((r) => r.loops.length === 2);
+    expect(holed).toHaveLength(2);
+    for (const r of holed) expect(r.loops[0]).toBe(4);
+    // The wall spans the full turn: two pieces on one surface, one loop each.
+    expect(walls).toHaveLength(2);
+    expect(walls[0]?.surface).toBe(walls[1]?.surface);
+    for (const r of walls) expect(r.loops).toHaveLength(1);
+  });
+
+  it('splits a capped cylinder’s wall into two halves', () => {
+    const { positions, indices } = trianglesOf(manifold.Manifold.cylinder(20, 5, 5, 32));
+    const regions = loopsOf(positions, indices);
+    const caps = regions.filter((r) => r.kind === 0);
+    const halves = regions.filter((r) => r.kind === 1);
+    expect(caps.map((r) => r.loops)).toEqual([[32], [32]]);
+    // One loop each: the two rims' 64 edges between them, and the two cuts twice.
+    expect(halves.map((r) => r.loops.length)).toEqual([1, 1]);
+    expect((halves[0]?.loops[0] ?? 0) + (halves[1]?.loops[0] ?? 0)).toBe(68);
+  });
+
+  it('keeps a boss’s freeform top as facets and its wall as one exact cylinder', () => {
+    const part = bossWithBump();
+    const volume = part.volume();
+    const { shape, report } = prismatic(meshOf(part));
+    try {
+      expect(report.rebuild).toBe('hybrid');
+      expect(report.facets).toBeGreaterThan(0);
+      expect(report.unfit.regions).toBe(1);
+      // The wall's two halves merge back into one face.
+      expect(report.cylinders).toBe(1);
+      expect(radii(shape).map((r) => Math.abs(r - 5) < 1e-3)).toEqual([true]);
+      expect(kernel.isValid(shape)).toBe(true);
+      expect(Math.abs(kernel.properties(shape).volume / volume - 1)).toBeLessThan(0.01);
     } finally {
       kernel.release(shape);
     }

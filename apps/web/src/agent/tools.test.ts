@@ -145,6 +145,8 @@ describe('the agent tools (ADR-0087 §5)', () => {
       spheres: 0,
       tori: 0,
       unfit: { regions: 0, triangles: 0, fraction: 0 },
+      rebuild: 'exact' as const,
+      facets: 0,
     };
     model.getState().computed({
       features: {

@@ -76,8 +76,16 @@ function sixPlanes(): MeshRegions {
 }
 
 /** A preview of the draft with its Mesh to Solid report. */
-function previewWith(id: FeatureId, report: MeshToSolidReport): Preview {
-  return { features: { [id]: { status: 'ok' } }, bodies: {}, tools: [], meshToSolid: report };
+function previewWith(
+  id: FeatureId,
+  report: Omit<MeshToSolidReport, 'facets'> & { facets?: number },
+): Preview {
+  return {
+    features: { [id]: { status: 'ok' } },
+    bodies: {},
+    tools: [],
+    meshToSolid: { facets: 0, ...report },
+  };
 }
 
 const counts = { planes: 0, cylinders: 0, cones: 0, spheres: 0, tori: 0, unfit: NONE };
@@ -148,6 +156,26 @@ describe('the mesh to solid dialog: regions and the Result line (ADR-0097 §4, �
     );
     await settle();
     expect(t.open()?.preview.regions).toBeDefined();
+  });
+
+  it('shows a hybrid result’s report, which says what stayed facets (slice D1)', async () => {
+    const t = started();
+    t.kernel.regions[0]?.resolve(sixPlanes());
+    await settle();
+    expect(result(t)?.text).toBe('6 planes · 0 unfit');
+    t.kernel.previews.at(-1)?.resolve(
+      previewWith(t.open()?.id as FeatureId, {
+        method: 'prismatic',
+        faces: 24,
+        ...counts,
+        planes: 6,
+        unfit: { regions: 1, triangles: 40, fraction: 0.1 },
+        rebuild: 'hybrid',
+        facets: 18,
+      }),
+    );
+    await settle();
+    expect(result(t)?.text).toBe('6 planes · 1 unfit region kept as 18 facets');
   });
 
   it('asks again when the tolerance changes, and drops the late answer', async () => {
