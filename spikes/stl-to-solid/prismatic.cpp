@@ -544,6 +544,21 @@ static void file(ExtrudoFacade& f, const std::string& path, double tolerance) {
                                   << ", pl/cy/co/sp/to " << rep[1] << "/" << rep[2] << "/" << rep[3] << "/" << rep[4] << "/" << rep[5] << std::endl;
   else if (rep.size() >= 12) std::cout << "   rebuild " << (rep[10] == 1 ? "hybrid" : "exact") << ", facets " << rep[11] << ", exploded " << f.hybridExploded_
                                        << ", pl/cy/co/sp/to " << rep[1] << "/" << rep[2] << "/" << rep[3] << "/" << rep[4] << "/" << rep[5] << std::endl;
+  if (rep.size() >= 11 && rep[10] == 1 && !f.hybridChains_.empty())
+    std::cout << "   " << f.hybridChains_ << "; kept as polylines: " << (f.hybridChainsKept_.empty() ? "none" : f.hybridChainsKept_) << std::endl;
+  {
+    // The result's edges by curve type (slice D3 collapses chains into lines, circles and ellipses).
+    NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> edges;
+    TopExp::MapShapes(s, TopAbs_EDGE, edges);
+    int circles = 0, ellipses = 0, lines = 0;
+    for (int i = 1; i <= edges.Extent(); ++i) {
+      const GeomAbs_CurveType type = BRepAdaptor_Curve(TopoDS::Edge(edges(i))).GetType();
+      circles += type == GeomAbs_Circle;
+      ellipses += type == GeomAbs_Ellipse;
+      lines += type == GeomAbs_Line;
+    }
+    std::cout << "   edges " << edges.Extent() << " (" << lines << " lines, " << circles << " circles, " << ellipses << " ellipses)" << std::endl;
+  }
   std::cout << "   prismatic " << f.count(h, 0) << " faces:" << kinds(s) << ", valid " << BRepCheck_Analyzer(s).IsValid() << ", volume "
             << v << " / mesh " << meshVolume << " = " << v / meshVolume << " (" << ms << " ms)" << std::endl;
   f.release(h);

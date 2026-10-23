@@ -323,6 +323,14 @@ function writeStagedMesh(mesh: ShapeHandle, path: string): void {
   fs?.writeFileSync(path, new Uint8Array(bytes));
 }
 
+/** "812 edges, 40 circles": a result's edges and how many are circles (slice D3's collapsed rims). */
+function edgeCounts(shape: ShapeHandle): string {
+  const edges = kernel.count(shape, 'edge');
+  let circles = 0;
+  for (let i = 0; i < edges; i++) if (kernel.edgeGeometry(shape, i, 2).type === 'circle') circles++;
+  return `${edges} edges, ${circles} circles`;
+}
+
 const stlDir = env.STL_DIR;
 // TOL=auto (or AUTO=1) runs prismatic with the Auto tolerance (ADR-0097, slice D2).
 const auto = env.TOL === 'auto' || env.AUTO === '1';
@@ -371,8 +379,9 @@ describe.skipIf(!stlDir)('Mesh to Solid over STL_DIR', { timeout: 3_600_000 }, (
                       ? `, ${report.unfit.regions} unfit left out`
                       : '';
                 const autoText = report.auto ? `, auto ${report.tolerance} mm` : '';
+                const ms = Math.round(performance.now() - t0);
                 cells.push(
-                  `✓ ${report.faces} faces (${report.planes}/${report.cylinders}/${report.cones}/${report.spheres}/${report.tori})${leftOut}${autoText}, valid ${kernel.isValid(shape)}, vol ${ratio.toFixed(4)} (${Math.round(performance.now() - t0)} ms)`,
+                  `✓ ${report.faces} faces (${report.planes}/${report.cylinders}/${report.cones}/${report.spheres}/${report.tori})${leftOut}${autoText}, ${edgeCounts(shape)}, valid ${kernel.isValid(shape)}, vol ${ratio.toFixed(4)} (${ms} ms)`,
                 );
               } finally {
                 kernel.release(shape);
