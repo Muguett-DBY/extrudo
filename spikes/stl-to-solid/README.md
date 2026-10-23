@@ -122,3 +122,19 @@ A converted hybrid file also prints
 reasons counted) and, for every converted file, `edges N (lines, circles,
 ellipses)`: the result's edges by curve type. An older facade lacks
 `hybridChains_`: build it with its own `run.sh` and `prismatic.cpp` (`FACADE=`).
+
+## Browser timings (slice D4, 2026-10-23)
+
+```sh
+PLAYWRIGHT_CHROMIUM_PATH=/usr/bin/google-chrome-stable E2E_GPU=1 bash spikes/stl-to-solid/browser-timing.sh
+```
+
+Builds the app, copies `battery-holder.stl`, `phone-stand-foldable.stl` and
+`spool-screw-v4.1.stl` from `$STL_DIR/own` into `MESH_TIMING_DIR` (default
+`/tmp/extrudo-mesh-timing`, never the repository), then runs
+`e2e/mesh-to-solid-timing.spec.ts` with `MESH_TIMING=1` (unset it is skipped,
+so CI ignores it). The spec imports each fixture and own file through the
+Import dialog ("As solid" off), opens Convert to Solid… (Prismatic, Auto)
+and times from the dialog's OK to the body row losing its mesh flag, twice per
+file; it prints one `TIMING {file, run, ms}` line per run. Pair each file with
+the kernel sweep's time at Auto (ADR-0097's slice D4 amendment has the table).

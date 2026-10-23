@@ -102,18 +102,20 @@ type Outcome =
     }
   | { refusal: string; tolerance?: number };
 
-// Slice C's fixtures. drill-block's lettering walls (3 unfit regions) are
-// left out; track-straight's socket-rim chamfer is left out at 0.05 mm. Slice
-// D1: where the exact rebuild fails (track-straight at 0.01 and 0.1 mm,
+// Slice C's fixtures. Slice D4: the exact stage runs only on a segmentation
+// with no unfit region, so drill-block (3 unfit lettering walls) and
+// track-straight at 0.05 mm (1 unfit socket-rim chamfer) go to the hybrid
+// instead of leaving their unfit regions out of an exact rebuild. Where the
+// exact rebuild fails (track-straight at 0.01 and 0.1 mm,
 // remove-before-flight-cover at 0.01 mm), the hybrid rebuild converts, the
 // unfit regions (and any region whose face wouldn't build) as facets.
 const DRILL_BLOCK: Outcome = {
-  planes: 77,
-  cylinders: 12,
+  planes: 108,
+  cylinders: 65,
   cones: 0,
-  spheres: 0,
+  spheres: 3,
   tori: 4,
-  leftOut: 3,
+  hybrid: { unfit: 3, facets: 208 },
 };
 const TRACK_001: Outcome = {
   planes: 65,
@@ -124,12 +126,12 @@ const TRACK_001: Outcome = {
   hybrid: { unfit: 2, facets: 237 },
 };
 const TRACK_005: Outcome = {
-  planes: 89,
-  cylinders: 12,
-  cones: 3,
+  planes: 66,
+  cylinders: 6,
+  cones: 2,
   spheres: 0,
-  tori: 3,
-  leftOut: 1,
+  tori: 0,
+  hybrid: { unfit: 1, facets: 145 },
   tolerance: 0.05,
 };
 const TRACK_01: Outcome = {
@@ -271,7 +273,7 @@ describe('Mesh to Solid, prismatic on the fixtures at Auto', { timeout: 120_000 
       0.02,
       { faces: 212, rebuild: 'hybrid', edges: 1488, circles: 21 },
     ],
-    ['drill-block.stl', drillBlockStl, 0.01, { faces: 93, rebuild: 'exact' }],
+    ['drill-block.stl', drillBlockStl, 0.01, { faces: 388, rebuild: 'hybrid' }],
     [
       'track-straight-100mm.stl',
       trackStl,
@@ -299,6 +301,36 @@ describe('Mesh to Solid, prismatic on the fixtures at Auto', { timeout: 120_000 
           if (outcome.edges !== undefined) {
             expect(edgeCounts(shape)).toBe(`${outcome.edges} edges, ${outcome.circles} circles`);
           }
+        } finally {
+          kernel.release(shape);
+        }
+      } finally {
+        kernel.release(mesh);
+      }
+    });
+  }
+});
+
+describe('Mesh to Solid, faceted on the fixtures the 5,000 cap allows', { timeout: 120_000 }, () => {
+  // Slice D4 raised FACETED_FACE_CAP from 2,000 to 5,000: these two fixtures'
+  // coplanar-facet counts are between the old and new cap, so Faceted converts
+  // them now (each in under 20 s in node; the measured times are in the ADR).
+  const cases: [string, string, number][] = [
+    ['drill-block.stl', drillBlockStl, 2532],
+    ['peg-perego-button.stl', pegPeregoStl, 3846],
+  ];
+  for (const [name, url, faces] of cases) {
+    it(`converts ${name} in Faceted (${faces} faces) in under 20 s`, () => {
+      const mesh = kernel.meshFrom(readStl(bytesOf(url)).mesh);
+      try {
+        const start = performance.now();
+        const { shape, report } = kernel.meshToSolid(mesh, { method: 'faceted', tolerance: 0.01 });
+        const ms = performance.now() - start;
+        try {
+          expect(report).toMatchObject({ faces, planes: faces });
+          expect(kernel.count(shape, 'face')).toBe(faces);
+          expect(kernel.isValid(shape)).toBe(true);
+          expect(ms).toBeLessThan(20_000);
         } finally {
           kernel.release(shape);
         }

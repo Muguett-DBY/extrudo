@@ -3074,3 +3074,21 @@ circles, ellipses), M polylines"; `FACES=1` a line per chain;
 `meshLoopsDebug` appends the chains (count, then left, right, closed, mesh
 edges, curve type: 0 line, 1 circle, 2 ellipse, −1 none, −2 not a
 candidate). The report is unchanged.
+
+**ADR-0097 slice D4 (2026-10-23): the exact stage only where it can win, Faceted's cap at 5,000, browser timings.**
+`prismaticFromMesh` skips the exact rebuild whenever the segmentation has
+**any unfit region** (`unfitRegions > 0`; slice C's up-to-2 % share that left
+them out is gone) or more than `PRISMATIC_SURFACE_CAP` (500) surfaces;
+`PRISMATIC_UNFIT_ALLOWED` (0.02) stays `rebuildPrismatic`'s own leaving-out
+rule and the Auto ladder's stopping rule, and a skipped exact stage means the
+hybrid (D1–D3) builds the unfit regions as facets. `PRISMATIC_REBUILD_BUDGET_MS`
+is 12,000 (was 30,000) and the "gave up after N s" message takes N from it
+(`thousands` not needed: seconds). `FACETED_FACE_CAP` is 5,000 (was 2,000) and
+**both** faceted cap messages take the number from it through `thousands()`;
+`FACETED_ESTIMATE_MARGIN` stays 1.5. A browser timing script
+(`e2e/mesh-to-solid-timing.spec.ts`, `MESH_TIMING=1`, run by
+`spikes/stl-to-solid/browser-timing.sh`; skipped in CI) times the Convert to
+Solid confirm → body done span and pairs it with the kernel sweep's time. The
+unfit-region rule changes outcomes on meshes that converted exactly with unfit
+regions left out (drill-block) and on ones the exact stage refused: the file
+list and the before/after sweep tables are in the amendment.
