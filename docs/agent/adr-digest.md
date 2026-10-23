@@ -2817,3 +2817,27 @@ Ctrl+Space opens the list on an empty word. The list is a Radix Popover (portall
 `aria-selected`, `onEscapeKeyDown` prevented, no auto focus); the field keeps the
 `textbox` role with `aria-autocomplete`, `aria-controls`, `aria-activedescendant`, and
 `data-keep-escape` while the list is open.
+
+ADR-0101 (P6-13, proposed 2026-10-23) adds **Render Picture with Blender** (desktop only).
+`apps/desktop/src/main/blender.ts` is pure over an injected environment like `slicers.ts`:
+`findBlender` (the `blender.path` preference wins; then PATH, Flatpak `org.blender.Blender`,
+Snap, Steam, Windows `Blender Foundation` folders newest first, `/Applications/Blender.app`),
+`blenderVersion` (**4.2 or newer**), `renderInBlender` (writes `model.obj`, `model.mtl`,
+`job.json` and the bundled `render.py` under `<temp>/extrudo-render/<job>/`, runs `blender -b
+--factory-startup -noaudio --python render.py -- job.json out.png`, parses `Sample n/m` from
+stdout for progress, reads the PNG back, removes the folder; one render at a time; Cancel
+kills the process). `blenderService.ts` validates every job field before anything is written;
+channels `render:status`/`render:start`/`render:cancel`/`render:progress`. **Rules:** the
+scenes (`studio`, `table`, `workbench`, `outdoor`) and finishes (`matte`, `glossy`,
+`translucent`, `resin`, `metal`, `wood`) are **built by `render.py` in Python**, no `.blend`
+or texture files in the repository; the base colour is always the body's colour; the enums
+are `packages/core/src/render.ts`'s (`RENDER_PRESETS`, `RENDER_FINISHES`, `RENDER_QUALITIES`)
+and the schema, the dialog and main's validation all import them. The renderer builds the OBJ
+itself with `@extrudo/io`'s `writeObj` (one `o` per body, MTL `Kd` from the colour,
+millimetres, Z up; the script imports at `global_scale=0.001`) and never sees a path. The
+settings are the document's optional `render` section (`RenderSettingsSchema`: `preset`,
+`finishes` only for bodies changed from `matte`, `camera` `{kind: 'auto' | 'current'}` or
+`{kind: 'view', id}`, `width`/`height` 256–8192, `quality`), written by the `render.set`
+command only when they changed; the picture is never stored. `Platform.render?`
+(`apps/web/src/platform/render.ts`) is absent on the web, where the `render` tile shows its
+"needs the desktop app" hint like `slicer`.
