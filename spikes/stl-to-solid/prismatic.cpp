@@ -511,6 +511,7 @@ static void file(ExtrudoFacade& f, const std::string& path, double tolerance) {
             if (st != BRepCheck_NoError) counts[std::string(name) + " in context " + std::to_string(int(st))]++;
       }
     }
+    std::cout << "   invalid after unify: valid " << analyzer.IsValid() << ", " << counts.size() << " kinds of status" << std::endl;
     for (const auto& [k, n] : counts) std::cout << "   invalid after unify: " << k << " x" << n << std::endl;
     f.hybridInvalid_.Nullify();
   }

@@ -8695,6 +8695,8 @@ private:
   static constexpr int HYBRID_FACET_CAP = 4000;
   /** A recognised region whose edges would need a larger tolerance (mm) is built as facets (slice D1). */
   static constexpr double HYBRID_EDGE_TOLERANCE_MAX = 1.0;
+  /** Every hybrid edge has at least this tolerance (mm): twice unify's linear tolerance, so an edge unify moves onto a merged plane stays valid. */
+  static constexpr double HYBRID_EDGE_TOLERANCE_MIN = 2e-3;
   /** The budget the next hybrid rebuild gets: HYBRID_BUDGET_MS, lowered only by the spike harness. */
   double hybridBudgetMs_ = HYBRID_BUDGET_MS;
   /** The last hybrid rebuild's exploded regions, and why it refused (the spike harness prints them). */
@@ -8831,7 +8833,9 @@ private:
       return fail(capMessage.c_str());
     };
 
-    for (int attempt = 0; attempt < 2; ++attempt) {
+    // Up to three builds: a face that fails the validity or the node check
+    // explodes its region, and the build runs again.
+    for (int attempt = 0; attempt < 3; ++attempt) {
       {
         const int estimate = facetEstimate();
         if (estimate > HYBRID_FACET_CAP * FACETED_ESTIMATE_MARGIN) return capRefusal(estimate, true);
@@ -8913,7 +8917,7 @@ private:
             const int lo = std::min(a, b), hi = std::max(a, b);
             const gp_Pnt2d from = chart.uv(gp_Pnt(meshNode(lo))), to = chart.uv(gp_Pnt(meshNode(hi)));
             const double off = deviation(chart, lo, hi, from, to);
-            const double tol = std::max(off * 1.1, Precision::Confusion());
+            const double tol = std::max(off * 1.1, HYBRID_EDGE_TOLERANCE_MIN);
             worstTolerance = std::max(worstTolerance, tol);
             wires.back().push_back({TopoDS_Edge(), Handle(Geom2d_Curve)(), tol, lo, hi, a == lo});
             wires.back().back().pcurve = pcurveOf(from, to, meshNode(lo).Subtracted(meshNode(hi)).Modulus());
@@ -9059,8 +9063,8 @@ private:
       };
       bool undone = false;
       TopoDS_Shape result = assemble(unified);
-      bool healed = false;
-      if (!BRepCheck_Analyzer(result).IsValid()) {
+      bool healed = false, valid = BRepCheck_Analyzer(result).IsValid();
+      if (!valid) {
         // Unify moves edges onto merged faces whose plane is up to its
         // linear tolerance off their own: ShapeFix raises their tolerances.
         if (keepHybridFaces_) hybridInvalid_ = result;
@@ -9076,11 +9080,12 @@ private:
           }
           result = assemble(unified);
           healed = true;
+          valid = BRepCheck_Analyzer(result).IsValid();
         } catch (const Standard_Failure&) {
         }
         stage("healed");
       }
-      if (!healed || !BRepCheck_Analyzer(result).IsValid()) {
+      if (!valid) {
         // The faces that fail, back to their regions: those explode, once.
         std::set<int> culprits;
         NCollection_DataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher> regionOfFace;
@@ -9106,14 +9111,14 @@ private:
           for (int region : origins.Find(e.Current())) culprits.insert(region);
         }
         check();
-        if (attempt == 0 && !culprits.empty()) {
+        if (attempt < 2 && !culprits.empty()) {
           for (int region : culprits) regions[region].why = "invalid after unify";
           stage("validity, exploding " + std::to_string(culprits.size()));
           continue;
         }
-        bool valid = true;
-        for (const TopoDS_Shape& solid : solids) valid = valid && BRepCheck_Analyzer(solid).IsValid();
-        if (!valid) return refuse("invalid");
+        bool cellsValid = true;
+        for (const TopoDS_Shape& solid : solids) cellsValid = cellsValid && BRepCheck_Analyzer(solid).IsValid();
+        if (!cellsValid) return refuse("invalid");
         result = assemble(solids);
         undone = true;
       }
@@ -9171,6 +9176,7 @@ private:
       if (std::fabs(volume - seg.meshVolume) > allowed)
         return refuse("volume off: " + std::to_string(volume) + " against " + std::to_string(seg.meshVolume) +
                       ", allowed " + std::to_string(allowed));
+      std::set<int> offRegions;
       {
         std::vector<MeshCheckedFace> checked;
         for (int i = 1; i <= resultFaces.Extent(); ++i) {
@@ -9197,6 +9203,9 @@ private:
           checked.push_back(std::move(c));
         }
         const int nodeStride = std::max(1, nodeCount / 2000);
+        std::vector<std::vector<int>> trianglesOf(nodeCount);
+        for (int t = 0; t < triangleCount; ++t)
+          for (int k = 0; k < 3; ++k) trianglesOf[corner(t, k)].push_back(t);
         const double reach = tolerance * 1.01 + 1e-7;
         for (int n = 0; n < nodeCount; n += nodeStride) {
           check();
@@ -9235,11 +9244,28 @@ private:
           if (!near) {
             BRepExtrema_DistShapeShape distance(BRepBuilderAPI_MakeVertex(p).Vertex(), result, Extrema_ExtFlag_MINMAX,
                                                 Extrema_ExtAlgo_Grad, deadline->Start());
-            if (!distance.IsDone() || distance.Value() > reach)
+            if (!distance.IsDone() || distance.Value() > reach) {
+              // A node a recognised face doesn't cover (its parameters outside
+              // the face's straight-edged domain): that region explodes.
+              int region = -1;
+              for (int t : trianglesOf[n])
+                if (regions[hybridOf[t]].kind >= 0 && regions[hybridOf[t]].why.empty()) region = hybridOf[t];
+              if (region >= 0 && attempt < 2) {
+                offRegions.insert(region);
+                continue;
+              }
               return refuse("node " + std::to_string(n) + " off the solid by " +
-                            std::to_string(distance.IsDone() ? distance.Value() : -1.0));
+                            std::to_string(distance.IsDone() ? distance.Value() : -1.0) +
+                            (region >= 0 ? " in a recognised region" : " on facets") + (undone ? ", unify undone" : "") +
+                            (healed ? ", healed" : ""));
+            }
           }
         }
+      }
+      if (!offRegions.empty()) {
+        for (int region : offRegions) regions[region].why = "a node off its face";
+        stage("checked against the mesh, exploding " + std::to_string(offRegions.size()));
+        continue;
       }
       stage("checked against the mesh");
       meshReport_[0] = static_cast<double>(resultFaces.Extent());
