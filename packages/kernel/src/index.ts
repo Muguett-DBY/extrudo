@@ -88,6 +88,7 @@ export {
   type OffsetFaceProblem,
   type OperationResult,
   PRISMATIC_SURFACE_CAP,
+  RemoveFacesError,
   rgbToHex,
   type ShapeHandle,
   type ShapeProperties,

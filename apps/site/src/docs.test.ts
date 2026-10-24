@@ -49,8 +49,8 @@ describe('the docs pages', () => {
       'sketch.md',
     ]);
     expect(paths).toContain('features/README.md');
-    // One page per feature type (47 since P4-13's meshToSolid) and their index.
-    expect(paths.filter((path) => path.startsWith('features/'))).toHaveLength(48);
+    // One page per feature type (48 since P4-13's meshToSolid) and their index.
+    expect(paths.filter((path) => path.startsWith('features/'))).toHaveLength(49);
   });
 
   it('are at the address their links point to', () => {

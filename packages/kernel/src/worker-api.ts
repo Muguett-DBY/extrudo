@@ -34,6 +34,7 @@ export function workerApi(service: KernelService): KernelApi {
           ] as ArrayBuffer[])
         : undefined;
     },
+    removeFacesPick: (body, faces, base) => service.removeFacesPick(body, faces, base),
     exportMeshes: async (bodies, tessellation, onProgress) => {
       const meshes = await service.exportMeshes(bodies, tessellation, onProgress);
       return Comlink.transfer(

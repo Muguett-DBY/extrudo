@@ -120,6 +120,8 @@ export function useFeatureDialogs({
           Promise.resolve(undefined),
         meshRegions: (body, tolerance, base) =>
           kernelRef.current?.meshRegions?.(body, tolerance, base) ?? Promise.resolve(undefined),
+        removeFacesPick: (body, faces, base) =>
+          kernelRef.current?.removeFacesPick?.(body, faces, base) ?? Promise.resolve(undefined),
         scadParameters: (file) =>
           kernelRef.current?.scadParameters?.(file) ??
           Promise.resolve({ ok: false, error: 'The kernel is not running.' }),
