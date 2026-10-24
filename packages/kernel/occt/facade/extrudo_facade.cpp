@@ -9549,7 +9549,7 @@ private:
     meshReport_[5] = static_cast<double>(resultTori);
     meshReport_[10] = 0;
     meshReport_[11] = 0;
-    return store(result);
+    return store(sewnConverted(result, tolerance));
   }
 
   /** The hybrid rebuild gives up after this much wall-clock time, a deadline of its own (ADR-0097, slice D1). */
@@ -10449,7 +10449,7 @@ private:
       for (int k = 0; k < 5; ++k) meshReport_[1 + k] = static_cast<double>(counts[k]);
       meshReport_[10] = 1;
       meshReport_[11] = static_cast<double>(facets);
-      return store(result);
+      return store(sewnConverted(result, tolerance));
     }
     return refuse("invalid after exploding");
   }
@@ -12270,6 +12270,69 @@ private:
     }
     if (volumeOf(solid) < 0) return solid.Reversed();
     return solid;
+  }
+
+  /** How many edges of `shape` belong to fewer than two faces (a seam counts once). */
+  static int freeEdgeCount(const TopoDS_Shape& shape) {
+    NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> edgeFaces;
+    TopExp::MapShapesAndUniqueAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+    int free = 0;
+    for (int i = 1; i <= edgeFaces.Extent(); ++i)
+      if (edgeFaces(i).Extent() < 2) ++free;
+    return free;
+  }
+
+  /** How many faces `shape` has. */
+  static int faceCount(const TopoDS_Shape& shape) {
+    int faces = 0;
+    for (TopExp_Explorer it(shape, TopAbs_FACE); it.More(); it.Next()) ++faces;
+    return faces;
+  }
+
+  /**
+   * A Mesh to Solid result whose faces don't all share their edges -- the
+   * hybrid's collapsed-chain rebuild can leave a chain's edge on one face
+   * only (ADR-0097 amendment, 2026-10-24) -- makes
+   * `BRepOffset_MakeOffset` build a closed skin of nearly no volume, so
+   * Offset Face and Shell fail on the converted body for every distance.
+   * Sew the faces back at `tolerance` and, when that gives a valid solid with
+   * the same face count and fewer free edges, return it; else the input.
+   */
+  static TopoDS_Shape sewnConverted(const TopoDS_Shape& input, double tolerance) {
+    const int before = freeEdgeCount(input);
+    if (before == 0) return input;
+    try {
+      BRepBuilderAPI_Sewing sewing(std::max(1e-5, tolerance), true, true, true, false);
+      sewing.Add(input);
+      sewing.Perform();
+      TopoDS_Shape sewn = sewing.SewedShape();
+      if (sewn.IsNull()) return input;
+      if (sewn.ShapeType() == TopAbs_SHELL) {
+        BRepBuilderAPI_MakeSolid maker(TopoDS::Shell(sewn));
+        if (!maker.IsDone()) return input;
+        sewn = maker.Solid();
+      } else if (sewn.ShapeType() == TopAbs_COMPOUND) {
+        TopoDS_Shape only;
+        int solids = 0;
+        for (TopExp_Explorer it(sewn, TopAbs_SOLID); it.More(); it.Next()) {
+          only = it.Current();
+          ++solids;
+        }
+        if (solids != 1) return input;
+        sewn = only;
+      } else if (sewn.ShapeType() != TopAbs_SOLID) {
+        return input;
+      }
+      if (!BRepCheck_Analyzer(sewn).IsValid()) return input;
+      if (!(volumeOf(sewn) > 0)) return input;
+      if (freeEdgeCount(sewn) >= before) return input;
+      if (faceCount(input) != faceCount(sewn)) return input;
+      return sewn;
+    } catch (const Standard_Failure&) {
+      return input;
+    } catch (...) {
+      return input;
+    }
   }
 
   /**
