@@ -2852,7 +2852,7 @@ public:
       for (int i = 1; i <= faces.Extent(); ++i) {
         const BRepAdaptor_Surface surface(TopoDS::Face(faces(i)), false);
         std::string key;
-        const auto point = [](const gp_Pnt& p) {
+        const auto point = [](const auto& p) {
           return std::to_string(p.X()) + "," + std::to_string(p.Y()) + "," + std::to_string(p.Z());
         };
         const auto axis = [&](const gp_Ax3& frame) { return point(frame.Location()) + "|" + point(frame.Direction()); };
