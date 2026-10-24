@@ -1,4 +1,4 @@
-// Mesh to Solid on real STL files (P4-13, ADR-0097's 2026-10-22 amendment):
+// Mesh to Solid on real STL files (P4-13, ADR-0097's hardening slice A amendment):
 // the owner's fixtures in fixtures/imports/mesh-to-solid/, and, when STL_DIR
 // names a folder, every .stl under it (at TOL, default 0.01 mm), where only a
 // trap fails: a refusal is an answer, a WASM RuntimeError is a bug.
@@ -347,7 +347,7 @@ describe('Mesh to Solid, the segmentation', { timeout: 120_000 }, () => {
   it('puts every triangle of trashcan-spacer.stl on a surface, and converts or refuses it without a trap', () => {
     // At 0.1 and 0.2 mm, splitComponent's border moves once left regions on no
     // surface (and others on two): meshRegions mapped their triangles to -1
-    // and the rebuild indexed adjacent[-1] (ADR-0097's 2026-10-22 amendment).
+    // and the rebuild indexed adjacent[-1] (ADR-0097's hardening slice A amendment).
     const mesh = kernel.meshFrom(readStl(bytesOf(spacerStl)).mesh);
     try {
       for (const tolerance of [0.1, 0.2]) {

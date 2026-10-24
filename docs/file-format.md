@@ -1547,7 +1547,7 @@ ADR-0097). No new keys.
 | Input | Kind | Required | Rule |
 |---|---|---|---|
 | `body` | `ref` | yes | One ref of kind `body`: the mesh body to convert. Empty: an error until one is picked. A body that is already a solid is refused |
-| `method` | `enum` | no | `prismatic` (default) recognises planes and cylinders within `tolerance` and rebuilds exact faces; `faceted` keeps every flat facet as a face |
+| `method` | `enum` | no | `prismatic` (default) recognises planes, cylinders, cones, spheres and tori within `tolerance` and rebuilds analytic faces (exact where the whole mesh fits, otherwise a hybrid that keeps the unfit parts as flat facets); `faceted` keeps every flat facet as a face and refuses a result of more than 5,000 faces |
 | `tolerance` | `expr` | no | Length in millimetres, greater than 0; absent: Auto (the kernel picks from 0.01, 0.02, 0.05 and 0.1 mm the first that fits all but 2 % of the surface); only `prismatic` reads it |
 
 The result **replaces the mesh body under its own body ID**, so the body

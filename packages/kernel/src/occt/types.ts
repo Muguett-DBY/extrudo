@@ -245,6 +245,7 @@ export interface FacadeBinding {
   meshRegionKindsPtr(): number;
   meshRegionCount(): number;
   clearMeshRegions(): void;
+  // Tests and the spike harness (spikes/stl-to-solid) only; the app never calls these.
   /** Tests only (ADR-0097 slice D1): the hybrid rebuild's regions and loops; see the facade. */
   meshLoopsDebug(tolerance: number): number;
   meshLoopsPtr(): number;

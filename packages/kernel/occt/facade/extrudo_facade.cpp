@@ -6019,7 +6019,7 @@ private:
   static constexpr int PRISMATIC_SURFACE_CAP = 500;
   /**
    * Prismatic's rebuild (everything after segmentMesh) gives up after this much
-   * wall-clock time (ADR-0097's 2026-10-22 amendment; 30 s lowered to 12 s in
+   * wall-clock time (ADR-0097's hardening slice A amendment; 30 s lowered to 12 s in
    * slice D4: the exact files finish in under 5 s each). The overrun inside one
    * long BOPAlgo_MakerVolume step is bounded by the exact stage's skip rule.
    */
@@ -6037,6 +6037,7 @@ private:
    * other parts worse (ADR-0097's D1 sweep).
    */
   static constexpr double MESH_AUTO_LADDER[] = {0.01, 0.02, 0.05, 0.1};
+  // Tests and the spike harness (spikes/stl-to-solid) only; the app never calls these.
   /** The budget the next rebuild gets: PRISMATIC_REBUILD_BUDGET_MS, lowered only by the spike harness. */
   double prismaticBudgetMs_ = PRISMATIC_REBUILD_BUDGET_MS;
   /** The last rebuild's oversized faces, one per surface, when the spike harness asks (GAPS=1). */
@@ -7345,7 +7346,7 @@ private:
           }
           // A piece that lost or gained a region is refitted (one can do both
           // and keep its size: its old region list would then miss a region
-          // and name one of another piece's, ADR-0097's 2026-10-22 amendment).
+          // and name one of another piece's, ADR-0097's hardening slice A amendment).
           std::vector<char> moved(pieces.size(), 0);
           for (const auto& [r, to] : moves) {
             moved[pieceOf[r]] = moved[to] = 1;
@@ -8590,7 +8591,7 @@ private:
     // Surfaces that are one surface (a cylinder the segmentation found in
     // pieces between other faces, two coplanar faces) become one: two faces
     // a few thousandths apart on one surface leave MakerVolume slivers or no
-    // cell at all (ADR-0097's 2026-10-22 amendment). A surface joins a larger
+    // cell at all (ADR-0097's hardening slice A amendment). A surface joins a larger
     // one of its kind with a parallel normal or axis (and a radius within
     // the tolerance) when every node of it is within the tolerance of that one.
     {
@@ -8665,7 +8666,7 @@ private:
     for (int s = 0; s < surfaceCount; ++s)
       for (int r : surfaces[s].regions) surfaceOf[r] = s;
     // Every region is on exactly one surface (segmentMesh's promise); one on
-    // none would index adjacent[-1] (the trap of ADR-0097's 2026-10-22 amendment).
+    // none would index adjacent[-1] (the trap of ADR-0097's hardening slice A amendment).
     for (int s : surfaceOf)
       if (s < 0) return refuse("a region on no surface");
     std::vector<std::vector<int>> adjacent(surfaceCount);
@@ -8887,7 +8888,7 @@ private:
     // A snap only takes when the surface still holds its own nodes within
     // the tolerance: a torus within 10 x the tolerance of tangent to a
     // cylinder it really meets at a crease would otherwise move off its own
-    // facets (ADR-0097's 2026-10-22 amendment). Such a surface keeps its fit.
+    // facets (ADR-0097's hardening slice A amendment). Such a surface keeps its fit.
     for (int i = 0; i < surfaceCount; ++i) {
       if (surfaces[i].kind < 0) continue;
       double off = 0;
@@ -8904,7 +8905,7 @@ private:
     // circle's true curve leaves its polygon's box by up to that). Its
     // neighbours', not the whole mesh's: one coarse torus would grow every
     // face, and MakerVolume would intersect more of them (ADR-0097's
-    // 2026-10-22 amendment).
+    // hardening slice A amendment).
     // An unfit region left out of the rebuild (at most
     // PRISMATIC_UNFIT_ALLOWED of the surface) has no face: its neighbours
     // grow across the gap it leaves, so that they meet there. Each of the
@@ -9139,7 +9140,7 @@ private:
     std::vector<int> inside(cells.size(), 0), outside(cells.size(), 0);
     // A cell whose votes agree (16 or more, 90 % one way) is decided: later
     // samples skip it, since a point is in one cell at most (a torus's or a
-    // sphere's cell is slow to classify; ADR-0097's 2026-10-22 amendment).
+    // sphere's cell is slow to classify; ADR-0097's hardening slice A amendment).
     std::vector<char> decided(cells.size(), 0);
     size_t undecided = cells.size();
     // Neighbouring samples tend to fall in the same cell: try the last one first.
@@ -9396,6 +9397,7 @@ private:
   static constexpr double HYBRID_EDGE_TOLERANCE_MAX = 1.0;
   /** Every hybrid edge has at least this tolerance (mm): twice unify's linear tolerance, so an edge unify moves onto a merged plane stays valid. */
   static constexpr double HYBRID_EDGE_TOLERANCE_MIN = 2e-3;
+  // Tests and the spike harness (spikes/stl-to-solid) only; the app never calls these.
   /** The budget the next hybrid rebuild gets: HYBRID_BUDGET_MS, lowered only by the spike harness. */
   double hybridBudgetMs_ = HYBRID_BUDGET_MS;
   /** What the exact rebuild's budget had left when it refused (prismaticFromMesh's retries get it). */

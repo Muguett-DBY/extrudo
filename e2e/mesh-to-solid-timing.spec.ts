@@ -1,8 +1,9 @@
 // P4-13 slice D4: the browser's Mesh to Solid time against node's (ADR-0097's
 // slice D4 amendment). A measurement script, not a CI test: skipped unless
 // MESH_TIMING is set. It imports each STL with "As solid" off, then runs
-// Convert to Solid… (Prismatic, Auto) and times from the dialog's OK to the
-// body row losing its mesh flag (the conversion done). Fixtures come from
+// Convert to Solid… (Prismatic, Auto) and times from the dialog opening (its
+// draft preview does the conversion; OK takes 0.2–1.0 s) to the body row
+// losing its mesh flag (the conversion done). Fixtures come from
 // fixtures/imports/mesh-to-solid/; the larger own/ files from the folder
 // MESH_TIMING_DIR names (default /tmp/extrudo-mesh-timing; they are not
 // repository fixtures). Run through spikes/stl-to-solid/browser-timing.sh.

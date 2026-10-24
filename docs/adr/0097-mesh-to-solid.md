@@ -123,7 +123,86 @@ The facade never falls back from one method to the other on its own
 (owner's 4.1 against a silent faceted fallback): what the user chose is what
 runs, and a refusal says what to choose instead.
 
-#### Amendment, 2026-10-21: prismatic as built (slice 3)
+### 4. The report
+
+`FeatureOutput.report` of kind `meshToSolid`: `{ method, faces, planes,
+cylinders, cones, spheres, tori, unfit: { regions, triangles, fraction },
+suggestedTolerance? }`, read from the facade's `meshReportPtr()` (doubles).
+The dialog shows it as one line ("12 planes, 4 cylinders · 0 unfit") and the
+feature status keeps it; the MCP `get_feature` tool returns it unchanged.
+
+### 5. Preview (slice 4)
+
+While the dialog is open, the view colours the picked mesh body by region
+kind before any solid is built: plane, cylinder/cone/sphere/torus, unfit.
+The kernel's preview path runs the segmentation only
+(`Kernel.meshRegions(shape, tolerance)` → one region id per triangle and a
+kind per region, in `ModelState.regions` for that body), which is linear and
+fast on a million triangles; OK runs the build. The colours come from the
+brand tokens (`docs/05-brand.md`), with a legend line in the dialog.
+
+### 6. Where it is
+
+A tile "Mesh to Solid" at the end of Solid › Modify (with a tooltip clip,
+`pnpm demos`, ADR-0052), a "Convert to solid…" entry in the context menu of
+a body the browser tags "Mesh" (`data-body-mesh`), and the command in the
+palette. Done (2026-10-21): the Import dialog's `solid` toggle ("As solid")
+adds `meshToSolid` (Prismatic, default tolerance) right after the import
+through `commitWith` — one undo step, mesh files only, create mode only.
+
+### 7. After it
+
+A converted body is a solid, so every feature works on it and the Export
+dialog's STEP export includes it (its skip is keyed on `BodyMesh.mesh`).
+Remove Faces (#78) and Simplify for print (#79) find a hole as a closed
+cylinder wall and a round as a cylinder or torus chain on it.
+
+A possible later slice, not planned: build the hybrid first, then retry the
+exact rebuild when only a few facets remain.
+
+## Rejected
+
+- **Faces of a mesh as references only** (ADR-0066's deferred "planar
+  regions"): sketch-on-face without a solid; fillets, shell, holes, Remove
+  Faces still refuse. The preview of §5 reuses that segmentation anyway.
+- **Triangles as faces with no cap**: ADR-0066's rejection, measured again.
+- **Decimating first** (`Manifold.setTolerance`): removes near-coplanar
+  triangles only; curved surfaces keep their facets.
+- **Converting inside `import`** (an `as` input): one timeline step, but a
+  boolean's or OpenSCAD's mesh couldn't be converted and nothing could be
+  suppressed to get the mesh back. The Import-dialog chip of §6 gives the
+  one-step feel later.
+- **Two features, "face groups" then "convert"** (Fusion's split): one
+  feature with a preview is one thing to learn and one timeline step.
+- **A silent fallback to faceted** when prismatic fails (owner's 4.2): the
+  body appears but with thousands of faces, every later cut takes seconds,
+  Remove Faces finds no hole, and nothing says why.
+
+## Consequences
+
+- A new feature type in the document schema: `docs/file-format.md` gets its
+  section (`meshToSolid`: `body`, `method`, `tolerance`), the schema test
+  enforces it.
+- Facade growth: `BRepBuilderAPI_MakeShapeOnMesh`, `BOPAlgo_MakerVolume`
+  (TKBO, already linked), the fitting code; tens of kB of WASM.
+- The 1,000,000-triangle cap holds; the new caps (2,000 faces, 500
+  surfaces) are constants in `packages/kernel/src/features/mesh-to-solid.ts`
+  and `extrudo_facade.cpp`, named in the refusal messages.
+- A long-lived branch: it is synced with main as releases go out, and its
+  ADR number is re-checked against main at pull-request time.
+
+## Slices
+
+1. Facade `faceted` + `Kernel.meshToSolid` + Vitest on `cube.stl` and a
+   cylinder STL (planes and faces counted, fillet and cut on the result).
+2. Feature, dialog, context menu, API, file format, docs, e2e (faceted).
+3. Facade `prismatic`: segmentation, fits, MakerVolume, verification, report,
+   refusals; Vitest with a bracket fixture.
+4. Region preview, cone/sphere/torus, tooltip clip, guide page, Import chip.
+
+## Amendments
+
+### Amendment, 2026-10-21: prismatic as built (slice 3)
 
 Measured natively first (`bash spikes/stl-to-solid/run.sh prismatic`: the
 facade itself, nodes rounded to float32 as `Kernel.meshFrom` keeps them),
@@ -214,7 +293,7 @@ WASM, this machine) the 20,124-triangle plate converts in 248 ms, the
 | plate, 12-gon hole / slot / boss | 116 / 528 / 516 | 7 / 10 / 8 faces, ±3e-7 % | 21 / 280 / 33 |
 | tube r 10 / r 6 | 1,008 | 2 planes + 2 cylinders | 48 |
 
-#### Amendment, 2026-10-21: spheres and cones (slice 4a1)
+### Amendment, 2026-10-21: spheres and cones (slice 4a1)
 
 The two remaining primitives (tori and splitting a smooth cluster into
 several primitives are the next slice), measured natively
@@ -301,7 +380,7 @@ Measured, native (ms under node; the same matrix passes in Vitest):
 The plain sphere and the 499k-triangle sphere, refused in slice 3's table,
 now convert to one sphere face (the table above notes the change).
 
-#### Amendment, 2026-10-21: tori and split clusters (slice 4a2)
+### Amendment, 2026-10-21: tori and split clusters (slice 4a2)
 
 The last primitive and the split of a smooth cluster that fits nothing
 whole, measured natively (`bash spikes/stl-to-solid/run.sh prismatic t`, then
@@ -416,25 +495,7 @@ fits 16.69995° (atan(6/20) is 16.6992°; was 16.716°), +0.0014 % (was
 +0.025 %). Refusals cost the split's attempts: the noisy 32-gon at 0.001 mm
 21 ms (was 0.1), the ellipsoid 42 ms (was 1.3).
 
-### 4. The report
-
-`FeatureOutput.report` of kind `meshToSolid`: `{ method, faces, planes,
-cylinders, cones, spheres, tori, unfit: { regions, triangles, fraction },
-suggestedTolerance? }`, read from the facade's `meshReportPtr()` (doubles).
-The dialog shows it as one line ("12 planes, 4 cylinders · 0 unfit") and the
-feature status keeps it; the MCP `get_feature` tool returns it unchanged.
-
-### 5. Preview (slice 4)
-
-While the dialog is open, the view colours the picked mesh body by region
-kind before any solid is built: plane, cylinder/cone/sphere/torus, unfit.
-The kernel's preview path runs the segmentation only
-(`Kernel.meshRegions(shape, tolerance)` → one region id per triangle and a
-kind per region, in `ModelState.regions` for that body), which is linear and
-fast on a million triangles; OK runs the build. The colours come from the
-brand tokens (`docs/05-brand.md`), with a legend line in the dialog.
-
-#### Amendment, 2026-10-21: preview and report as built (slice 4b)
+### Amendment, 2026-10-21: preview and report as built (slice 4b)
 
 - **One segmentation, two callers.** The facade's `segmentMesh(tolerance,
   MeshSegmentation&)` (private) holds what `prismaticFromMesh` did up to its
@@ -535,7 +596,7 @@ brand tokens (`docs/05-brand.md`), with a legend line in the dialog.
   `meshToSolid` as the status has it. A refused conversion has no report on
   its status (the error says it); the dialog's regions carry the counts.
 
-#### Amendment, 2026-10-22: hardening slice A (memory safety, rebuild budget, rebuilds that failed)
+### Amendment, 2026-10-22: hardening slice A (memory safety, rebuild budget, rebuilds that failed)
 
 The owner ran the kernel over 41 real STLs on 2026-10-21 (36 import as closed
 bodies; prismatic converted 6 at 0.01 mm). Three problems are fixed here;
@@ -659,7 +720,68 @@ asks the indicator between its own steps only, and one step of
 hot-wheels-connector at 0.1 mm ran to 56 s before the refusal; stopping
 inside a step would need the rebuild on its own thread.
 
-#### Amendment, 2026-10-22: hardening slice C (small unfit regions, wrong clusters, a tolerance to suggest)
+### Amendment, 2026-10-22: hardening slice B
+
+The owner ran 41 real STLs through `Kernel.meshToSolid` on 2026-10-21
+(`~/Development/extrudo-stl-solid-test/baseline-2026-10-21-tol0.01.md`) and
+found two faceted problems. This slice fixes exactly those two.
+
+**The cap refusal was slow.** On every over-cap mesh the facade built the
+whole solid (unify included) and only then counted faces: 3–15 s per file
+(`own/kuglbahn-pillar-base.stl` 12.8 s for 19,883 faces,
+`own/spool-screw-v4.1.stl` 10.4 s, `third-party/vented-funnel.stl` 9.8 s).
+Now a private `facetedMeshCounts()` runs first, from the triangle buffers
+alone: adjacent triangles (sharing a node-index edge) whose unit normals
+agree within 1e-3 rad and whose planes agree within 1e-3 mm — the tolerances
+`ShapeUpgrade_UnifySameDomain` gets — are one face, with a union-find over
+the triangles; a zero-area triangle joins a neighbour; the number of groups
+is the estimate. A circle of `uses` sorted by edge key is linear-ish and
+costs single-digit ms on these files (every refusal is now under 25 ms).
+Over `FACETED_FACE_CAP` the facade refuses at once with "Faceted would give
+about N faces; …" (the word "about" is new: the estimate can be off by a few
+faces). The old after-unify count stays a backstop; its message is unchanged
+(no "about"). The estimate matched the exact count for 12 of the 18
+non-capped files measured and was within 5 % for 17;
+`own/trashcan-repair-foot.stl` was the outlier (387 estimated vs 275 exact,
++41 %; `UnifySameDomain` merges more than the edge rule sees).
+
+**Six meshes the importer accepted as closed were refused** with "Mesh to
+Solid couldn't make a closed solid from this mesh …". The stage was the
+`BRepCheck_Analyzer` on the solid, before unify, and its shell status was
+`BRepCheck_NotConnected`: every one of the six is a body of **several
+disjoint closed shells** (a multi-part STL), and putting all their faces in
+one `TopoDS_Shell` is not a connected shell. `wyze-garage-bracket` has 2
+shells, `mirna-doodle-1` 5, `battery-power-adapter` 2, `phone-stand-foldable`
+2, `whiteboard-tray-v5` 7, `gear-bearing-5` 7. **Fix:** the facade groups the
+faces by shared edge (a union-find over the OCCT edges) and builds one shell,
+`BRepBuilderAPI_MakeSolid`, `ShapeFix_Solid` and `ShapeUpgrade_UnifySameDomain`
+per shell; one shell gives the solid as before, several give a compound
+(`splitSolids` splits it into bodies, ADR-0030). `mirna-doodle-1` (198 faces)
+and `wyze-garage-bracket` (945 faces) now convert, valid, volume unchanged to
+the mesh; the other four were always over the face cap (8,152 / 7,851 /
+7,938 / 16,987 estimated) and are now refused at the pre-count, quickly. No
+mesh with one shell changes (same face counts, validity and volume).
+
+**A truly non-manifold mesh still refuses, and now names the reason.**
+`facetedMeshCounts()` also counts edges shared by more than two triangles,
+edges used by one (open), and pinched vertices (a vertex whose triangles
+belong to more than one edge-connected shell). Each has a message: "Mesh to
+Solid couldn't make a closed solid from this mesh: 3 edges are shared by more
+than two triangles. Repair it in your slicer or a mesh tool and try again."
+(and "1 edge has only one triangle." / "1 vertex joins shells that only touch
+at a point."; the counts pluralise). The generic message stays for anything
+else. The importer rejects open and non-manifold-edge meshes before this, so
+only a direct `Kernel.meshToSolid` call, or a pinched-vertex mesh
+(`checkManifold` counts edges, not vertices), reaches those clauses.
+
+The fast loop is harness case `g` (`STL_DIR=… FILE=… bash
+spikes/stl-to-solid/run.sh prismatic g`): faceted on one corpus file. Tests
+in the faceted `describe` of `packages/kernel/src/mesh-to-solid.test.ts`: a
+two-cube mesh converts into a compound of two solids; a mesh whose two cubes
+touch at a single vertex is refused with "vertex joins shells that only touch
+at a point"; the cap-refusal test asserts the refusal takes under 1 s.
+
+### Amendment, 2026-10-22: hardening slice C (small unfit regions, wrong clusters, a tolerance to suggest)
 
 At 0.01 mm the unfit refusal fired on 19 of the owner's 36 real meshes, 10 of
 them with unfit regions covering 0–6 % of the surface on parts that are
@@ -803,123 +925,6 @@ mm (9 before: drill-block is new), 12 at 0.05 (11: track-straight) and 9 at
 converted at 0.01 mm give the same faces, validity and volumes. A refusal
 that retries costs up to the rest of the 30 s budget (remove-before-flight
 16 s, wyze 13 s) where it was refused in under a second or two before.
-
-### 6. Where it is
-
-A tile "Mesh to Solid" at the end of Solid › Modify (with a tooltip clip,
-`pnpm demos`, ADR-0052), a "Convert to solid…" entry in the context menu of
-a body the browser tags "Mesh" (`data-body-mesh`), and the command in the
-palette. Done (2026-10-21): the Import dialog's `solid` toggle ("As solid")
-adds `meshToSolid` (Prismatic, default tolerance) right after the import
-through `commitWith` — one undo step, mesh files only, create mode only.
-
-### 7. After it
-
-A converted body is a solid, so every feature works on it and the Export
-dialog's STEP export includes it (its skip is keyed on `BodyMesh.mesh`).
-Remove Faces (#78) and Simplify for print (#79) find a hole as a closed
-cylinder wall and a round as a cylinder or torus chain on it.
-
-## Rejected
-
-- **Faces of a mesh as references only** (ADR-0066's deferred "planar
-  regions"): sketch-on-face without a solid; fillets, shell, holes, Remove
-  Faces still refuse. The preview of §5 reuses that segmentation anyway.
-- **Triangles as faces with no cap**: ADR-0066's rejection, measured again.
-- **Decimating first** (`Manifold.setTolerance`): removes near-coplanar
-  triangles only; curved surfaces keep their facets.
-- **Converting inside `import`** (an `as` input): one timeline step, but a
-  boolean's or OpenSCAD's mesh couldn't be converted and nothing could be
-  suppressed to get the mesh back. The Import-dialog chip of §6 gives the
-  one-step feel later.
-- **Two features, "face groups" then "convert"** (Fusion's split): one
-  feature with a preview is one thing to learn and one timeline step.
-- **A silent fallback to faceted** when prismatic fails (owner's 4.2): the
-  body appears but with thousands of faces, every later cut takes seconds,
-  Remove Faces finds no hole, and nothing says why.
-
-## Consequences
-
-- A new feature type in the document schema: `docs/file-format.md` gets its
-  section (`meshToSolid`: `body`, `method`, `tolerance`), the schema test
-  enforces it.
-- Facade growth: `BRepBuilderAPI_MakeShapeOnMesh`, `BOPAlgo_MakerVolume`
-  (TKBO, already linked), the fitting code; tens of kB of WASM.
-- The 1,000,000-triangle cap holds; the new caps (2,000 faces, 500
-  surfaces) are constants in `packages/kernel/src/features/mesh-to-solid.ts`
-  and `extrudo_facade.cpp`, named in the refusal messages.
-- A long-lived branch: it is synced with main as releases go out, and its
-  ADR number is re-checked against main at pull-request time.
-
-## Slices
-
-1. Facade `faceted` + `Kernel.meshToSolid` + Vitest on `cube.stl` and a
-   cylinder STL (planes and faces counted, fillet and cut on the result).
-2. Feature, dialog, context menu, API, file format, docs, e2e (faceted).
-3. Facade `prismatic`: segmentation, fits, MakerVolume, verification, report,
-   refusals; Vitest with a bracket fixture.
-4. Region preview, cone/sphere/torus, tooltip clip, guide page, Import chip.
-
-### Amendment, 2026-10-22: hardening slice B
-
-The owner ran 41 real STLs through `Kernel.meshToSolid` on 2026-10-21
-(`~/Development/extrudo-stl-solid-test/baseline-2026-10-21-tol0.01.md`) and
-found two faceted problems. This slice fixes exactly those two.
-
-**The cap refusal was slow.** On every over-cap mesh the facade built the
-whole solid (unify included) and only then counted faces: 3–15 s per file
-(`own/kuglbahn-pillar-base.stl` 12.8 s for 19,883 faces,
-`own/spool-screw-v4.1.stl` 10.4 s, `third-party/vented-funnel.stl` 9.8 s).
-Now a private `facetedMeshCounts()` runs first, from the triangle buffers
-alone: adjacent triangles (sharing a node-index edge) whose unit normals
-agree within 1e-3 rad and whose planes agree within 1e-3 mm — the tolerances
-`ShapeUpgrade_UnifySameDomain` gets — are one face, with a union-find over
-the triangles; a zero-area triangle joins a neighbour; the number of groups
-is the estimate. A circle of `uses` sorted by edge key is linear-ish and
-costs single-digit ms on these files (every refusal is now under 25 ms).
-Over `FACETED_FACE_CAP` the facade refuses at once with "Faceted would give
-about N faces; …" (the word "about" is new: the estimate can be off by a few
-faces). The old after-unify count stays a backstop; its message is unchanged
-(no "about"). The estimate matched the exact count for 12 of the 18
-non-capped files measured and was within 5 % for 17;
-`own/trashcan-repair-foot.stl` was the outlier (387 estimated vs 275 exact,
-+41 %; `UnifySameDomain` merges more than the edge rule sees).
-
-**Six meshes the importer accepted as closed were refused** with "Mesh to
-Solid couldn't make a closed solid from this mesh …". The stage was the
-`BRepCheck_Analyzer` on the solid, before unify, and its shell status was
-`BRepCheck_NotConnected`: every one of the six is a body of **several
-disjoint closed shells** (a multi-part STL), and putting all their faces in
-one `TopoDS_Shell` is not a connected shell. `wyze-garage-bracket` has 2
-shells, `mirna-doodle-1` 5, `battery-power-adapter` 2, `phone-stand-foldable`
-2, `whiteboard-tray-v5` 7, `gear-bearing-5` 7. **Fix:** the facade groups the
-faces by shared edge (a union-find over the OCCT edges) and builds one shell,
-`BRepBuilderAPI_MakeSolid`, `ShapeFix_Solid` and `ShapeUpgrade_UnifySameDomain`
-per shell; one shell gives the solid as before, several give a compound
-(`splitSolids` splits it into bodies, ADR-0030). `mirna-doodle-1` (198 faces)
-and `wyze-garage-bracket` (945 faces) now convert, valid, volume unchanged to
-the mesh; the other four were always over the face cap (8,152 / 7,851 /
-7,938 / 16,987 estimated) and are now refused at the pre-count, quickly. No
-mesh with one shell changes (same face counts, validity and volume).
-
-**A truly non-manifold mesh still refuses, and now names the reason.**
-`facetedMeshCounts()` also counts edges shared by more than two triangles,
-edges used by one (open), and pinched vertices (a vertex whose triangles
-belong to more than one edge-connected shell). Each has a message: "Mesh to
-Solid couldn't make a closed solid from this mesh: 3 edges are shared by more
-than two triangles. Repair it in your slicer or a mesh tool and try again."
-(and "1 edge has only one triangle." / "1 vertex joins shells that only touch
-at a point."; the counts pluralise). The generic message stays for anything
-else. The importer rejects open and non-manifold-edge meshes before this, so
-only a direct `Kernel.meshToSolid` call, or a pinched-vertex mesh
-(`checkManifold` counts edges, not vertices), reaches those clauses.
-
-The fast loop is harness case `g` (`STL_DIR=… FILE=… bash
-spikes/stl-to-solid/run.sh prismatic g`): faceted on one corpus file. Tests
-in the faceted `describe` of `packages/kernel/src/mesh-to-solid.test.ts`: a
-two-cube mesh converts into a compound of two solids; a mesh whose two cubes
-touch at a single vertex is refused with "vertex joins shells that only touch
-at a point"; the cap-refusal test asserts the refusal takes under 1 s.
 
 ### Amendment, 2026-10-22: hardening slice D
 
@@ -1883,3 +1888,9 @@ there; the confirm itself is instant. (4) Faceted's cap stays unreachable for
 desk-organizer-module-small and whiteboard-tray-v5 (their coplanar counts are
 ~15,600 and ~7,900), so a faceted cavity still needs Faceted to fit under the
 cap.
+
+**Decision, 2026-10-24.** The owner kept the skip rule as built: the exact
+stage runs only with no unfit region and at most 500 surfaces. drill-block's
+result, a hybrid with 388 faces and 208 facets, is preferred to the exact
+93-face result that left 3 small regions out: it is faithful, and the Result
+line says what stayed facets.

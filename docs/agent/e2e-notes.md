@@ -1075,7 +1075,7 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
 ### `e2e/mesh-to-solid.spec.ts`
 
 - **Mesh to Solid region preview e2e** (`e2e/mesh-to-solid.spec.ts`, P4-13
-  slice 4b, ADR-0097's 2026-10-22 amendment): its own helpers (it doesn't
+  slice 4b, ADR-0097's hardening slice C amendment): its own helpers (it doesn't
   touch `import-mesh.spec.ts`): Home › Import Model through the file chooser
   (a path, or `{ name, mimeType, buffer }` for the sphere), OK once the
   Import dialog's `data-preview-status="ok"`, then the body row's right-click
