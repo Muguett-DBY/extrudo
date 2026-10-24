@@ -208,8 +208,11 @@ The **Render Picture tile is ready everywhere**: the web build loses its
   progressive, one `renderSample()` per animation frame so the UI thread
   stays responsive; 128 samples for Standard and 512 for High (Blender's
   numbers, §3), 5 bounces, tiles so that one tile's GPU time stays under ~40 ms
-  (measured with a fence after each tile, the next tile waiting for it, so
-  work never piles up on the GPU the desktop shares). A denoise pass (owner, 2026-10-24) follows the output pass: the library's
+  (measured with a fence after each frame's batch of tiles, the next batch
+  waiting for it, so work never piles up on the GPU the desktop shares). A
+  batch the GPU finished by the next frame doubles, one over the budget
+  halves: a fast GPU is not held to one tile a frame (that cost 7×: 137 s
+  against 20 s for Standard on a GTX 1050 Ti), a slow one gets one small tile. A denoise pass (owner, 2026-10-24) follows the output pass: the library's
   `DenoiseMaterial` (an edge-preserving blur, sigma 5, threshold 0.12) runs on the
   8-bit display values, so the threshold means a colour difference as seen. The
   library's default threshold, 0.03, is below Standard's grain and left it in place. Progress is
@@ -252,6 +255,20 @@ extends with `status()`.
 rendered with Blender on a desktop opens on the web with the row hidden and
 the app engine used; the stored `blender` is kept until the person renders
 there again.
+
+#### 6.5 The workbench's cutting mat (owner, 2026-10-24)
+
+The workbench gets a green cutting mat under the model, in both engines:
+light lines every 10 mm, brighter every 50 mm, numbers in a plain border
+along the two edges that face the automatic camera (front, −y, and right,
++x), counting millimetres from the design's origin. The grid lies on the
+design's coordinates (the placement's offset maps them into the scene), so a
+line runs through the origin. The mat covers the footprint plus
+max(15 mm, ¼ of the model's size), snapped outward to the grid; above 60 cells
+across, the step goes 10 → 50 → 100 → 500 mm, and above 30 cells only the
+major lines are numbered. The dark worktop stays beyond the mat. The app draws
+it to a canvas (`mat.ts`); `render.py` builds the grid as shader maths on the
+world position and the numbers as text objects (bpy only: no image, no numpy).
 
 ### Rejected (the amendment)
 
