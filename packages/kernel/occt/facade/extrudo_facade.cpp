@@ -2920,6 +2920,17 @@ public:
   }
 
   /**
+   * The exact and hybrid rebuild refusals of the last Mesh to Solid call
+   * (tests and the spike harness only), in lastError(). Returns 1.
+   */
+  int meshRefusalDebug() {
+    beginOp();
+    lastError_ = "exact: " + rebuildRefusal_ + " | hybrid: " + hybridRefusal_ + " | exploded " +
+                 std::to_string(hybridExploded_);
+    return 1;
+  }
+
+  /**
    * Probes one plain `BRepOffset_MakeOffset` build of `face` by `distance`
    * (tests and the spike harness only): geometry_ holds [built, IsDone,
    * Error(), result not null, result volume]. The builder's own error code is
@@ -7766,18 +7777,6 @@ private:
     gp_Ax3 frame;
     double radius = 0, majorRadius = 0, semiAngle = 0;
     double uCentre = 0, vCentre = 0;
-    /**
-     * The chart's Geom_Surface, built once and shared by every region on this
-     * surface (ADR-0097's amendment, 2026-10-24). The hybrid splits a surface
-     * that spans more than 3/4 of a turn into pieces, and UnifySameDomain only
-     * merges faces that return the same surface object; a face per piece with
-     * a fresh Geom_Surface each left the split faces, and their extra seam
-     * edges, in the result, which made BRepOffset_MakeOffset build an open
-     * skin (a null solid) for every later Offset Face. A sphere's frame is
-     * chosen per piece (its poles away from that piece's nodes), so it is not
-     * shared.
-     */
-    Handle(Geom_Surface) geom;
 
     bool uPeriodic() const { return kind >= 1; }
     bool vPeriodic() const { return kind == 4; }
@@ -7845,7 +7844,6 @@ private:
       return du.Crossed(dv);
     }
     Handle(Geom_Surface) surface() const {
-      if (!geom.IsNull()) return geom;
       switch (kind) {
         case 1:
           return new Geom_CylindricalSurface(frame, radius);
@@ -7997,9 +7995,6 @@ private:
         }
       }
       for (int t : piece) chartIndex[t] = static_cast<int>(chartOf.size());
-      // One surface object per fitted surface (not a sphere, whose frame is per
-      // piece): the split pieces share it, so UnifySameDomain merges them.
-      if (chart.kind >= 0 && chart.kind != 3) chart.geom = chart.surface();
       chartOf.push_back(chart);
     }
     // The regions: connected pieces of each label, centred on their own angles.
