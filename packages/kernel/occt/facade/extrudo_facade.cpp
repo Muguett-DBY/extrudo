@@ -2970,10 +2970,23 @@ public:
       geometry_.push_back(raw.IsNull() ? -1 : static_cast<double>(raw.ShapeType()));
       geometry_.push_back(static_cast<double>(rawShells));
       geometry_.push_back(static_cast<double>(rawClosed));
+      const std::vector<int> moving{face};
+      const double volume = result.IsNull() ? 0 : exactVolume(result);
+      const double before = exactVolume(copy);
+      const bool valid = !result.IsNull() && BRepCheck_Analyzer(result).IsValid();
+      const bool farKept = !result.IsNull() && farFacesKept(builder, copy, copyFaces, moving, result);
+      const bool good = !result.IsNull() && offsetIsGood(builder, copy, copyFaces, moving, result, distance);
+      geometry_.push_back(good ? 1 : 0);
+      geometry_.push_back(valid ? 1 : 0);
+      geometry_.push_back(volume);
+      geometry_.push_back(before);
+      geometry_.push_back(farKept ? 1 : 0);
       lastError_ = "offset probe: built " + std::to_string(built) + ", done " + std::to_string(builder.IsDone()) +
                    ", error " + std::to_string(static_cast<int>(error)) + ", null " + std::to_string(result.IsNull()) +
                    ", raw kind " + std::to_string(raw.IsNull() ? -1 : static_cast<int>(raw.ShapeType())) + ", shells " +
-                   std::to_string(rawShells) + " (" + std::to_string(rawClosed) + " closed)";
+                   std::to_string(rawShells) + " (" + std::to_string(rawClosed) + " closed), good " +
+                   std::to_string(good) + ", valid " + std::to_string(valid) + ", volume " + std::to_string(volume) +
+                   " before " + std::to_string(before) + ", farKept " + std::to_string(farKept);
       return 1;
     } catch (...) {
       return failFromException("Probe failed");
