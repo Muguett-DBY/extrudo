@@ -2883,11 +2883,16 @@ public:
       }
       NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> edgeFaces;
       TopExp::MapShapesAndUniqueAncestors(*input, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
-      int freeEdges = 0, overEdges = 0;
+      int freeEdges = 0, overEdges = 0, danglingEdges = 0;
       for (int i = 1; i <= edgeFaces.Extent(); ++i) {
         const int around = edgeFaces(i).Extent();
-        if (around == 1) ++freeEdges;
-        else if (around > 2) ++overEdges;
+        if (around == 1) {
+          ++freeEdges;
+          const TopoDS_Edge edge = TopoDS::Edge(edgeFaces.FindKey(i));
+          if (!BRep_Tool::IsClosed(edge) && !BRep_Tool::Degenerated(edge)) ++danglingEdges;
+        } else if (around > 2) {
+          ++overEdges;
+        }
       }
       int invalidFaces = 0, invalidEdges = 0;
       for (int i = 1; i <= faces.Extent(); ++i)
@@ -2906,13 +2911,15 @@ public:
       geometry_.push_back(static_cast<double>(overEdges));
       geometry_.push_back(static_cast<double>(invalidFaces));
       geometry_.push_back(static_cast<double>(invalidEdges));
+      geometry_.push_back(static_cast<double>(danglingEdges));
       lastError_ = "max tolerance: vertex " + std::to_string(maxVertex) + ", edge " + std::to_string(maxEdge) +
                    ", face " + std::to_string(maxFace) + " mm; " + std::to_string(vertices.Extent()) + " vertices, " +
                    std::to_string(edges.Extent()) + " edges (" + std::to_string(notSameParameter) +
                    " not same-parameter, " + std::to_string(invalidEdges) + " invalid), " +
                    std::to_string(faces.Extent()) + " faces (" + std::to_string(splitSurfaces) +
                    " on a surface another face has, " + std::to_string(invalidFaces) + " invalid), " +
-                   std::to_string(freeEdges) + " free edges, " + std::to_string(overEdges) + " over-shared edges";
+                   std::to_string(freeEdges) + " free edges (" + std::to_string(danglingEdges) +
+                   " dangling, not a seam or degenerate), " + std::to_string(overEdges) + " over-shared edges";
       return 1;
     } catch (...) {
       return failFromException("Diagnose failed");
@@ -2970,7 +2977,10 @@ public:
       geometry_.push_back(raw.IsNull() ? -1 : static_cast<double>(raw.ShapeType()));
       geometry_.push_back(static_cast<double>(rawShells));
       geometry_.push_back(static_cast<double>(rawClosed));
-      const std::vector<int> moving{face};
+      // The same moving set offsetFaces uses: the smooth chain around the face.
+      std::vector<int> chain;
+      smoothChains(copy, copyFaces, chain);
+      const std::vector<int> moving = smoothClosure(chain, std::vector<int>{face});
       const double volume = result.IsNull() ? 0 : exactVolume(result);
       const double before = exactVolume(copy);
       const bool valid = !result.IsNull() && BRepCheck_Analyzer(result).IsValid();
@@ -2981,12 +2991,14 @@ public:
       geometry_.push_back(volume);
       geometry_.push_back(before);
       geometry_.push_back(farKept ? 1 : 0);
+      geometry_.push_back(static_cast<double>(moving.size()));
       lastError_ = "offset probe: built " + std::to_string(built) + ", done " + std::to_string(builder.IsDone()) +
                    ", error " + std::to_string(static_cast<int>(error)) + ", null " + std::to_string(result.IsNull()) +
                    ", raw kind " + std::to_string(raw.IsNull() ? -1 : static_cast<int>(raw.ShapeType())) + ", shells " +
                    std::to_string(rawShells) + " (" + std::to_string(rawClosed) + " closed), good " +
                    std::to_string(good) + ", valid " + std::to_string(valid) + ", volume " + std::to_string(volume) +
-                   " before " + std::to_string(before) + ", farKept " + std::to_string(farKept);
+                   " before " + std::to_string(before) + ", farKept " + std::to_string(farKept) + ", moving " +
+                   std::to_string(moving.size());
       return 1;
     } catch (...) {
       return failFromException("Probe failed");
