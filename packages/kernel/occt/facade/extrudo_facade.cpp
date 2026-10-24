@@ -2933,7 +2933,7 @@ public:
   int meshRefusalDebug() {
     beginOp();
     lastError_ = "exact: " + rebuildRefusal_ + " | hybrid: " + hybridRefusal_ + " | exploded " +
-                 std::to_string(hybridExploded_);
+                 std::to_string(hybridExploded_) + " | cleanup " + sewnNote_;
     return 1;
   }
 
@@ -9574,7 +9574,7 @@ private:
     meshReport_[5] = static_cast<double>(resultTori);
     meshReport_[10] = 0;
     meshReport_[11] = 0;
-    return store(sewnConverted(result, tolerance));
+    return store(closedConverted(result, tolerance));
   }
 
   /** The hybrid rebuild gives up after this much wall-clock time, a deadline of its own (ADR-0097, slice D1). */
@@ -9593,6 +9593,8 @@ private:
   /** The last hybrid rebuild's exploded regions, and why it refused (the spike harness prints them). */
   int hybridExploded_ = 0;
   std::string hybridRefusal_;
+  /** What the last converted-body cleanup did, for meshRefusalDebug (tests and the spike harness). */
+  std::string sewnNote_;
   /** The last hybrid build's chains (slice D3): "chains: 12 collapsed (…), 3 polylines", and why chains stayed polylines. */
   std::string hybridChains_, hybridChainsKept_;
   /** Per recognised region of the last hybrid rebuild, when the spike harness asks (FACES=1). */
@@ -10474,7 +10476,7 @@ private:
       for (int k = 0; k < 5; ++k) meshReport_[1 + k] = static_cast<double>(counts[k]);
       meshReport_[10] = 1;
       meshReport_[11] = static_cast<double>(facets);
-      return store(sewnConverted(result, tolerance));
+      return store(closedConverted(result, tolerance));
     }
     return refuse("invalid after exploding");
   }
@@ -12315,49 +12317,62 @@ private:
   }
 
   /**
-   * A Mesh to Solid result whose faces don't all share their edges -- the
-   * hybrid's collapsed-chain rebuild can leave a chain's edge on one face
-   * only (ADR-0097 amendment, 2026-10-24) -- makes
-   * `BRepOffset_MakeOffset` build a closed skin of nearly no volume, so
-   * Offset Face and Shell fail on the converted body for every distance.
-   * Sew the faces back at `tolerance` and, when that gives a valid solid with
-   * the same face count and fewer free edges, return it; else the input.
+   * A Mesh to Solid result whose faces don't all share their edges -- a mesh
+   * the import repaired can leave a boundary edge on one face only, and the
+   * hybrid rebuild then leaves it dangling (ADR-0097 amendment, 2026-10-24)
+   * -- is not a watertight solid, and `BRepOffset_MakeOffset` builds an
+   * invalid skin of nearly no volume from it, so Offset Face and Shell fail
+   * on the converted body for every distance. Sew the faces back at twice
+   * the largest edge tolerance (at least the conversion tolerance), then try
+   * `ShapeFix_Shape`; keep whichever gives a valid solid with positive
+   * volume, no more faces than the input and fewer free edges. Otherwise the
+   * input is returned unchanged.
    */
-  static TopoDS_Shape sewnConverted(const TopoDS_Shape& input, double tolerance) {
+  TopoDS_Shape closedConverted(const TopoDS_Shape& input, double tolerance) {
     const int before = freeEdgeCount(input);
-    if (before == 0) return input;
-    try {
-      BRepBuilderAPI_Sewing sewing(std::max(1e-5, tolerance), true, true, true, false);
-      sewing.Add(input);
-      sewing.Perform();
-      TopoDS_Shape sewn = sewing.SewedShape();
-      if (sewn.IsNull()) return input;
-      if (sewn.ShapeType() == TopAbs_SHELL) {
-        BRepBuilderAPI_MakeSolid maker(TopoDS::Shell(sewn));
-        if (!maker.IsDone()) return input;
-        sewn = maker.Solid();
-      } else if (sewn.ShapeType() == TopAbs_COMPOUND) {
-        TopoDS_Shape only;
-        int solids = 0;
-        for (TopExp_Explorer it(sewn, TopAbs_SOLID); it.More(); it.Next()) {
-          only = it.Current();
-          ++solids;
-        }
-        if (solids != 1) return input;
-        sewn = only;
-      } else if (sewn.ShapeType() != TopAbs_SOLID) {
-        return input;
-      }
-      if (!BRepCheck_Analyzer(sewn).IsValid()) return input;
-      if (!(volumeOf(sewn) > 0)) return input;
-      if (freeEdgeCount(sewn) >= before) return input;
-      if (faceCount(input) != faceCount(sewn)) return input;
-      return sewn;
-    } catch (const Standard_Failure&) {
-      return input;
-    } catch (...) {
+    if (before == 0) {
+      sewnNote_ = "none (closed)";
       return input;
     }
+    double maxEdgeTolerance = 0;
+    for (TopExp_Explorer it(input, TopAbs_EDGE); it.More(); it.Next())
+      maxEdgeTolerance = std::max(maxEdgeTolerance, BRep_Tool::Tolerance(TopoDS::Edge(it.Current())));
+    const double sewTolerance = std::max(std::max(1e-3, 2 * maxEdgeTolerance), tolerance);
+    const int faces = faceCount(input);
+    TopoDS_Shape best = input;
+    int bestFree = before;
+    std::string note = "free " + std::to_string(before);
+    try {
+      BRepBuilderAPI_Sewing sewing(sewTolerance, true, true, true, false);
+      sewing.Add(input);
+      sewing.Perform();
+      const TopoDS_Shape sewn = asSolid(sewing.SewedShape());
+      if (!sewn.IsNull() && BRepCheck_Analyzer(sewn).IsValid() && volumeOf(sewn) > 0 &&
+          faceCount(sewn) <= faces && freeEdgeCount(sewn) < bestFree) {
+        best = sewn;
+        bestFree = freeEdgeCount(sewn);
+        note += " -> sewn " + std::to_string(bestFree);
+      }
+    } catch (const Standard_Failure&) {
+    } catch (...) {
+    }
+    if (bestFree > 0) {
+      try {
+        ShapeFix_Shape healer(input);
+        healer.Perform();
+        const TopoDS_Shape fixed = healer.Shape();
+        if (!fixed.IsNull() && BRepCheck_Analyzer(fixed).IsValid() && volumeOf(fixed) > 0 &&
+            faceCount(fixed) <= faces && freeEdgeCount(fixed) < bestFree) {
+          best = fixed;
+          bestFree = freeEdgeCount(fixed);
+          note += " -> fixed " + std::to_string(bestFree);
+        }
+      } catch (const Standard_Failure&) {
+      } catch (...) {
+      }
+    }
+    sewnNote_ = note + " (sew tol " + std::to_string(sewTolerance) + ")";
+    return best;
   }
 
   /**
