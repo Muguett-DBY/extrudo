@@ -2942,13 +2942,27 @@ public:
       TopoDS_Shape result;
       const bool built = buildOffset(builder, copy, copyFaces, std::vector<int>{face}, distance, result);
       const BRepOffset_Error error = builder.Error();
+      // The builder's own shape, before asSolid: what shape kind it is, how
+      // many shells, and how many of them close (a null result from asSolid
+      // means its shape wasn't a closeable solid).
+      const TopoDS_Shape raw = builder.Shape();
+      int rawShells = 0, rawClosed = 0;
+      for (TopExp_Explorer shell(raw, TopAbs_SHELL); shell.More(); shell.Next()) {
+        ++rawShells;
+        if (BRep_Tool::IsClosed(TopoDS::Shell(shell.Current()))) ++rawClosed;
+      }
       geometry_.push_back(built ? 1 : 0);
       geometry_.push_back(builder.IsDone() ? 1 : 0);
       geometry_.push_back(static_cast<double>(error));
       geometry_.push_back(result.IsNull() ? 0 : 1);
       geometry_.push_back(result.IsNull() ? 0 : exactVolume(result));
+      geometry_.push_back(raw.IsNull() ? -1 : static_cast<double>(raw.ShapeType()));
+      geometry_.push_back(static_cast<double>(rawShells));
+      geometry_.push_back(static_cast<double>(rawClosed));
       lastError_ = "offset probe: built " + std::to_string(built) + ", done " + std::to_string(builder.IsDone()) +
-                   ", error " + std::to_string(static_cast<int>(error)) + ", null " + std::to_string(result.IsNull());
+                   ", error " + std::to_string(static_cast<int>(error)) + ", null " + std::to_string(result.IsNull()) +
+                   ", raw kind " + std::to_string(raw.IsNull() ? -1 : static_cast<int>(raw.ShapeType())) + ", shells " +
+                   std::to_string(rawShells) + " (" + std::to_string(rawClosed) + " closed)";
       return 1;
     } catch (...) {
       return failFromException("Probe failed");
@@ -7752,6 +7766,18 @@ private:
     gp_Ax3 frame;
     double radius = 0, majorRadius = 0, semiAngle = 0;
     double uCentre = 0, vCentre = 0;
+    /**
+     * The chart's Geom_Surface, built once and shared by every region on this
+     * surface (ADR-0097's amendment, 2026-10-24). The hybrid splits a surface
+     * that spans more than 3/4 of a turn into pieces, and UnifySameDomain only
+     * merges faces that return the same surface object; a face per piece with
+     * a fresh Geom_Surface each left the split faces, and their extra seam
+     * edges, in the result, which made BRepOffset_MakeOffset build an open
+     * skin (a null solid) for every later Offset Face. A sphere's frame is
+     * chosen per piece (its poles away from that piece's nodes), so it is not
+     * shared.
+     */
+    Handle(Geom_Surface) geom;
 
     bool uPeriodic() const { return kind >= 1; }
     bool vPeriodic() const { return kind == 4; }
@@ -7819,6 +7845,7 @@ private:
       return du.Crossed(dv);
     }
     Handle(Geom_Surface) surface() const {
+      if (!geom.IsNull()) return geom;
       switch (kind) {
         case 1:
           return new Geom_CylindricalSurface(frame, radius);
@@ -7970,6 +7997,9 @@ private:
         }
       }
       for (int t : piece) chartIndex[t] = static_cast<int>(chartOf.size());
+      // One surface object per fitted surface (not a sphere, whose frame is per
+      // piece): the split pieces share it, so UnifySameDomain merges them.
+      if (chart.kind >= 0 && chart.kind != 3) chart.geom = chart.surface();
       chartOf.push_back(chart);
     }
     // The regions: connected pieces of each label, centred on their own angles.
