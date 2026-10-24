@@ -3247,3 +3247,45 @@ wrapper in worker code kills the kernel worker with `$RefreshReg$ is not
 defined`, which no CI run sees: e2e uses production builds, so check
 `pnpm dev` after touching the plugin's options); nothing that makes a
 WebGL context runs in the view's first render when it can run earlier.
+
+ADR-0101 (P6-15, proposed 2026-10-23) adds **Render Picture with Blender** (desktop only).
+`apps/desktop/src/main/blender.ts` is pure over an injected environment like `slicers.ts`:
+`findBlender` (the `blender.path` preference wins; then PATH, Flatpak `org.blender.Blender`,
+Snap, Steam, Windows `Blender Foundation` folders newest first, `/Applications/Blender.app`),
+`blenderVersion` (**4.2 or newer**), `renderInBlender` (writes `model.obj`, `model.mtl`,
+`job.json` and the bundled `render.py` under `<temp>/extrudo-render-<8 hex>`, a direct child of
+temp, runs `blender -b --factory-startup -noaudio --python render.py [-f 1] -- job.json out.png`
+(`-f 1` for Standard and High: a script-started render prints no progress in Blender 5.x, so the
+script only builds the scene and Blender's own render follows, saving `out1.png`; Draft renders in
+the script, keeping its EEVEE → Cycles fallback; a draft whose Blender crashed without the script's `EXTRUDO ERROR` line, the Windows crash handler's `Thread : …` lines included, runs once more with `"eevee": false` in job.json, so a machine without a usable GPU still gets its draft from Cycles), parses progress from stdout (its own `EXTRUDO
+<phase>` lines, `Sample n/m`, `Finished`/`Saved:`), reads the PNG back, removes the folder; one
+render at a time; Cancel kills the process). The automatic camera fits the model's box corners to
+the frame along the home direction; every floor is far bigger than the frame reaches. `blenderService.ts` validates every job field before anything is written;
+channels `extrudo:render:status`/`extrudo:render:start`/`extrudo:render:cancel`/`extrudo:render:progress`. **Rules:** the
+scenes (`studio`, `table`, `workbench`, `outdoor`) and finishes (`matte`, `glossy`,
+`translucent`, `resin`, `metal`, `wood`) are **built by `render.py` in Python**, no `.blend`
+or texture files in the repository; the base colour is always the body's colour; the enums
+are `packages/core/src/render.ts`'s (`RENDER_PRESETS`, `RENDER_FINISHES`, `RENDER_QUALITIES`)
+and the schema, the dialog and main's validation all import them. The renderer builds the OBJ
+itself with `@extrudo/io`'s `writeObj` (one `o` per body, MTL `Kd` from the colour,
+millimetres, Z up; the script imports at `global_scale=0.001`) and never sees a path. The
+settings are the document's optional `render` section (`RenderSettingsSchema`: `preset`,
+`finishes` only for bodies changed from `matte`, `camera` `{kind: 'auto' | 'current'}` (default `current`) or
+`{kind: 'view', id}`, `width`/`height` 256–8192, `quality`), written by the `render.set`
+command only when they changed; the picture is never stored. `Platform.render?`
+(`apps/web/src/platform/render.ts`) is absent on the web, where the `render` tile shows its
+"needs the desktop app" hint like `slicer`.
+
+ADR-0101, slice 3 (the UI, 2026-10-23): `apps/web/src/render/renderJob.ts` holds the pure
+helpers (`currentRenderSettings`, `finishOf`, `withFinish`, `settingsChanged`, `jobCamera`,
+`buildRenderJob`, `renderFileName`); `RenderDialog.tsx` is the dialog (`RenderForm` is its body,
+tested in jsdom with Testing Library over a fake `BlenderRenderer`). **Rules:** the `render` tool
+is ready only where `platform.render` exists (`AppShell`'s `canRender`), and the dialog is only
+mounted then; Render dispatches `setRenderSettings` only when `settingsChanged` (one undo step),
+meshes every **shown** body at `RESOLUTIONS.medium`, builds the job with `writeObj` and hands it
+to `platform.render.render`; closing is refused while meshing or rendering (Esc and overlay
+included), Cancel stops it and unmounting the form cancels a running render. The picture is an
+object URL revoked on Render again and on close; Save uses `files.download`. The Blender path
+is the string preference `blender.path` (Settings › Desktop; empty means search). The blender.org
+link goes through `platform.openLink`, so the desktop allow-list (`apps/desktop/src/main/links.ts`)
+must contain `www.blender.org`.

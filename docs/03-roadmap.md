@@ -1404,6 +1404,25 @@ end to end, faster than in established desktop CAD.
   largest cost was the WebGL probe, now run on the home screen, not the
   bodies' geometry); left unticked for the owner's review.
 
+- [x] **P6-15 Render Picture with Blender** (owner, 2026-10-23; ADR-0101). Done 2026-10-23.
+  FR-3DP-08. A Render Picture tile (3D Print › Output, desktop only) opens a
+  dialog with scene presets (studio, table, workbench, outdoor), a finish per
+  body (the body's colour stays the base colour), the camera (automatic,
+  current, a named view), size and quality; Render writes the settings into
+  the design (`render`), main finds Blender (4.2+; `blender.path` override),
+  writes an OBJ+MTL and a job file and runs Blender headless with a bundled
+  Python script that builds the scene, shows progress with Cancel and the PNG
+  with Save and Copy. Acceptance: with Blender installed, a design renders
+  in each preset and quality and the PNG opens; without it the dialog says so
+  and links the install page and Settings; the web build shows the tile's
+  "needs the desktop app" hint; `writeObj` round-trips through `readObj`;
+  `render` loads and saves and the file-format test passes; `blender.test.ts`
+  covers detection on the three OSes, the version gate, job validation,
+  progress parsing and cancel; the guide page exists. *Deps:* P6-01, P6-02.
+  *Slices:* (1) OBJ writer, enums, schema, command, platform types; (2) main:
+  detection, launch, `render.py` scenes and finishes, channels; (3) the tile,
+  dialog, progress, result, Settings row; (4) docs.
+
 ## Phase 7 — Later (lowest priority, after everything else)
 
 **Owner, 2026-10-14: the last work on the roadmap.** Don't pick a task here

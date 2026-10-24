@@ -163,6 +163,7 @@ for the phase's release, **S** = should, **C** = could.
 | FR-3DP-05 | Clearance and tolerance helpers: a document-level `tolerance` parameter that hole and thread presets use. | S | 4 |
 | FR-3DP-06 | Open the export directly in a slicer (PrusaSlicer, OrcaSlicer, Bambu Studio, Cura) via URL scheme on the web, or by launching the program on desktop. | C | 4 / 6 |
 | FR-3DP-07 | Minimum wall thickness check. | C | 5 |
+| FR-3DP-08 | Render a presentable picture of the design in Blender (desktop, Blender installed): scene presets, a finish per body, the settings saved in the design. | C | 6 |
 
 ### 5.8 Import and export (FR-IO)
 

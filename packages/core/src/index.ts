@@ -77,6 +77,7 @@ export { documentFeatures } from './registry';
 export * from './remint';
 export * from './remove';
 export * from './remove-faces';
+export * from './render';
 export * from './revolve';
 export * from './rib';
 export * from './scale';

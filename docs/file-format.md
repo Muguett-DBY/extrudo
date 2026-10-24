@@ -215,6 +215,7 @@ schema names unknown keys, and a reader leaves them out (section 3).
 | `joints` | array of Joint | no | As-built joints between components, in browser order (section 4.8). Absent means the design has none. |
 | `bodies` | object | yes | Record from body ID to `BodyMeta` (section 4.2). May be empty. Keys are IDs the kernel makes (section 10). |
 | `views` | array of NamedView | yes | Saved camera views (section 4.3). May be empty. |
+| `render` | object | no | Render Picture settings (section 4.9). Absent until the first render. |
 | `configurations` | array of Configuration | no | Named value sets for the customizer (section 5.4). Absent means the design has none. |
 | `attachments` | object | no | Record from attachment ID to Attachment (section 4.5). Absent in designs with no files of their own. |
 | `meta` | object | yes | Section 4.4. |
@@ -432,6 +433,33 @@ The kernel resolves both frames after every recompute at the timeline marker,
 like a feature appended there: a lost frame is the joint's error (Fix
 References repairs it), and a frame on a rolled-back feature makes the joint
 inactive.
+
+### 4.9 `render` (RenderSettings)
+
+What the Render Picture dialog last used (desktop app, ADR-0101; added
+2026-10-23). The dialog writes it when a render starts, so the next render of
+the design starts from the same choices. **The picture itself is never
+stored**: it is derived, and the user saves or copies it from the dialog.
+
+| Field | Type | Required | Meaning |
+|---|---|---|---|
+| `preset` | string | yes | The scene: `studio` (a white sweep), `table` (a wooden table top), `workbench` (a dark worktop) or `outdoor` (the ground under a sunny sky). |
+| `finishes` | object | no | Record from body ID (section 4.2) to a finish: `matte`, `glossy`, `translucent`, `resin`, `metal` or `wood`. Only bodies whose finish isn't `matte` (the default) are listed; an entry for a body that no longer exists is ignored. |
+| `camera` | object (RenderCamera) | yes | Which camera the picture uses, by `kind`: `auto` (the renderer frames the model itself), `current` (the viewport's camera when the render starts) or `view` with the `id` of a saved view (section 4.3). |
+| `width` | integer | yes | Picture width in pixels, 256 to 8192. |
+| `height` | integer | yes | Picture height in pixels, 256 to 8192. |
+| `quality` | string | yes | `draft`, `standard` or `high`: how long the renderer takes. |
+
+```json
+"render": {
+  "preset": "table",
+  "finishes": { "extrude-1:0": "glossy" },
+  "camera": { "kind": "auto" },
+  "width": 1920,
+  "height": 1080,
+  "quality": "standard"
+}
+```
 
 ---
 

@@ -1700,6 +1700,15 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
 - See `e2e/onboarding.spec.ts`: `RECORD_ASSETS=1` only, the demo recorder.
 - `demo: meshToSolid` starts from a mesh, not a design: `demoProject('blank')`, Home › Import Model with `fixtures/demos/meshToSolid.stl` (the demo-designs test writes it), the Import dialog's OK before `record`. Then the Body field picks: `runTool`, wait for the dialog, `pickModel(…, /./)` on the plate's top (the hover is a `face:` kind, not `body:`; a face click *before* the tool selects no body, so the Body field stays empty and OK disabled). Waits: `data-regions` matches `/planes/` (colours on), `previewed`, 600 ms; after `commit` the row loses `data-body-mesh`. The parked pointer must miss the axes (an axis hover lights it orange): `clip.y + 130` at the right edge is clear.
 
+### `e2e/render-tile.spec.ts`
+
+- **Render Picture tile** (P6-15, ADR-0101), web build: the 3D Print tab's Output
+  group has the button "Render Picture" (`exact`), `aria-disabled="true"`; its
+  tooltip reads "Rendering needs the desktop app and Blender (free, blender.org)."
+  (Playwright can't click it: it is not enabled). The dialog needs `platform.render`, which the web
+  build lacks; it is covered by `RenderDialog.test.tsx` (jsdom + Testing Library
+  with a fake renderer). `E2E_PORT=4454`.
+
 ### `e2e/remove-faces.spec.ts`
 
 - **Remove Faces e2e** (`e2e/remove-faces.spec.ts`, P4-13): the dialog is the region
