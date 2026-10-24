@@ -2818,6 +2818,126 @@ public:
   int meshLoopsSize() const { return static_cast<int>(meshLoops_.size()); }
 
   /**
+   * Diagnostics for a built shape (tests and the spike harness only; the app
+   * never calls this). Fills geometry_ with, in order: the largest vertex,
+   * edge and face tolerance (mm), the vertex/edge/face counts, the edges that
+   * aren't SameParameter, the faces that sit on a Geom_Surface another face
+   * also has (one analytic surface split across several faces), the free
+   * edges (one face) and over-shared edges (more than two), and the invalid
+   * faces and edges. Sets lastError() to a readable summary. Returns 1, or 0
+   * on an unknown shape.
+   */
+  int shapeDiagnose(int shape) {
+    beginOp();
+    geometry_.clear();
+    const TopoDS_Shape* input = find(shape);
+    if (input == nullptr) return fail("Diagnose: unknown input shape.");
+    try {
+      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> vertices, edges, faces;
+      TopExp::MapShapes(*input, TopAbs_VERTEX, vertices);
+      TopExp::MapShapes(*input, TopAbs_EDGE, edges);
+      TopExp::MapShapes(*input, TopAbs_FACE, faces);
+      double maxVertex = 0, maxEdge = 0, maxFace = 0;
+      for (int i = 1; i <= vertices.Extent(); ++i)
+        maxVertex = std::max(maxVertex, BRep_Tool::Tolerance(TopoDS::Vertex(vertices(i))));
+      for (int i = 1; i <= edges.Extent(); ++i)
+        maxEdge = std::max(maxEdge, BRep_Tool::Tolerance(TopoDS::Edge(edges(i))));
+      for (int i = 1; i <= faces.Extent(); ++i)
+        maxFace = std::max(maxFace, BRep_Tool::Tolerance(TopoDS::Face(faces(i))));
+      int notSameParameter = 0;
+      for (int i = 1; i <= edges.Extent(); ++i)
+        if (!BRep_Tool::SameParameter(TopoDS::Edge(edges(i)))) ++notSameParameter;
+      std::vector<Handle(Geom_Surface)> surfaces;
+      int splitSurfaces = 0;
+      for (int i = 1; i <= faces.Extent(); ++i) {
+        TopLoc_Location location;
+        const Handle(Geom_Surface) surface = BRep_Tool::Surface(TopoDS::Face(faces(i)), location);
+        if (surface.IsNull()) continue;
+        bool seen = false;
+        for (const Handle(Geom_Surface)& other : surfaces) {
+          if (other->IsSame(surface)) {
+            seen = true;
+            break;
+          }
+        }
+        if (seen) ++splitSurfaces;
+        else surfaces.push_back(surface);
+      }
+      NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> edgeFaces;
+      TopExp::MapShapesAndUniqueAncestors(*input, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+      int freeEdges = 0, overEdges = 0;
+      for (int i = 1; i <= edgeFaces.Extent(); ++i) {
+        const int around = edgeFaces(i).Extent();
+        if (around == 1) ++freeEdges;
+        else if (around > 2) ++overEdges;
+      }
+      int invalidFaces = 0, invalidEdges = 0;
+      for (int i = 1; i <= faces.Extent(); ++i)
+        if (!BRepCheck_Analyzer(faces(i)).IsValid()) ++invalidFaces;
+      for (int i = 1; i <= edges.Extent(); ++i)
+        if (!BRepCheck_Analyzer(edges(i)).IsValid()) ++invalidEdges;
+      geometry_.push_back(maxVertex);
+      geometry_.push_back(maxEdge);
+      geometry_.push_back(maxFace);
+      geometry_.push_back(static_cast<double>(vertices.Extent()));
+      geometry_.push_back(static_cast<double>(edges.Extent()));
+      geometry_.push_back(static_cast<double>(faces.Extent()));
+      geometry_.push_back(static_cast<double>(notSameParameter));
+      geometry_.push_back(static_cast<double>(splitSurfaces));
+      geometry_.push_back(static_cast<double>(freeEdges));
+      geometry_.push_back(static_cast<double>(overEdges));
+      geometry_.push_back(static_cast<double>(invalidFaces));
+      geometry_.push_back(static_cast<double>(invalidEdges));
+      lastError_ = "max tolerance: vertex " + std::to_string(maxVertex) + ", edge " + std::to_string(maxEdge) +
+                   ", face " + std::to_string(maxFace) + " mm; " + std::to_string(vertices.Extent()) + " vertices, " +
+                   std::to_string(edges.Extent()) + " edges (" + std::to_string(notSameParameter) +
+                   " not same-parameter, " + std::to_string(invalidEdges) + " invalid), " +
+                   std::to_string(faces.Extent()) + " faces (" + std::to_string(splitSurfaces) +
+                   " on a surface another face has, " + std::to_string(invalidFaces) + " invalid), " +
+                   std::to_string(freeEdges) + " free edges, " + std::to_string(overEdges) + " over-shared edges";
+      return 1;
+    } catch (...) {
+      return failFromException("Diagnose failed");
+    }
+  }
+
+  /**
+   * Probes one plain `BRepOffset_MakeOffset` build of `face` by `distance`
+   * (tests and the spike harness only): geometry_ holds [built, IsDone,
+   * Error(), result not null, result volume]. The builder's own error code is
+   * the OCCT fact an offset refusal rests on. Returns 1, or 0 on a bad
+   * argument.
+   */
+  int offsetProbe(int shape, int face, double distance) {
+    beginOp();
+    geometry_.clear();
+    const TopoDS_Shape* input = find(shape);
+    if (input == nullptr) return fail("Probe: unknown input shape.");
+    try {
+      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> faces;
+      TopExp::MapShapes(*input, TopAbs_FACE, faces);
+      if (face < 0 || face >= faces.Extent()) return fail("Probe: face index out of range.");
+      const TopoDS_Shape copy = BRepBuilderAPI_Copy(*input, true, false).Shape();
+      NCollection_IndexedMap<TopoDS_Shape, TopTools_ShapeMapHasher> copyFaces;
+      TopExp::MapShapes(copy, TopAbs_FACE, copyFaces);
+      BRepOffset_MakeOffset builder;
+      TopoDS_Shape result;
+      const bool built = buildOffset(builder, copy, copyFaces, std::vector<int>{face}, distance, result);
+      const BRepOffset_Error error = builder.Error();
+      geometry_.push_back(built ? 1 : 0);
+      geometry_.push_back(builder.IsDone() ? 1 : 0);
+      geometry_.push_back(static_cast<double>(error));
+      geometry_.push_back(result.IsNull() ? 0 : 1);
+      geometry_.push_back(result.IsNull() ? 0 : exactVolume(result));
+      lastError_ = "offset probe: built " + std::to_string(built) + ", done " + std::to_string(builder.IsDone()) +
+                   ", error " + std::to_string(static_cast<int>(error)) + ", null " + std::to_string(result.IsNull());
+      return 1;
+    } catch (...) {
+      return failFromException("Probe failed");
+    }
+  }
+
+  /**
    * Mesh to Solid's report, 13 doubles: faces, planes, cylinders, cones,
    * spheres, tori, unfit regions, unfit triangles, unfit fraction, suggested
    * tolerance (-1 = none), rebuild (0 exact, 1 hybrid, -1 none: faceted or
@@ -11075,9 +11195,17 @@ private:
    * bisection from 0 (7 steps, so within 0.8 % of `failing`: more would
    * only refine digits the message drops, and a failing build can take a
    * second), or 0 if nothing down to failing / 128 works.
+   *
+   * The smallest step is probed first: most callers fail at every value (a
+   * body OCCT can't offset, shell or fillet at all, e.g. a Mesh to Solid
+   * result before the 2026-10-24 fix), and that answer then costs one build
+   * instead of seven. Under the bisection's own monotonicity assumption the
+   * result is unchanged: when failing / 128 fails, every larger step does
+   * too, so the old loop would have returned 0 as well.
    */
   template <typename Probe>
   static double largestThatWorks(Probe works, double failing) {
+    if (!works(failing / 128.0)) return 0;
     double good = 0;
     double bad = failing;
     for (int step = 0; step < 7; ++step) {
