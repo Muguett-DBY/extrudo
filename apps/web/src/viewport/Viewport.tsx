@@ -650,6 +650,7 @@ export function Viewport({
       data-joint-check={jointCheck?.summary}
       data-preview={previewSummary(preview)}
       data-preview-dimmed={preview?.dimmed || undefined}
+      data-preview-regions={preview?.regions?.body}
       className="relative isolate min-w-0 flex-1 overflow-hidden"
       style={{ background: 'var(--x-viewport-glow)' }}
     >
@@ -1050,6 +1051,14 @@ function Scene({
         {...(collisions && { collisions: { faces: collisions, color: colors.thickness } })}
         {...(sectionClip && {
           section: { clips: sectionClip, color: colors.section, hatch: colors.sectionHatch },
+        })}
+        {...(preview?.regions && {
+          regions: {
+            view: preview.regions,
+            plane: colors.regionPlane,
+            curved: colors.regionCurved,
+            unfit: colors.regionUnfit,
+          },
         })}
       />
       {/* Ghost bodies (ADR-0030's amendment): a vague grey shape, no picking or analysis. */}

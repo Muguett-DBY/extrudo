@@ -118,6 +118,8 @@ export function useFeatureDialogs({
         smoothFaces: (body, faces, base, keepRounds) =>
           kernelRef.current?.smoothFaces?.(body, faces, base, keepRounds) ??
           Promise.resolve(undefined),
+        meshRegions: (body, tolerance, base) =>
+          kernelRef.current?.meshRegions?.(body, tolerance, base) ?? Promise.resolve(undefined),
         removeFacesPick: (body, faces, base) =>
           kernelRef.current?.removeFacesPick?.(body, faces, base) ?? Promise.resolve(undefined),
         scadParameters: (file) =>

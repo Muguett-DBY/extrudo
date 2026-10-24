@@ -133,6 +133,34 @@ describe('the agent tools (ADR-0087 §5)', () => {
     expect(plainInput({ kind: 'bool', value: true })).toBe(true);
   });
 
+  it("gives a Mesh to Solid's report with the feature, as its status has it", async () => {
+    const { host, store, model } = plateHost();
+    const [sketch, extrude] = store.getState().doc.features;
+    const report = {
+      method: 'prismatic' as const,
+      faces: 7,
+      planes: 6,
+      cylinders: 1,
+      cones: 0,
+      spheres: 0,
+      tori: 0,
+      unfit: { regions: 0, triangles: 0, fraction: 0 },
+      rebuild: 'exact' as const,
+      facets: 0,
+    };
+    model.getState().computed({
+      features: {
+        [sketch?.id as never]: { status: 'ok' },
+        [extrude?.id as never]: { status: 'ok', meshToSolid: report },
+      },
+      bodies: {},
+    });
+    const detail = jsonOf(await runTool('get_feature', { id: extrude?.id }, context(host)));
+    expect(detail.meshToSolid).toEqual(report);
+    const sketchDetail = jsonOf(await runTool('get_feature', { id: sketch?.id }, context(host)));
+    expect(sketchDetail.meshToSolid).toBeUndefined();
+  });
+
   it('sets a parameter through apply as one undo step named Agent: …', async () => {
     const { host, store, applied } = plateHost();
     const reply = await runTool(

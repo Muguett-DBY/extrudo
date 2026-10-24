@@ -325,6 +325,8 @@ export interface BodyActions {
   remove(ids: readonly BodyId[]): FeatureId | undefined;
   /** Opens the export with these bodies (P2-12); absent where there is no export. */
   exportBodies?(ids: readonly BodyId[]): void;
+  /** Opens Mesh to Solid with this mesh body picked (P4-13, ADR-0097 §5); absent where tools can't start. */
+  convertToSolid?(id: BodyId): void;
   /** Puts bodies into a component, or (`null`) takes them out of theirs: one undo step. */
   moveToComponent(ids: readonly BodyId[], component: ComponentId | null): void;
   /** Makes a component of the bodies (none: an empty one) and returns its ID. */

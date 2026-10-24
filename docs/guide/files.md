@@ -53,7 +53,9 @@ These are in the Home tab's **Import** group.
   new design with the Import Model dialog open.
 - **Import Model** brings in a STEP file, an STL, 3MF or OBJ mesh, or an OpenSCAD `.scad`
   file, as bodies in the current design. A STEP file keeps its exact surfaces. A mesh becomes a
-  [mesh body](./bodies.md) and must be closed. An OpenSCAD file is compiled in your browser, and
+  [mesh body](./bodies.md) and must be closed. **Mesh to Solid** turns it into a solid with
+  real faces when you need to fillet, shell or sketch on it. Tick **As solid** in the Import dialog to do both in
+  one step. An OpenSCAD file is compiled in your browser, and
   its customizer variables show up as fields you can change. The **Up** setting says whether the
   file's up is Z or Y, and a mesh has a **Units** setting. An `.f3d` file picked here opens as a
   new design instead, with its parameters, sketches, pulled solids, fillets and chamfers; a

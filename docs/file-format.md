@@ -1539,6 +1539,30 @@ or trimmed keeps its name**, so later features that refer to it keep finding
 it. The app's pick takes a hole's or a round's faces together; the feature
 stores the faces it got.
 
+### 6.35 `meshToSolid`
+
+Turns an imported mesh body into a B-rep solid with real faces (P4-13,
+ADR-0097). No new keys.
+
+| Input | Kind | Required | Rule |
+|---|---|---|---|
+| `body` | `ref` | yes | One ref of kind `body`: the mesh body to convert. Empty: an error until one is picked. A body that is already a solid is refused |
+| `method` | `enum` | no | `prismatic` (default) recognises planes, cylinders, cones, spheres and tori within `tolerance` and rebuilds analytic faces (exact where the whole mesh fits, otherwise a hybrid that keeps the unfit parts as flat facets); `faceted` keeps every flat facet as a face and refuses a result of more than 5,000 faces |
+| `tolerance` | `expr` | no | Length in millimetres, greater than 0; absent: Auto (the kernel picks from 0.01, 0.02, 0.05 and 0.1 mm the first that fits all but 2 % of the surface); only `prismatic` reads it |
+
+The result **replaces the mesh body under its own body ID**, so the body
+keeps its name, colour and place in the browser; suppressing the feature
+gives the mesh back. The result's faces are named
+`toSolid:<feature>:face:<n>`, `n` the face's position in the result shape,
+with edges and vertices derived; there is no history into the mesh, so a
+reference to such a face survives a recompute until the mesh, the method or
+the tolerance changes. `faceted` refuses a result of more than 5,000 faces
+and `prismatic` more than 500 recognised surfaces, or any region that fits
+no plane, cylinder, cone, sphere or torus. The feature's report of kind
+`meshToSolid` carries `method`, `faces`, `planes`, `cylinders`, `cones`,
+`spheres`, `tori`, `unfit` (`regions`, `triangles`, `fraction`) and, when a
+region fits nothing, a `suggestedTolerance`.
+
 ---
 
 ## 7. Sketch data (`sketchData`)

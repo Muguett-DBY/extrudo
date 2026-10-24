@@ -52,3 +52,4 @@ different geometry model (triangle-mesh CSG, whereas we use exact B-rep).
 | FreeCAD (Sketcher, TNP work in 1.0) | Constraint UX and topological-naming approach | LGPL-2.1 |
 | OpenSCAD (its own WebAssembly snapshot, ADR-0071) | Phase 5 import (P5-04): `.scad` files compiled to mesh bodies | GPL-2.0-or-later (the WASM bundles CGAL: GPL-3.0-or-later) |
 | Manifold | Mesh booleans | Apache-2.0 |
+| [stl2step](https://github.com/BlinkingSun/stl2step) (its `trueform` engine) | STL to analytic STEP on OCCT. Mesh to Solid's hybrid rebuild (ADR-0097, slice D1) takes its idea: start from the mesh's own topology (shared edges, no sewing), one analytic face per recognised region bounded by the region's mesh boundary, the rest planar facets, and a region whose face won't build back to facets. Ideas only, our own code. | MIT |

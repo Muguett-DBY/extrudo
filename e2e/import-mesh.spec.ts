@@ -1,6 +1,7 @@
 import { expect, type Locator, type Page, test } from '@playwright/test';
 import { readStl } from '../packages/io/src/index';
 import {
+  clickEdge,
   exportModel,
   objectsOf3mf,
   ok,
@@ -83,6 +84,9 @@ test('an STL becomes one mesh body, and undo takes it away', async ({ page }) =>
   await expect(panel.locator('[data-info="file"]')).toContainText('cube.stl');
   // A mesh file has its own units, so the dialog offers them (ADR-0066 §2).
   await expect(panel.getByRole('combobox', { name: 'Units' })).toHaveValue('auto');
+  // A mesh import can also convert at once (ADR-0097 §6): the checkbox is
+  // there for a mesh file (a STEP one has none, see import-step.spec.ts).
+  await expect(panel.getByRole('checkbox', { name: 'As solid' })).toBeVisible();
   // The live preview needs manifold-3d in the worker, which the recomputer
   // asks for before this recompute.
   await expect(panel).toHaveAttribute('data-preview-status', 'ok', { timeout: 90_000 });
@@ -480,4 +484,91 @@ test('a mesh body moves, and splits along a plane', async ({ page }) => {
   );
   expect(volumes[0]).toBeCloseTo(4000, -1);
   expect((volumes[0] ?? 0) + (volumes[1] ?? 0)).toBeCloseTo(8000, -1);
+});
+
+// P4-13: Mesh to Solid (ADR-0097). The converted body replaces the mesh under
+// its own name and is a plain solid: every feature works on it again.
+
+test('Convert to Solid… turns the mesh into a six-face solid that fillets', async ({ page }) => {
+  await openProject(page);
+  await kernelReady(page);
+  await cubeBody(page);
+
+  // The browser row's menu opens Mesh to Solid with this body picked.
+  await bodyRow(page).click({ button: 'right' });
+  await page.getByRole('menuitem', { name: 'Convert to Solid…' }).click();
+  const toSolid = page.getByRole('region', { name: 'Mesh to Solid dialog' });
+  await expect(toSolid).toBeVisible();
+  await expect(toSolid.getByRole('button', { name: 'Body', exact: true })).toHaveText('Body1');
+  await expect(toSolid.getByRole('combobox', { name: 'Method' })).toHaveValue('prismatic');
+  await expect(toSolid).toHaveAttribute('data-preview-status', 'ok', { timeout: 90_000 });
+  await ok(page, toSolid);
+  await expect(chip(page, 'Mesh to Solid1')).toBeVisible();
+
+  // Six real faces, and no longer tagged "Mesh".
+  await expect
+    .poll(async () => bodies(page), { timeout: 60_000 })
+    .toEqual([{ name: 'Body1', faces: 6, size: [20, 20, 20] }]);
+  await expect(bodyRow(page)).not.toHaveAttribute('data-body-mesh');
+  await expect(bodyRow(page)).not.toContainText('Mesh');
+
+  // A fillet works on the converted body: the cube's top-front edge, whose
+  // midpoint is [10, 0, 20] (the cube spans 0…20 on each axis).
+  const at = await turnView(page, 'Shift+1');
+  await solidTab(page);
+  await pickTool(page, 'Fillet');
+  const fillet = page.getByRole('region', { name: 'Fillet dialog' });
+  await expect(fillet).toBeVisible();
+  await clickEdge(page, at, [10, 0, 20]);
+  await expect(fillet.getByRole('button', { name: 'Edges', exact: true })).toHaveText('1 edge');
+  await fillet.getByRole('textbox', { name: 'Radius', exact: true }).fill('2 mm');
+  await expect(fillet).toHaveAttribute('data-preview-status', 'ok', { timeout: 15_000 });
+  await fillet.getByRole('button', { name: 'OK' }).click();
+  await expect(fillet).toBeHidden();
+  await kernelReady(page);
+  await expect
+    .poll(async () => bodies(page), { timeout: 60_000 })
+    .toEqual([{ name: 'Body1', faces: 7, size: [20, 20, 20] }]);
+
+  // Undo takes the fillet and the conversion back: the mesh face again.
+  await page.keyboard.press('Control+z');
+  await page.keyboard.press('Control+z');
+  await expect
+    .poll(async () => bodies(page), { timeout: 60_000 })
+    .toEqual([{ name: 'Body1', faces: 1, size: [20, 20, 20] }]);
+  await expect(bodyRow(page)).toHaveAttribute('data-body-mesh');
+});
+
+test('Import with As solid gives a converted body in one undo step', async ({ page }) => {
+  await openProject(page);
+  await kernelReady(page);
+
+  const panel = await importFile(page, CUBE_STL);
+  const asSolid = panel.getByRole('checkbox', { name: 'As solid' });
+  await expect(asSolid).toBeVisible();
+  await expect(asSolid).not.toBeChecked();
+  await asSolid.check();
+  await expect(panel).toHaveAttribute('data-preview-status', 'ok', { timeout: 90_000 });
+  await panel.getByRole('button', { name: /^OK/ }).click();
+
+  // Two chips, and the converted body: six real faces, no "Mesh" tag.
+  await expect(chip(page, 'Import1')).toBeVisible();
+  await expect(chip(page, 'Mesh to Solid1')).toBeVisible();
+  await expect
+    .poll(async () => bodies(page), { timeout: 60_000 })
+    .toEqual([{ name: 'Body1', faces: 6, size: [20, 20, 20] }]);
+  await expect(bodyRow(page)).not.toHaveAttribute('data-body-mesh');
+
+  // One undo step takes the conversion and the import away together, and
+  // redo brings both back.
+  await page.keyboard.press('Control+z');
+  await expect(chip(page, 'Import1')).toHaveCount(0);
+  await expect(chip(page, 'Mesh to Solid1')).toHaveCount(0);
+  await expect.poll(async () => (await bodies(page)).length).toBe(0);
+  await page.keyboard.press('Control+Shift+z');
+  await expect(chip(page, 'Import1')).toBeVisible();
+  await expect(chip(page, 'Mesh to Solid1')).toBeVisible();
+  await expect
+    .poll(async () => bodies(page), { timeout: 60_000 })
+    .toEqual([{ name: 'Body1', faces: 6, size: [20, 20, 20] }]);
 });

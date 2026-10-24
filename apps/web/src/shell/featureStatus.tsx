@@ -1,8 +1,13 @@
-import type { Feature, FeatureStatus } from '@extrudo/core';
+import { type Feature, type FeatureStatus, meshToSolidSummary } from '@extrudo/core';
 import { TriangleAlert, X } from 'lucide-react';
 
 export function scriptChipHint(status?: FeatureStatus): string | undefined {
   return status?.script ? `made ${status.script.generated.length} features` : undefined;
+}
+
+/** A Mesh to Solid chip's line (ADR-0097 §4): what the conversion made, "6 planes · 0 unfit". */
+export function meshToSolidChipHint(status?: FeatureStatus): string | undefined {
+  return status?.meshToSolid && meshToSolidSummary(status.meshToSolid);
 }
 
 /** A feature's problem as the timeline and the browser show it: a warning or an error. */

@@ -13,7 +13,14 @@ import type { SmoothKind, SubShapeKind } from './history';
 import { type Inspection, type InspectTarget, inspectShapes } from './inspect';
 import { type Interference, interferences } from './interference';
 import { checkJoint, type JointCheck, type JointCheckRequest } from './joints/check';
-import { type HeapUsage, Kernel, KernelError, type KernelStats, type ShapeHandle } from './kernel';
+import {
+  type HeapUsage,
+  Kernel,
+  KernelError,
+  type KernelStats,
+  type MeshRegions,
+  type ShapeHandle,
+} from './kernel';
 import { loadManifold, type ManifoldLoadOptions } from './manifold';
 import type { ExportMesh, MeshOptions } from './mesh';
 import { type StepBody, stepGroups } from './model-export';
@@ -155,6 +162,12 @@ export interface KernelApi {
     base?: boolean,
     keepRounds?: boolean,
   ): Promise<SmoothFaces | undefined>;
+  /**
+   * Mesh to Solid's region preview (ADR-0097 §5) of a mesh body (`base` as
+   * for `reference`): one surface per triangle and a kind per surface, no
+   * solid built. Undefined if the body is gone; a solid body throws.
+   */
+  meshRegions(body: BodyId, tolerance: number, base?: boolean): Promise<MeshRegions | undefined>;
   /**
    * The faces the Remove Faces dialog and Delete take for a click on each of
    * `faces` of a body: a hole whole, a round's smooth run, else the face
@@ -465,6 +478,10 @@ export class KernelService implements KernelApi {
     keepRounds = false,
   ): Promise<SmoothFaces | undefined> {
     return this.#run(() => this.#engineOf().smoothFaces(body, faces, base, keepRounds));
+  }
+
+  meshRegions(body: BodyId, tolerance: number, base = false): Promise<MeshRegions | undefined> {
+    return this.#run(() => this.#engineOf().meshRegions(body, tolerance, base));
   }
 
   removeFacesPick(

@@ -2826,6 +2826,297 @@ Ctrl+Space opens the list on an empty word. The list is a Radix Popover (portall
 `textbox` role with `aria-autocomplete`, `aria-controls`, `aria-activedescendant`, and
 `data-keep-escape` while the list is open.
 
+ADR-0097 (P4-13, issue #95) adds **Mesh to Solid**: feature `meshToSolid`
+(`packages/kernel/src/features/mesh-to-solid.ts`, core `meshToSolidFeature`)
+with `body` (one mesh body), `method` `prismatic` | `faceted` and
+`tolerance` (mm), `bodyAccess: 'write'`; the result **replaces the mesh body
+under its own `BodyId`** and its faces are named `toSolid:<feature>:face:<n>`
+in the result's face order (edges and vertices derived, no history into the
+mesh). `Kernel.meshToSolid(shape, options)` takes a mesh handle only, feeds
+the facade through its `meshNodes`/`meshTriangles` buffers written in place
+(read the pointer, write at once: memory growth moves the heap), and returns
+`{ shape, report }`; the facade's `meshToSolid(method, tolerance)` does
+`BRepBuilderAPI_MakeShapeOnMesh` → shell → `MakeSolid` + `ShapeFix_Solid` →
+`UnifySameDomain` (1e-3) → `ShapeFix_Shape` only when invalid, for `faceted`,
+and segmentation + plane/cylinder/cone/sphere/torus fits + `BOPAlgo_MakerVolume` +
+verification for `prismatic`. **Rules:** never fall back from one method to
+the other (the user's choice runs or is refused); refuse faceted above
+`FACETED_FACE_CAP` (2,000 faces after unify, counted before the heavy fix)
+and prismatic's exact rebuild above `PRISMATIC_SURFACE_CAP` (500) or with
+unfit regions over 2 % of the surface (slice C; since slice D1 these skip to
+the hybrid rebuild instead of refusing),
+each message naming the count and the way out (the other method, a higher
+tolerance, the slicer); `MAX_MESH_TRIANGLES` stays the input cap; the report
+(`kind: 'meshToSolid'`: faces, planes, cylinders, cones, spheres, tori, unfit
+regions/triangles/fraction, suggestedTolerance) goes out unchanged through
+the feature status and MCP; the preview colours regions by kind through
+`Kernel.meshRegions` without building a solid. A converted body is a plain
+solid: STEP export includes it, Remove Faces works on it. **Prismatic as
+built** (2026-10-21 amendment, `prismaticFromMesh`/`rebuildPrismatic` in the
+facade): planar regions grow against the seed's plane (corners within the
+tolerance, normal within 1°) and take the area-weighted plane; smooth
+clusters (normals under 30°) fit whole as one plane or cylinder, else their
+regions of 4 × the median area or more become planes and the rest is
+refitted (the fine-tessellation rule; fewer than 4 leftover regions stay
+planes); a smooth cluster fits in the order **plane → cylinder → cone →
+sphere → torus** (`bestFit`; kinds 0/1/2/3/4; the cone before the sphere,
+since a two-ring frustum's nodes also lie on a sphere; `fitMeshTorus` finds
+the spine from the normals) and the peel groups the
+large regions into smooth components too (a dome's coarser cylinder next to a
+finer sphere isn't taken as 64 planes). **The split** (slice 4a2,
+`splitComponent`): an unfit component of ≥ 4 regions is grown into pieces
+from its largest region (a large one, 4 × the median area, is a plane; else
+a patch by longest shared border to 16 nodes, never fitted below 16 nodes
+unless that is all there is; growth by rounds of neighbours whose every node
+is within the tolerance, refitting the same kind), border regions then go to
+the nearer piece; a leftover unfit piece under 4 regions is planes, and one
+of 4 or more drops the split (the component stays one unfit region: the
+ellipsoid must stay refused). A plane's fit is the largest region's own plane
+first (near-tangent fillet facets tilt any other); after the clusters each
+curved surface is refitted without the stray nodes a neighbour explains
+(fillet networks must come out exactly tangent). Cylinders are **snapped** to tangent
+and square planes, adjacent cylinders/spheres/tori with radii (a torus's
+tube) within the tolerance first share one radius, a sphere goes to the
+cylinders it shares a radius with (the point on their axes), a cone to its
+cylinder's or end plane's axis, and a torus to its cylinder's axis
+(`R = r_cyl ∓ r` when within 10 × tolerance) or a square plane's normal, its
+spine plane exactly r from a plane it touches, before
+the faces are made (MakerVolume fails on nearly tangent faces without it; no
+sewing path); faces grow by 10 × tolerance + twice the largest chord error,
+and a curved face covers only its nodes' angular range past their largest
+gap (cylinder u, sphere latitude/longitude, torus v; the full turn when the
+gap is under twice the margin plus twice the facet angle: full spheres and
+tubes meet their neighbours along whole tangent circles);
+MakerVolume with `SetAvoidInternalShapes`; cells kept by inside/outside
+sample points; shared faces dropped, then `UnifySameDomain`; verified by
+validity, sampled nodes within the tolerance (all five kinds alike, a face's
+angles moved into its own range) and the volume within
+max(1 %, 2 × Σ area × chord error + tolerance × area) (the sagitta sum is
+doubled: an inscribed mesh's deficit is up to ~1.5 × it). The dialog legend says
+**Curved** for every non-planar kind (kinds 1–4 draw in one colour). Measure a
+change with `bash spikes/stl-to-solid/run.sh prismatic` (the facade natively,
+float32 nodes) before a CI build. The one-step import path is done (2026-10-21): the
+Import dialog's `solid` toggle ("As solid", mesh files only, create mode
+only) appends the `meshToSolid` feature (Prismatic, default tolerance, at
+the import's index + 1) to the dialog's `commitWith` commands, so one undo
+step holds the attachment record, the `import` and the conversion; the
+toggle is a dialog value, never an input of `import` (its `toInputs` builds
+the inputs by hand and must keep no `solid` key).
+**Preview and report** (2026-10-21 amendment):
+the segmentation is one private `segmentMesh` shared by `prismaticFromMesh`
+and `meshRegions` (change it in one place; the preview and the conversion
+must agree), whose per-triangle surface index and per-surface kind (0 plane,
+1 cylinder, 2–4 cone/sphere/torus, −1 unfit; core's `MESH_REGION_KIND`) map
+onto the view's `BodyMesh.indices` / 3 (both come from `Manifold.getMesh()`;
+stage through `Kernel.#stageMesh`, never another order). The report sits on
+`FeatureStatus.meshToSolid` (without `kind`; `sameStatuses` compares it) and
+in `Preview.meshToSolid` / `DialogContext.draftMeshToSolid`; the chip's
+tooltip and `get_feature` show it. The dialog's region preview is the
+generic `FeatureDialogSpec.regions` hook (no feature code in `dialog.ts`):
+asked before the preview, late answers dropped, cleared for faceted and on
+close, edit mode waits for the base. While regions exist the view draws the
+body's de-indexed coloured copy (`regionGeometry`) **in place of** its faces
+and of the drawing, coloured from the tokens (`--x-cat-create` planes,
+`--x-cat-sketch` curved, `--x-error` unfit), never literals. **Hardening
+slice A** (its amendment): every region is on exactly one surface
+after `segmentMesh` (`splitComponent` refits any piece that lost or gained a
+region; the rebuild refuses a region on none rather than index with -1);
+the rebuild after `segmentMesh` has `PRISMATIC_REBUILD_BUDGET_MS` (30 s)
+through `MeshDeadline` (a `Message_ProgressIndicator`; pass its `Start()` to
+every OCCT algorithm in the rebuild that takes a range, and `check()` the
+deadline in every new loop) and refuses past it with "Mesh to Solid gave up
+after 30 s: this mesh has too many surfaces to rebuild exactly. Use
+Faceted, or simplify the mesh in your slicer." (never a trap); same
+surfaces are merged before the snaps, a snap that leaves a surface's own
+nodes outside the tolerance is undone, a decided cell (16 votes, 90 %) is
+skipped by later samples, and a face's margin uses its own and its
+neighbours' chord error. Test real files with
+`packages/kernel/src/mesh-to-solid-files.test.ts`: the owner's public
+fixtures in `fixtures/imports/mesh-to-solid/` (own designs only; downloaded
+models never go into the repository) and, with `STL_DIR=<folder>` (`TOL`,
+`FILE`, `MESH_OUT`), every STL of a folder, where only a trap fails;
+`pnpm check` doesn't need `STL_DIR`. Harness: `f`/`F` cases, `SAN=1`
+(AddressSanitizer), `TIMES=1` (spike README). **Hardening slice C**
+(its amendment): unfit regions covering at most
+`PRISMATIC_UNFIT_ALLOWED` (0.02) of the surface area in total **don't
+refuse**: they stay kind −1 surfaces with no face (skip them in every
+rebuild loop: merge, snap check, faces, samples; their nodes are skipped by
+the node check, the volume check keeps its allowance), each neighbour's face
+grows by the gap the region leaves (per node, the distance to the second
+nearest neighbour's nearest node), and the report's `unfit` keeps what was
+left out; when that rebuild fails the user gets the **unfit** refusal (with a
+tolerance that converted, if the retry found one), over 2 % it refuses as
+before. A failed rebuild (not past the budget) retries segmentation and
+rebuild at 2 T and 5 T within the same `MeshDeadline`; the first that
+converts is named ("couldn't rebuild … within T mm. Raise the tolerance to X
+mm, or use Faceted."), its result released, the report and stage times kept
+from T. Unify that breaks a valid cells' solid is undone (the split faces
+stay) when healing fails. The segmentation is unchanged (two rules tried and
+rejected are in the amendment). The feature
+lives on branch `claude/stl-import-native-solid-e60e8c` until one pull
+request.
+
+**Faceted hardening** (hardening slice B amendment, `facetedFromMesh` in the
+facade): a private `facetedMeshCounts()` runs **before** any build, over the
+triangle buffers, estimating the unified face count (edge-adjacent triangles
+whose unit normals agree within 1e-3 rad and planes within 1e-3 mm are one
+face, with a union-find; a zero-area triangle joins a neighbour). Over
+`FACETED_FACE_CAP * FACETED_ESTIMATE_MARGIN` (`FACETED_ESTIMATE_MARGIN` = 1.5;
+2026-10-22 slice D — the estimate over-counts by up to about 40 % on real
+meshes, so the pre-count refuses only this far over the cap, and between 2,000
+and 3,000 estimated faces the build runs, the exact count deciding) it refuses
+at once with "Faceted would give
+**about** N faces; …" (the "about" marks the estimate; the after-unify count
+stays a backstop and its message has no "about"). The faces are grouped by
+shared edge and **each connected shell becomes its own solid** (one shell
+keeps the plain solid, several give a compound that `splitSolids` splits), so
+a multi-part STL converts instead of failing with `BRepCheck_NotConnected`.
+**Rules:** the estimate precedes the build; a refusal **names the reason**
+(edges shared by more than two triangles / edges used by one / vertices
+joining shells that only touch at a point, in the house style); single-shell
+meshes keep the same face counts, validity and volume.
+**The hybrid rebuild** (2026-10-23 amendment, slice D1; `prismaticFromMesh`,
+`hybridRegions`/`meshLoops`/`MeshChart`, `rebuildHybrid` in the facade):
+prismatic is two stages. The exact rebuild (`rebuildPrismatic`, unchanged)
+runs unless the segmentation rules it out (unfit share over
+`PRISMATIC_UNFIT_ALLOWED`, surfaces over `PRISMATIC_SURFACE_CAP`); when it is
+skipped or refuses (its refusal, an exception, its budget), the hybrid builds
+the solid **from the mesh itself**, on the surfaces **as fitted** (the exact
+stage snaps them in place: keep the copy), with a fresh `MeshDeadline` of
+`HYBRID_BUDGET_MS` (90 s). **Rules:** a hybrid region is a connected piece of
+one surface's triangles (or of the unfit ones); a cylinder, cone, sphere or
+torus region spanning more than 3/4 of a turn (u; a torus's v too) is split
+by triangle-centroid angle, and every piece's periodic parameters are taken
+within half a turn of its own centre (no pcurve wraps); a sphere's frame puts
+its poles away from the nodes. Loops are the boundary mesh edges walked with
+the region on the left, the outer first by parameter-space area, signs
+checked; a node two boundary edges leave explodes the region. **One
+`TopoDS_Vertex` per mesh node, one `TopoDS_Edge` per mesh edge** (a line from
+the lower node to the higher, shared by both faces: never sew); a pcurve per
+(edge, face), the straight (u,v) segment on the edge's own range (a degree-1
+B-spline); the edge tolerance is the sampled distance between its image and
+the chord (× 1.1, at least `HYBRID_EDGE_TOLERANCE_MIN` = 2e-3 mm), its
+vertices raised with it. Each recognised region is one face (its own
+`Geom_Surface`, reversed when the chart's normal disagrees with its
+triangles'), checked alone with `BRepCheck_Analyzer` **right after it is
+built** (an invalid one takes its pcurves off the shared edges); an edge
+tolerance over `HYBRID_EDGE_TOLERANCE_MAX` (1 mm), an invalid face or a throw
+explodes the region; unfit and exploded triangles are planar facets on the
+same edges. Then a solid per mesh shell (a shell of negative mesh volume is a cavity:
+an inner shell of the solid that holds its node, never a solid of its own),
+`UnifySameDomain(true, true, true)`
+at 1e-3 (coplanar facets merge, split pieces merge back), `ShapeFix_Shape`
+only when that is invalid; a face still invalid explodes its regions (unify's
+history), and so does a mesh node no face covers: up to three builds. The
+checks are the exact stage's (validity, every n-th node within the
+tolerance), the volume within max(1 %, 2 Σ area·sag + tolerance × area) over
+the recognised regions. Facets (result faces that only facets made, by
+unify's history) over `HYBRID_FACET_CAP` (4,000 in slice D1; 5,000 since slice
+D2, see the paragraph below; pre-estimated with
+faceted's coplanar rule and refused at once past 1.5 ×) refuse with the share
+rebuilt exactly and the facet count; past its budget it "gave up after 90 s";
+any other hybrid refusal gives the rebuild message (it wins over the unfit
+one; an exception keeps the unfit one), and the 2 T / 5 T retries (exact
+only) run only then. `meshReport_` is 12 doubles, the last two `rebuild` (0
+exact, 1 hybrid, −1 none) and `facets`; core's `MeshToSolidReport` has
+`rebuild?: 'exact' | 'hybrid'` and `facets` (0 for faceted and exact),
+`Kernel.meshRegions` drops both; a hybrid result's summary is "12 planes,
+4 cylinders · 3 unfit regions kept as 318 facets" (kinds count recognised
+faces only), and the dialog's Result line shows a hybrid draft's report in
+place of the region counts. Not the rejected silent faceted fallback: the
+recognised faces are real surfaces and the line says what stayed facets.
+Harness: `FACES=1`, `TIMES=1`, `HYBRID_BUDGET`; tests read the loops through
+the facade's `meshLoopsDebug` (never on `Kernel`).
+
+**ADR-0097 slice D2 (2026-10-23): Auto tolerance, the facet cap at 5,000,
+cavities in Faceted.** A tolerance of 0 or less means **Auto** in
+`meshToSolid`/`meshRegions` (faceted ignores it): `meshAutoTolerance`
+segments at each of `MESH_AUTO_LADDER` (0.01, 0.02, 0.05, 0.1 mm) and stops
+at the first whose `unfitFraction` ≤ `PRISMATIC_UNFIT_ALLOWED` (2 %), reusing
+that step's `MeshSegmentation` (else the smallest share, ties: the smaller);
+each step costs a segmentation. `prismaticFromMesh` runs the exact stage first
+at the chosen tolerance, skips the 2 T / 5 T retries when Auto, and its
+"raise the tolerance" clauses become "Use Faceted, or simplify the mesh in
+your slicer." `meshReport_` is 13 doubles (the 13th the tolerance used in mm;
+−1 for faceted); `MeshToSolidReport` gains `tolerance?: number` and
+`auto?: boolean` (the kernel sets `auto` from ≤ 0), and
+`meshSurfaceSummary`/`meshToSolidSummary` append " · auto 0.05 mm"
+(`formatTolerance`, no trailing zeros). `Kernel.meshToSolid`/`meshRegions`
+document ≤ 0 as Auto; `MeshToSolidSettings` gains `tolerance: number | 'auto'`
+(absent input = Auto; `MESH_TO_SOLID_DEFAULT_TOLERANCE` is gone; the schema
+is unchanged). The dialog gets a `toleranceMode` choice (Auto default, Custom)
+with the `tolerance` expression ("Custom tolerance") shown only for Custom,
+mapping inputs itself (`toInputs`/`fromInputs`: Auto writes no `tolerance`
+input); its regions request passes −1 for Auto. `HYBRID_FACET_CAP` is 5,000.
+`facetedFromMesh` shares the hybrid's cavity rule through
+`solidsWithCavities(shells, insidePoints, meshVolume, …)`: a shell whose solid
+volume is below −1e-6 × max(1, |mesh volume|) is an inner shell of the solid
+that holds one of its nodes, never a solid of its own (none holds it:
+faceted's "a hollow lies in no solid."). Harness: `TOL=auto` (or `AUTO=1` in
+the kernel sweep); `TIMES=1` prints the ladder's `auto <tol>: unfit <share> %`.
+
+**ADR-0097 slice D3 (2026-10-23): the hybrid's boundary chains collapsed.**
+`rebuildHybrid` builds `meshChains` once after `hybridRegions`: runs of
+boundary mesh edges with the same two regions, in the left region's loop
+order, ending at **break nodes** (three or more regions around, an unfit or
+exploded region counting as one, or other than two boundary edges:
+stl2step's I8); a loop with none is one closed chain. Per build, a chain
+between two built recognised regions collapses into one `TopoDS_Edge` on the
+two surfaces' own curve (`surfaceCurves`, `IntAna_QuadQuadGeo` at 1° and the
+tolerance, cached per surface pair; curved|curved pairs only when coaxial
+within 1° and the tolerance, the second moved onto the first's axis;
+coaxial cylinders: the circle through the nodes' mean height, other cylinder pairs IntAna's lines or ellipses; parabola,
+hyperbola, off-axis and more than two curves: none) when **every node is
+within 1.5 × the tolerance** of it, the parameters run strictly one way, a
+circle's or ellipse's span is under a turn (closed: one), and no replaced
+chord's straight pcurve strays past `HYBRID_EDGE_TOLERANCE_MAX` (D1's limit,
+so such regions still explode). Never collapsed: facet islands, two pieces of
+one surface (the split's seam), a chain touching a sphere whose surface is in
+pieces (unify won't merge the pieces across arcs). The edge joins the
+existing end vertices (they never move; inner nodes get none), trimmed to the
+end nodes' parameters; tolerance 1.1 × max(node distances, both pcurves'
+11-point sampled distance), floor `HYBRID_EDGE_TOLERANCE_MIN`, vertices
+raised to it; no `BRepLib::SameParameter`. **Pcurves end exactly at the end
+nodes' chart parameters** (where the face's other pcurves end: an open
+domain skews `BRepGProp`'s volume, +1.8 % measured): a straight degree-1
+B-spline when its image stays within 1.5 × the tolerance of the curve, else
+an interpolating B-spline through samples of the curve's chart parameters
+(continuous across periods, the end offsets blended in), same check; else
+no collapse. `makeFace(…, region)` walks
+each loop from a break node and adds a collapsed chain's edge once, forward
+for the left region. Fallbacks: a face that fails is rebuilt with its chains
+as polylines (built neighbours across them stripped and rebuilt) before its
+region explodes; after unify and in the node check, failing regions with
+collapsed chains get them undone in an extra build (≤ 2) before D1's
+explode; the node check skips collapsed chains' nodes. `hybridChains_` /
+`hybridChainsKept_` and `TIMES=1`'s "hybrid chains: N collapsed (lines,
+circles, ellipses), M polylines"; `FACES=1` a line per chain;
+`meshLoopsDebug` appends the chains (count, then left, right, closed, mesh
+edges, curve type: 0 line, 1 circle, 2 ellipse, −1 none, −2 not a
+candidate). The report is unchanged.
+
+**ADR-0097 slice D4 (2026-10-23): the exact stage only where it can win, Faceted's cap at 5,000, browser timings.**
+`prismaticFromMesh` skips the exact rebuild whenever the segmentation has
+**any unfit region** (`unfitRegions > 0`; slice C's up-to-2 % share that left
+them out is gone) or more than `PRISMATIC_SURFACE_CAP` (500) surfaces;
+`PRISMATIC_UNFIT_ALLOWED` (0.02) stays `rebuildPrismatic`'s own leaving-out
+rule and the Auto ladder's stopping rule, and a skipped exact stage means the
+hybrid (D1–D3) builds the unfit regions as facets. `PRISMATIC_REBUILD_BUDGET_MS`
+is 12,000 (was 30,000) and the "gave up after N s" message takes N from it
+(`thousands` not needed: seconds). `FACETED_FACE_CAP` is 5,000 (was 2,000) and
+**both** faceted cap messages take the number from it through `thousands()`;
+`FACETED_ESTIMATE_MARGIN` stays 1.5. A browser timing script
+(`e2e/mesh-to-solid-timing.spec.ts`, `MESH_TIMING=1`, run by
+`spikes/stl-to-solid/browser-timing.sh`; skipped in CI) times the Convert to
+Solid confirm → body done span and pairs it with the kernel sweep's time. The
+unfit-region rule changes outcomes only on files the exact stage converted by
+leaving unfit regions out: drill-block (exact with 3 unfit left out → hybrid,
+388 faces, at Auto and 0.01 mm) and track-straight-100mm at 0.05 mm (→ hybrid
+219 faces); whiteboard-tray-v5 stays refused but slower (44.8 s at Auto, the
+hybrid alone). The before/after sweep tables (Auto total 377.9 → 187.8 s) and
+the browser/node ratio (median 3.5×, the fixed per-conversion overhead and a
+cold kernel, not the kernel call) are in the amendment.
+
 ADR-0099 (2026-10-23, #78, P4-13) adds **Remove Faces** (`removeFaces`,
 `packages/core/src/remove-faces.ts`, evaluator `packages/kernel/src/features/remove-faces.ts`,
 facade `removeFaces` with `BRepAlgoAPI_Defeaturing`). Rules: **all or nothing** (any

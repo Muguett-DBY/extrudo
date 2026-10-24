@@ -289,12 +289,15 @@ function featureDetail(host: AgentHost, id: string) {
   const feature = doc.features.find((f) => f.id === id);
   if (!feature) return undefined;
   const status = timeline(host).find((f) => f.id === id);
+  // A Mesh to Solid's report (ADR-0097 §4) goes out as the status has it.
+  const meshToSolid = host.model.getState().features[feature.id]?.meshToSolid;
   const base = {
     id: feature.id,
     type: feature.type,
     name: feature.name,
     status: status?.status,
     ...(status?.message && { message: status.message }),
+    ...(meshToSolid && { meshToSolid }),
     suppressed: feature.suppressed,
   };
   if (feature.type === 'sketch') {

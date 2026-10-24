@@ -17,6 +17,7 @@ import {
 import { LineMaterial } from 'three/examples/jsm/lines/LineMaterial.js';
 import { LineSegments2 } from 'three/examples/jsm/lines/LineSegments2.js';
 import { LineSegmentsGeometry } from 'three/examples/jsm/lines/LineSegmentsGeometry.js';
+import type { ViewRegions } from '../features/preview';
 import type { OverhangView } from '../print/overhang';
 import type { SectionClip } from '../section/clip';
 import {
@@ -33,6 +34,7 @@ import { clipPlanes } from './clipPlanes';
 import { capColors, type Rgba } from './colors';
 import { createDotMaterial } from './dots';
 import { createOverhangShading } from './overhangShading';
+import { regionGeometry } from './regionGeometry';
 import { SectionCap } from './SectionCap';
 import {
   curvedFaces,
@@ -89,6 +91,19 @@ export interface BodiesProps {
    * body takes no section cap (the cap's quad is placed in world space).
    */
   posed?: Readonly<Record<BodyId, Matrix12>>;
+  /**
+   * Mesh to Solid's region preview (ADR-0097 §5): the named body's triangles
+   * coloured by surface kind, drawn in place of its faces.
+   */
+  regions?: BodyRegions;
+}
+
+/** A region preview and its colours (`BodiesProps.regions`). */
+export interface BodyRegions {
+  view: ViewRegions;
+  plane: Rgba;
+  curved: Rgba;
+  unfit: Rgba;
 }
 
 /** A pose as a three.js matrix (both are row-major with the translation in the last column). */
@@ -126,6 +141,7 @@ export function Bodies({
   thickness,
   collisions,
   posed,
+  regions,
 }: BodiesProps) {
   const shown = useMemo(
     () =>
@@ -155,6 +171,7 @@ export function Bodies({
       {...(collisions && { error: collisions.color })}
       onSilhouettes={onSilhouettes}
       {...(posed?.[id] && { pose: posed[id] })}
+      {...(regions?.view.body === id && { regions })}
       {...(overhang && { overhang })}
       {...(thickness && { thickness: { thin: thickness.thin[id], color: thickness.color } })}
       {...(section &&
@@ -191,6 +208,7 @@ function Body({
   overhang,
   thickness,
   pose,
+  regions,
 }: {
   id: BodyId;
   mesh: BodyMesh;
@@ -216,6 +234,8 @@ function Body({
   thickness?: { thin: Float32Array | undefined; color: Rgba };
   /** Drawn through this matrix (a joint posed, P6-05 J2). */
   pose?: Matrix12;
+  /** Mesh to Solid's region preview of this body, drawn in place of its faces. */
+  regions?: BodyRegions;
 }) {
   const planes = section?.planes ?? null;
   const group = usePose(pose);
@@ -236,6 +256,7 @@ function Body({
   }, [mesh]);
   useFaceColors(faces, mesh, body, accent, marks.faces, error);
   useThinFlags(faces, thickness?.thin);
+  const regionFaces = useRegionFaces(mesh, regions);
   const edges = useMemo(() => {
     const g = new LineSegmentsGeometry();
     g.setPositions(edgeSegments(mesh));
@@ -283,7 +304,20 @@ function Body({
 
   return (
     <group ref={group} name={bodyObjectName(id)}>
-      {showFaces && (
+      {showFaces && regionFaces && (
+        <mesh geometry={regionFaces}>
+          <meshStandardMaterial
+            vertexColors
+            roughness={0.62}
+            metalness={0.05}
+            polygonOffset
+            polygonOffsetFactor={1}
+            polygonOffsetUnits={1}
+            clippingPlanes={planes}
+          />
+        </mesh>
+      )}
+      {showFaces && !regionFaces && (
         <mesh geometry={faces}>
           <meshStandardMaterial
             // three bakes OPAQUE into the program while `transparent` is false and R3F
@@ -405,6 +439,32 @@ function useFaceColors(
     attribute.addUpdateRange(range[0] * 3, range[1] * 3);
     attribute.needsUpdate = true;
   }, [faces, mesh, body, accent, states, error]);
+}
+
+/**
+ * The de-indexed, coloured copy of a mesh body for a region preview (ADR-0097
+ * §5), built only while one is shown and again when the mesh, the regions or
+ * the theme change. Undefined without regions, or for regions of another mesh.
+ */
+function useRegionFaces(mesh: BodyMesh, regions: BodyRegions | undefined) {
+  const view = regions?.view;
+  const [plane, curved, unfit] = [regions?.plane, regions?.curved, regions?.unfit];
+  const geometry = useMemo(() => {
+    if (!view || !plane || !curved || !unfit) return undefined;
+    const built = regionGeometry(mesh, view, {
+      plane: linear(plane),
+      curved: linear(curved),
+      unfit: linear(unfit),
+    });
+    if (!built) return undefined;
+    const g = new BufferGeometry();
+    g.setAttribute('position', new BufferAttribute(built.positions, 3));
+    g.setAttribute('normal', new BufferAttribute(built.normals, 3));
+    g.setAttribute('color', new BufferAttribute(built.colors, 3));
+    return g;
+  }, [mesh, view, plane, curved, unfit]);
+  useEffect(() => () => geometry?.dispose(), [geometry]);
+  return geometry;
 }
 
 /** One compiled program for both analysis patches; their settings are uniforms. */

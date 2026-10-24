@@ -1053,6 +1053,67 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
   body **in creation order**, so a mesh target and a solid tool warn about
   nothing.
 
+- **Convert to Solid e2e** (the file's last test, P4-13, ADR-0097):
+  right-click the row (`bodyRow(page).click({ button: 'right' })`) and click
+  the `menuitem` named "Convert to Solid…" (the browser row's own Radix menu,
+  the same pattern as `e2e/bodies.spec.ts`), which opens the region "Mesh to
+  Solid dialog" with the body already picked — the `Body` button reads
+  "Body1", not the "Pick a mesh body" prompt — and the `Method` combobox is
+  `toHaveValue('prismatic')` (the default since slice 3; the cube converts to 6 planes either way); wait up to 90 s for `data-preview-status="ok"` and
+  commit through `ok()`. The chip is "Mesh to Solid1"; the converted body
+  keeps the name "Body1" and polls to `faces: 6, size: [20, 20, 20]`, its row
+  losing `data-body-mesh` and the "Mesh" text. The fillet after it:
+  `pickTool(page, 'Fillet')` first, then `clickEdge(page, at, [10, 0, 20])` —
+  the cube fixture spans 0…20, so the top-front edge's midpoint is
+  `[10, 0, 20]` in the home view (`Shift+1`; it picked first try, the fallback
+  `[20, 10, 20]` was never needed), the Radius textbox takes "2 mm", and one
+  filleted edge adds one face: `faces: 7`. Two `Control+z` are back to one
+  face with `data-body-mesh="true"`.
+
+- **As solid e2e** (the file's last test, P4-13 slice 4c, ADR-0097 §6): the
+  Import dialog's toggle is a plain `<input type="checkbox">`, so the
+  selector is `panel.getByRole('checkbox', { name: 'As solid' })` — visible
+  for a mesh file only (the plain-STL test asserts it too), absent for a STEP
+  file (`e2e/import-step.spec.ts`'s first test) and absent when editing (an
+  edit can't add a feature). Ticking it, waiting for
+  `data-preview-status="ok"` (90 s) and OK give two chips, "Import1" and
+  "Mesh to Solid1", one body polling to `faces: 6` with the row losing
+  `data-body-mesh`; one `Control+z` takes both chips and the body away in the
+  one undo step, `Control+Shift+z` brings both back. The spec is now **12
+  tests, 41.6 s**.
+
+### `e2e/mesh-to-solid.spec.ts`
+
+- **Mesh to Solid region preview e2e** (`e2e/mesh-to-solid.spec.ts`, P4-13
+  slice 4b, ADR-0097's hardening slice C amendment): its own helpers (it doesn't
+  touch `import-mesh.spec.ts`): Home › Import Model through the file chooser
+  (a path, or `{ name, mimeType, buffer }` for the sphere), OK once the
+  Import dialog's `data-preview-status="ok"`, then the body row's right-click
+  menu → "Convert to Solid…" opens the region "Mesh to Solid dialog". The
+  dialog region carries **`data-regions="6 planes, 0 cylinders, 0 unfit"`**
+  while a region preview is shown (absent for Faceted; spheres, cones and tori appear only when there are some: "…, 1 sphere, 2 tori, 0 unfit"); the Result line is
+  `[data-info="summary"]` ("6 planes · 0 unfit", "1 unfit", "6 faces" for
+  Faceted once its preview is back) with its swatches in
+  `[data-legend="summary"]` (Prismatic only; the second swatch is **Curved**:
+  cylinders, spheres and cones together); the viewport carries
+  **`data-preview-regions="<body id>"`** while the view colours the body.
+  Method is a native select: `selectOption('faceted')`. Since slice D2 the
+  dialog has a **Tolerance** select (Auto, the default, or Custom) and, only
+  for Custom, a **Custom tolerance** expression; the Result line and the
+  chip's report name the kernel's pick as "· auto 0.02 mm", so match the
+  summary with a trailing-optional regex. The second test's
+  shape is an **ellipsoid** (`sphereStl(0.6)`, a UV sphere with its z scaled
+  by 0.6: 12 rings × 22 segments, 484 triangles, r 10 in x/y): it fits no
+  sphere, so `data-regions="0 planes, 0 cylinders, 1 unfit"`; since slice D1
+  (ADR-0097, the hybrid rebuild) the preview is `ok` and the summary turns
+  from "1 unfit" to "1 unfit region kept as N facets" once the draft's
+  report is in (match it with a regex: N is the merged facet count); the
+  regions stay drawn while the method is prismatic.
+  The report on the status shows in the chip's tooltip: hover
+  `Mesh to Solid1`, `getByRole('tooltip')` contains "6 planes · 0 unfit".
+  Two screenshots go to the test's output folder (`ellipsoid-regions.png`,
+  `cube-regions.png`) for a look, not compared. **3 tests, 11.4 s** (4.4–5.8 s each) on the Ubuntu machine with `--workers=2`.
+
 ### `e2e/import-scad.spec.ts`
 
 - **Import OpenSCAD e2e** (`e2e/import-scad.spec.ts`, P5-04 slice 2): the
@@ -1637,6 +1698,7 @@ Moved out of `CLAUDE.md` on 2026-10-12. Read the entries for the specs you write
 ### `e2e/record-assets.spec.ts`
 
 - See `e2e/onboarding.spec.ts`: `RECORD_ASSETS=1` only, the demo recorder.
+- `demo: meshToSolid` starts from a mesh, not a design: `demoProject('blank')`, Home › Import Model with `fixtures/demos/meshToSolid.stl` (the demo-designs test writes it), the Import dialog's OK before `record`. Then the Body field picks: `runTool`, wait for the dialog, `pickModel(…, /./)` on the plate's top (the hover is a `face:` kind, not `body:`; a face click *before* the tool selects no body, so the Body field stays empty and OK disabled). Waits: `data-regions` matches `/planes/` (colours on), `previewed`, 600 ms; after `commit` the row loses `data-body-mesh`. The parked pointer must miss the axes (an axis hover lights it orange): `clip.y + 130` at the right edge is clear.
 
 ### `e2e/remove-faces.spec.ts`
 

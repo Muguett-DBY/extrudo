@@ -3,7 +3,7 @@ title: Plugin feature
 type: plugin
 section: Features
 category: create
-order: 46
+order: 47
 ---
 
 # Plugin feature

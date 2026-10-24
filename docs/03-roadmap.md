@@ -1078,6 +1078,36 @@ end to end, faster than in established desktop CAD.
 
 ---
 
+- [x] **P4-13 Mesh to Solid: an imported mesh becomes a B-rep body.** FR-IO-10
+  (issue #95; #78 and #79 need it for STLs). Added 2026-10-20 (ADR-0097,
+  plan `docs/plans/stl-to-solid-2026-10-20.md`). On its own branch until the
+  whole feature lands in one pull request. *AC:* feature `meshToSolid`
+  (Solid › Modify, and "Convert to solid…" on a Mesh body) replaces a mesh
+  body with a solid under the same body ID; `faceted` merges coplanar
+  triangles into planar faces (≤ 2,000 faces, else a refusal naming the
+  count); `prismatic` recognises planes and cylinders (cones, spheres, tori
+  after) within a tolerance and rebuilds exact faces through
+  `BOPAlgo_MakerVolume` (≤ 500 surfaces), refusing with the unfit regions'
+  count and a suggested tolerance when it can't close the body; the dialog
+  previews the regions by kind and reports the face kinds; faces named
+  `toSolid:<feature>:face:<n>`; a converted body fillets, shells, takes a
+  sketch and exports to STEP like any solid; Vitest on box, cylinder and
+  bracket fixtures, e2e for the dialog and a fillet on the result.
+  *Slices:* (1) facade faceted + kernel; (2) feature, dialog, API, docs,
+  e2e; (3) facade prismatic; (4) preview, more surfaces, clip, guide. Done
+  2026-10-21 on the feature branch (slices 1–4c, 4a1, 4a2 and the clip);
+  hardening slices A–D 2026-10-22; slice D1 (2026-10-23, ADR-0097's
+  amendment): the hybrid rebuild, prismatic's second stage, keeps what fits
+  nothing as facets (≤ 4,000) on shared mesh edges; slice D2 (2026-10-23):
+  Auto tolerance, the facet cap at 5,000, cavities in Faceted; slice D3
+  (2026-10-23): the hybrid's boundary chains between two recognised regions
+  collapsed into one line, circle or ellipse edge where the nodes lie on the
+  surfaces' curve; slice D4 (2026-10-23): the exact rebuild runs only on a
+  segmentation with no unfit region at all (the hybrid keeps those as facets),
+  its budget 30 s → 12 s, Faceted's cap 2,000 → 5,000, and the browser-vs-node
+  timings (Auto total over the 37 files 377.9 → 187.8 s). Next: fillet strips,
+  tangent lines where a plane meets a fillet's cylinder.
+
 ## Phase 5 — Programmatic design (→ v0.6)
 
 - [x] **P5-01 Public document API** (`@extrudo/api`), generated from the feature

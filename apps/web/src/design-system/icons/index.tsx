@@ -84,6 +84,7 @@ export const ICON_NAMES = [
   'offset-face',
   'remove-faces',
   'split-body',
+  'mesh-to-solid',
   'draft',
   'remove',
   'combine',

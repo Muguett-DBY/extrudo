@@ -13,6 +13,7 @@ import { kernelFillet } from './fillet';
 import { kernelHole } from './hole';
 import { kernelImport } from './import';
 import { kernelLoft } from './loft';
+import { kernelMeshToSolid } from './mesh-to-solid';
 import { kernelOffsetFace } from './offset-face';
 import { kernelCircularPattern, kernelPathPattern, kernelRectangularPattern } from './pattern';
 import { kernelPlaceOnBed } from './place-on-bed';
@@ -86,6 +87,8 @@ export function kernelFeatures(): FeatureRegistry<KernelFeatureDefinition> {
   registry.register(kernelImport as unknown as KernelFeatureDefinition);
   // Canvas: a reference image on a plane, drawn by the view (P4-06, ADR-0066 §5).
   registry.register(kernelCanvas as unknown as KernelFeatureDefinition);
+  // Mesh to Solid: an imported mesh becomes a B-rep body (P4-13, ADR-0097).
+  registry.register(kernelMeshToSolid as unknown as KernelFeatureDefinition);
   // Script: code that makes features, run by an injected runner (P5-02, ADR-0070).
   registry.register(kernelScript as unknown as KernelFeatureDefinition);
   // A plugin's custom feature (P6-03, ADR-0077 §3), expanded like a Script.

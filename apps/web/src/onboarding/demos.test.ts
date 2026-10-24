@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import { TABS, TOOLS } from '../shell/tools';
-import { DEMO_TOOLS, demoUrl } from './demos';
+import { DEMO_CLIPS_PENDING, DEMO_TOOLS, demoUrl } from './demos';
 import { ToolDemo } from './ToolDemo';
 
 /** The clips on disk, by file name (their loaders are never called except for sizes). */
@@ -37,6 +37,7 @@ describe('tool demos', () => {
   it('lists exactly the clips on disk, each for a real tool', () => {
     expect([...DEMO_TOOLS].sort()).toEqual(names);
     for (const id of DEMO_TOOLS) expect(Object.keys(TOOLS)).toContain(id);
+    for (const id of DEMO_CLIPS_PENDING) expect(Object.keys(TOOLS)).toContain(id);
   });
 
   it('has a clip for the most used tools', () => {
@@ -48,7 +49,10 @@ describe('tool demos', () => {
       const groups = TABS.find((t) => t.id === tab)?.groups ?? [];
       expect(groups.length).toBeGreaterThan(0);
       const tiles = groups.flatMap((group) => group.tools);
-      expect({ tab, missing: tiles.filter((id) => !DEMO_TOOLS.includes(id)) }).toEqual({
+      expect({
+        tab,
+        missing: tiles.filter((id) => !DEMO_TOOLS.includes(id) && !DEMO_CLIPS_PENDING.includes(id)),
+      }).toEqual({
         tab,
         missing: [],
       });

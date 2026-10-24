@@ -23,6 +23,7 @@ import { filletFeature } from './fillet';
 import { holeFeature } from './hole';
 import { importFeature } from './import';
 import { loftFeature } from './loft';
+import { meshToSolidFeature } from './mesh-to-solid';
 import { mirrorFeature } from './mirror';
 import { moveBodiesFeature } from './move';
 import { offsetFaceFeature } from './offset-face';
@@ -91,6 +92,8 @@ export function documentFeatures(): FeatureRegistry<FeatureDefinition> {
   // Import (a STEP solid or a mesh body) and Canvas (a picture on a plane),
   // ADR-0066.
   registry.register(importFeature).register(canvasFeature);
+  // Mesh to Solid: an imported mesh becomes a B-rep body (P4-13, ADR-0097).
+  registry.register(meshToSolidFeature);
   // Script (P5-02, ADR-0070): code that adds features, run by the kernel.
   registry.register(scriptFeature as FeatureDefinition);
   // A plugin's custom feature (P6-03, ADR-0077 §3): a Script packaged with inputs.

@@ -21,23 +21,32 @@ import {
   type Attachment,
   type AttachmentId,
   addAttachment,
+  type BodyId,
   type Command,
   type DocumentStore,
   type ExtrudoDocument,
+  type Feature,
+  type FeatureId,
   type FeatureInputs,
   IMPORT_UNITS,
   IMPORT_UP,
   type ImportInputs,
   importFeature,
   importInputs,
+  insertFeature,
   isMeshMediaType,
   isScadMediaType,
+  MESH_TO_SOLID_TYPE,
   mediaTypeOf,
+  meshToSolidFeature,
+  meshToSolidInputs,
   modelKind,
   newId,
+  nextFeatureName,
 } from '@extrudo/core';
 import { type ProjectStore, sha256Hex } from '@extrudo/storage';
 import { createStore } from 'zustand/vanilla';
+import { withActiveComponent } from '../components/active';
 import type { FileAccess } from '../platform';
 import { pendingPluginById } from '../plugins/pending';
 import { putAttachmentBytes } from '../sketch/fonts';
@@ -47,7 +56,7 @@ import { type DialogContext, type DialogValues, defineFeatureDialog } from './sp
 import { defaultFromInputs, shownFields } from './values';
 
 /**
- * What the platform's file picker is asked for: the model files of §0, and an
+ * The app's file picker: the model files of §0, and an
  * `.f3d` file, which opens as a new design instead (ADR-0083 §4).
  */
 export const IMPORT_ACCEPT = '.step,.stp,.stl,.3mf,.obj,.scad,.f3d';
@@ -238,6 +247,15 @@ export const importDialog = defineFeatureDialog({
       default: 'z',
       hint: 'Which way the file points up. Y-up files are turned a quarter turn about X.',
     },
+    {
+      kind: 'toggle',
+      name: 'solid',
+      label: 'As solid',
+      default: false,
+      // A mesh only, and only when importing (an edit can't add a feature).
+      shown: (_values, ctx) => (ctx ? isMesh(ctx) && !ctx.feature : false),
+      hint: 'Also run Mesh to Solid on the mesh (Prismatic, Auto tolerance), in the same step. Faces and edges become real, so you can fillet, shell and sketch on the part.',
+    },
   ],
   toInputs(values: DialogValues, ctx: DialogContext): ImportInputs {
     // With no file the inputs are invalid, and `validate` says so in the
@@ -271,15 +289,43 @@ export const importDialog = defineFeatureDialog({
   },
   // An OpenSCAD file's variables, one row each (P5-04 slice 2).
   extra: ScadOverrides,
-  // The attachment record, in the same undo step as the feature (ADR-0066 §0).
-  commitWith(_values: DialogValues, ctx: DialogContext): readonly Command<unknown>[] {
+  // The attachment record, in the same undo step as the feature (ADR-0066 §0);
+  // with As solid ticked, the Mesh to Solid feature right after the import
+  // (ADR-0097 §6), so one undo step holds the file, the import and the conversion.
+  commitWith(values: DialogValues, ctx: DialogContext): readonly Command<unknown>[] {
     const file = importedFile(ctx);
     if (!file || ctx.feature) return [];
+    // Read before the pending file is forgotten below (`importedFile` falls
+    // back to it): As solid adds the conversion when a mesh is being imported.
+    const asSolid = values.toggles.solid === true && ctx.featureId !== undefined && isMesh(ctx);
+    const commands: Command<unknown>[] = [];
     // The same file added again is the attachment that is already there.
-    if (ctx.doc.attachments?.[file.id]) return [];
-    // Committed: the picked file is the design's now.
-    clearPendingImport();
-    return [addAttachment({ id: file.id, attachment: file.attachment })];
+    if (!ctx.doc.attachments?.[file.id]) {
+      // Committed: the picked file is the design's now.
+      clearPendingImport();
+      commands.push(addAttachment({ id: file.id, attachment: file.attachment }));
+    }
+    if (asSolid) {
+      // The import itself lands at the timeline marker (dialog.ts's
+      // `fresh.index`, which is the marker in create mode), so the conversion
+      // goes right after it.
+      const feature: Feature = {
+        id: newId<FeatureId>(),
+        type: MESH_TO_SOLID_TYPE,
+        name: nextFeatureName(ctx.doc, meshToSolidFeature.label),
+        suppressed: false,
+        inputs: meshToSolidInputs(`${ctx.featureId}:0` as BodyId, 'prismatic'),
+      };
+      // Stamped with the active component, as every app insert site is
+      // (ADR-0081 §6): the context carries the session.
+      commands.push(
+        insertFeature({
+          feature: ctx.session ? withActiveComponent(feature, ctx.session) : feature,
+          index: ctx.doc.timelineMarker + 1,
+        }),
+      );
+    }
+    return commands;
   },
 });
 

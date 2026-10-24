@@ -44,7 +44,13 @@ import type { ViewportStore } from '../viewport/store';
 import { webglSupport } from '../viewport/webglSupport';
 import { FeatureMenuItems, GroupMenuItems, RenameField } from './FeatureMenu';
 import type { FeatureActions } from './featureActions';
-import { type FeatureProblem, featureProblem, StatusGlyph, scriptChipHint } from './featureStatus';
+import {
+  type FeatureProblem,
+  featureProblem,
+  meshToSolidChipHint,
+  StatusGlyph,
+  scriptChipHint,
+} from './featureStatus';
 import type { GroupActions } from './groupActions';
 import { chipSelection, edgeScrollStep } from './timelineDrag';
 import {
@@ -554,6 +560,7 @@ function Chip({
   marker: number;
   /** The kernel's verdict; only for active features (`featureProblem`). */
   problem: FeatureProblem | undefined;
+  /** The feature's status: a script's run, a Mesh to Solid's report (their chip hints). */
   scriptStatus?: FeatureStatus | undefined;
   /** "Name plate 1.0.0": the plugin a plugin feature comes from (P6-03 slice 3). */
   pluginHint?: string | undefined;
@@ -593,7 +600,13 @@ function Chip({
     feature.suppressed && 'suppressed',
     problem?.status,
   ].filter(Boolean);
-  const hint = [tool.label, pluginHint, ...states, scriptChipHint(scriptStatus)]
+  const hint = [
+    tool.label,
+    pluginHint,
+    ...states,
+    scriptChipHint(scriptStatus),
+    meshToSolidChipHint(scriptStatus),
+  ]
     .filter(Boolean)
     .join(' · ');
   const chip = (

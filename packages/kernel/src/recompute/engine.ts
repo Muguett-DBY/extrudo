@@ -40,7 +40,7 @@ import { type SmoothFaces, smoothFaces } from '../features/offset-face';
 import { kernelSurface, removeFacesPick } from '../features/remove-faces';
 import type { SmoothKind, SubShapeKind } from '../history';
 import { resolveJoint } from '../joints/frames';
-import { type Kernel, KernelError, type ShapeHandle } from '../kernel';
+import { type Kernel, KernelError, type MeshRegions, type ShapeHandle } from '../kernel';
 import type { MeshOptions } from '../mesh';
 import type { ShapeDescription } from '../naming/description';
 import { fingerprintOf } from '../naming/fingerprint';
@@ -305,6 +305,18 @@ export class RecomputeEngine {
       () => this.#describe(shape),
       keepRounds,
     );
+  }
+
+  /**
+   * Mesh to Solid's region preview (ADR-0097 §5) of a mesh body of the last
+   * finished recompute, or with `base` of the last preview's base (editing
+   * the feature that replaced it): prismatic's segmentation within
+   * `tolerance`, no solid built. Undefined if there is no such body; a solid
+   * body throws `KernelError`.
+   */
+  meshRegions(body: BodyId, tolerance: number, base = false): MeshRegions | undefined {
+    const shape = (base ? this.#previewBase : this.#latest).get(body);
+    return shape === undefined ? undefined : this.#kernel.meshRegions(shape, tolerance);
   }
 
   /**

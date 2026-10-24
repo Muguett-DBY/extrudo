@@ -15,9 +15,11 @@ import { repeatableFeatures } from './featureList';
 import { pickName } from './pickName';
 import type {
   DialogField,
+  DialogRegions,
   FeatureDialogSpec,
   FeatureListField,
   LabelsField,
+  LegendEntry,
   SelectionField,
 } from './spec';
 import { countLabel, pickPrompt, shownFields } from './values';
@@ -46,7 +48,9 @@ export const DIALOG_COLUMN = 280;
  *
  * Test hooks: `data-feature-dialog` (the feature type), `data-dialog-mode`
  * (`create`/`edit`), `data-dialog-valid`, `data-preview-status`
- * (`pending`, `ok`, `warning`, `error`, or absent before the first preview).
+ * (`pending`, `ok`, `warning`, `error`, or absent before the first preview),
+ * `data-regions` while a region preview is shown (ADR-0097 §5: "6 planes,
+ * 0 cylinders, 0 unfit").
  */
 export function FeatureDialog({ controller, settings }: FeatureDialogProps) {
   const open = useStore(controller.state, (s) => s.open);
@@ -118,6 +122,7 @@ export function FeatureDialogPanel({
       data-dialog-mode={open.mode}
       data-dialog-valid={valid || undefined}
       data-preview-status={open.preview.pending ? 'pending' : status?.status}
+      data-regions={open.preview.regions && regionsText(open.preview.regions)}
       className="pointer-events-auto absolute z-20 flex w-64 flex-col rounded-dialog border border-line shadow-raised backdrop-blur-[6px]"
       style={{
         right: `clamp(12px, ${HOME.right - offset.x}px, calc(100% - ${spec.wide ? 560 : 256}px - 12px))`,
@@ -285,10 +290,30 @@ function FieldRow({
       // A read-only line: what the file is, not something to change (ADR-0066 §2).
       const ctx = controller.context();
       const text = ctx ? field.text(open.values, ctx) : '';
+      const legend = (ctx && field.legend?.(open.values, ctx)) ?? [];
       control = (
-        <p data-info={field.name} className="truncate pt-1.5 text-sm">
-          {text}
-        </p>
+        <>
+          <p data-info={field.name} className="truncate pt-1.5 text-sm">
+            {text}
+          </p>
+          {legend.length > 0 && (
+            <ul
+              data-legend={field.name}
+              className="flex flex-wrap gap-x-2.5 gap-y-0.5 text-xs text-muted"
+            >
+              {legend.map((entry) => (
+                <li key={entry.label} className="flex items-center gap-1">
+                  <span
+                    aria-hidden
+                    className="size-2.5 rounded-[3px]"
+                    style={{ background: LEGEND_TOKENS[entry.tone] }}
+                  />
+                  {entry.label}
+                </li>
+              ))}
+            </ul>
+          )}
+        </>
       );
       break;
     }
@@ -511,4 +536,25 @@ export function FieldExpression({
       />
     </div>
   );
+}
+
+/** The colour of each legend tone: the category tokens the view's region colours read too. */
+const LEGEND_TOKENS: Record<LegendEntry['tone'], string> = {
+  create: 'var(--x-cat-create)',
+  sketch: 'var(--x-cat-sketch)',
+  error: 'var(--x-error)',
+};
+
+/**
+ * A region preview's counts for `data-regions`: "6 planes, 0 cylinders,
+ * 0 unfit", with spheres, cones and tori ("1 torus", "2 tori") only when
+ * there are some.
+ */
+function regionsText(regions: DialogRegions): string {
+  const plural = (n: number, one: string) => `${n} ${one}${n === 1 ? '' : 's'}`;
+  const parts = [plural(regions.planes, 'plane'), plural(regions.cylinders, 'cylinder')];
+  if (regions.spheres > 0) parts.push(plural(regions.spheres, 'sphere'));
+  if (regions.cones > 0) parts.push(plural(regions.cones, 'cone'));
+  if (regions.tori > 0) parts.push(`${regions.tori} ${regions.tori === 1 ? 'torus' : 'tori'}`);
+  return `${parts.join(', ')}, ${regions.unfit.regions} unfit`;
 }

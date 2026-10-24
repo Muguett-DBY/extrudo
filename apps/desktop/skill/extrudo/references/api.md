@@ -892,6 +892,16 @@ Faces: `from:(<edge>)` (A face the operation generated from an edge: a round, a 
 
 Faces: `cap:start` (The face the sweep starts at: the profile in its own place); `cap:end` (The face the sweep ends at); `side:<curve>` (A wall, one per edge of the profile: the sketch curve it came from, or the body edge it was swept from); `side:<piece>` (One piece of the thread: `root`, `crest`, `flank0`, `flank1`, `end0`, `end1` or `lead0`, `lead1`, prefixed with the face's place in the input (`f0`, `f1`, ...) and numbered per turn. A multi-start thread (`starts` above 1) puts `s<j>.` after that prefix for each start's tooth faces: `f0.s1.crest`).
 
+### `meshToSolid` — Mesh to Solid
+
+| Input | Type | Required or default | What it does |
+| --- | --- | --- | --- |
+| `body` | `GeomRef \| GeomRef[]` (`body`) | **required** | The mesh body to convert. |
+| `method` | `'prismatic' \| 'faceted'` | default `prismatic` | prismatic recognises planes, cylinders, cones, spheres and tori within the tolerance and rebuilds exact faces; what fits nothing stays as facets. faceted keeps every flat facet as a face. |
+| `tolerance` | `string \| number \| ParameterHandle` | optional | How far a facet may sit from a fitted surface, in mm (prismatic only). Absent: Auto, the kernel picks 0.01-0.1 mm from the mesh. |
+
+Faces: `face:<n>` (Face n of the converted body, in the result's own order (1-based)).
+
 ## Construct
 
 The planes, axes and points other features build on.

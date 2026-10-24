@@ -20,6 +20,11 @@ export {
   type SpawnKernel,
 } from './client';
 export type { ExtrudeOutputData } from './features/extrude';
+export {
+  isMeshToSolidReport,
+  kernelMeshToSolid,
+  type MeshToSolidFeatureReport,
+} from './features/mesh-to-solid';
 export type { SmoothFaces } from './features/offset-face';
 export type { OperationReport } from './features/operation';
 export type { PrimitiveOutputData } from './features/primitives';
@@ -62,6 +67,7 @@ export {
   type ChamferSpec,
   DraftError,
   type DraftProblem,
+  FACETED_FACE_CAP,
   FilletError,
   type FilletProblem,
   type HeapUsage,
@@ -73,10 +79,15 @@ export {
   MeshBodyError,
   MeshError,
   type MeshProblem,
+  type MeshRegions,
+  type MeshToSolidOptions,
+  type MeshToSolidReport,
+  type MeshToSolidResult,
   meshBodyMessage,
   OffsetFaceError,
   type OffsetFaceProblem,
   type OperationResult,
+  PRISMATIC_SURFACE_CAP,
   RemoveFacesError,
   rgbToHex,
   type ShapeHandle,

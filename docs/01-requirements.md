@@ -177,6 +177,7 @@ for the phase's release, **S** = should, **C** = could.
 | FR-IO-07 | Canvas: a reference image on a plane, calibrated to real scale. | S | 4 |
 | FR-IO-08 | OpenSCAD `.scad` import as a mesh body (through openscad-wasm). | C | 5 |
 | FR-IO-09 | OpenSCAD `.scad` export: the design as OpenSCAD code (CSG, parameters as Customizer variables), with polyhedra where OpenSCAD can't follow. | C | 6 |
+| FR-IO-10 | Mesh to Solid: a mesh body (STL, 3MF, OBJ, OpenSCAD) becomes a B-rep solid, faceted (planar faces) or prismatic (planes, cylinders and more recognised within a tolerance), so it can be filleted, shelled, sketched on and exported to STEP. | S | 4 |
 
 ### 5.9 Programmatic design (FR-PRG), later phases
 

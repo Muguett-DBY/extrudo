@@ -49,6 +49,7 @@ export const DEMO_TOOLS: readonly string[] = [
   'removeFaces',
   'draft',
   'thread',
+  'meshToSolid',
   'move',
   'mirror',
   'combine',
@@ -103,6 +104,9 @@ export const DEMO_TOOLS: readonly string[] = [
   'symmetric',
   'exportSketch',
 ];
+
+/** Tiles whose clip is still to record; empty now. */
+export const DEMO_CLIPS_PENDING: readonly string[] = [];
 
 /** Where a tool's clip is, or `undefined` if it has none. */
 export function demoUrl(tool: string): string | undefined {

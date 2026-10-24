@@ -50,6 +50,12 @@ export interface SceneColors {
   overhang: Rgba;
   /** The wall-thickness check's shading (P5-06): the error colour, as the overhang's. */
   thickness: Rgba;
+  /** Mesh to Solid's region preview (ADR-0097 §5): planes in the Create category's colour. */
+  regionPlane: Rgba;
+  /** Cylinders and the other curved kinds in the Sketch category's. */
+  regionCurved: Rgba;
+  /** Regions that fit nothing in the error colour. */
+  regionUnfit: Rgba;
 }
 
 /** The token each scene colour is read from (exported for the tests). */
@@ -78,6 +84,9 @@ export const TOKENS: Record<keyof SceneColors, string> = {
   sectionHatch: '--x-ink',
   overhang: '--x-error',
   thickness: '--x-error',
+  regionPlane: '--x-cat-create',
+  regionCurved: '--x-cat-sketch',
+  regionUnfit: '--x-error',
 };
 
 /**

@@ -611,6 +611,14 @@ export const TOOLS = {
     category: 'modify',
     hint: 'Tilt faces by a few degrees about a plane, so the part comes off the bed or out of a mould.',
   },
+  meshToSolid: {
+    id: 'meshToSolid',
+    label: 'Mesh to Solid',
+    short: 'To Solid',
+    icon: 'mesh-to-solid',
+    category: 'modify',
+    hint: 'Turn an imported mesh into a solid with real faces, so it fillets, shells and takes sketches like any body.',
+  },
   thread: {
     id: 'thread',
     label: 'Thread',
@@ -1025,9 +1033,13 @@ export const TABS: Tab[] = [
           'removeFaces',
           'draft',
           'thread',
+          'meshToSolid',
         ],
       },
-      { label: 'Transform', tools: ['move', 'mirror', 'combine', 'splitBody', 'scale'] },
+      {
+        label: 'Transform',
+        tools: ['move', 'mirror', 'combine', 'splitBody', 'scale'],
+      },
     ],
   },
   {

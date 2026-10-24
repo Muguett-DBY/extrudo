@@ -58,6 +58,7 @@ What changes the bodies a design already has.
 - [Scale](scale.md) — `d.scale(inputs, options?)`
 - [Draft](draft.md) — `d.draft(inputs, options?)`
 - [Thread](thread.md) — `d.thread(inputs, options?)`
+- [Mesh to Solid](meshToSolid.md) — `d.meshToSolid(inputs, options?)`
 
 ## Construct
 

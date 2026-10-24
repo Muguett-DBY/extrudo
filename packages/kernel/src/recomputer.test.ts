@@ -16,6 +16,7 @@ import {
   type GeomRef,
   importInputs,
   type ModelStore,
+  meshToSolidInputs,
   originPlaneRef,
   renameFeature,
   type SketchData,
@@ -24,6 +25,7 @@ import {
 import { SketchBuilder } from '@extrudo/sketch/fixtures';
 import { detectProfiles } from '@extrudo/sketch/profiles';
 import { afterEach, describe, expect, it } from 'vitest';
+import cubeStl from '../../../fixtures/imports/cube.stl?url&inline';
 import interRegular from '../fonts/fonts/inter-regular.ttf?url&inline';
 import type { KernelConnection } from './client';
 import type { BodyMesh } from './mesh';
@@ -143,6 +145,7 @@ function bind(service: KernelService) {
     reference: service.reference.bind(service),
     tangentChain: service.tangentChain.bind(service),
     smoothFaces: service.smoothFaces.bind(service),
+    meshRegions: service.meshRegions.bind(service),
     removeFacesPick: service.removeFacesPick.bind(service),
     exportMeshes: service.exportMeshes.bind(service),
     exportStep: service.exportStep.bind(service),
@@ -680,6 +683,67 @@ describe('Recomputer', () => {
     expect(preview?.tools.map((t) => t.style)).toEqual(['cut']);
     // The cut changed the box: a new mesh, not the model store's.
     expect(preview?.bodies['box:0' as BodyId]).not.toBe(model.getState().bodies['box:0' as BodyId]);
+  });
+
+  it("keeps Mesh to Solid's report on its status and its preview, and gives a mesh body's regions (ADR-0097)", {
+    timeout: 60_000,
+  }, async () => {
+    const data = cubeStl.slice(cubeStl.indexOf(',') + 1);
+    const bytes = Uint8Array.from(atob(data), (c) => c.charCodeAt(0)).buffer as ArrayBuffer;
+    const file = 'cube' as AttachmentId;
+    const doc: ExtrudoDocument = {
+      ...testDocument([{ ...testFeature('Import1', 'import'), inputs: importInputs({ file }) }]),
+      attachments: {
+        [file]: {
+          name: 'cube',
+          fileName: 'cube.stl',
+          mediaType: 'model/stl',
+          sha256: 'c'.repeat(64),
+          size: bytes.byteLength,
+        },
+      },
+    };
+    const { model, document } = setup(doc, { files: { bytes: async () => bytes } });
+    await until(() => ready(model));
+    const r = recomputer as Recomputer;
+    const body = 'Import1:0' as BodyId;
+    const regions = await r.meshRegions(body, 0.01);
+    expect(Array.from(regions?.kinds ?? [])).toEqual([0, 0, 0, 0, 0, 0]);
+    expect(regions?.surfaceOf).toHaveLength(12);
+    expect(await r.meshRegions('nothing' as BodyId, 0.01)).toBeUndefined();
+    // A tolerance of 0 means Auto now (ADR-0097, slice D2): it segments.
+    expect((await r.meshRegions(body, 0))?.auto).toBe(true);
+
+    const convert: Feature = {
+      ...testFeature('toSolid', 'meshToSolid'),
+      inputs: meshToSolidInputs('Import1:0'),
+    };
+    const preview = await r.preview(convert, 1);
+    expect(preview?.meshToSolid).toMatchObject({ method: 'prismatic', faces: 6, planes: 6 });
+    r.endPreview();
+
+    edit(document, (d) => ({ ...d, features: [...d.features, convert], timelineMarker: 2 }));
+    await until(() => model.getState().features['toSolid' as FeatureId] !== undefined);
+    const status = model.getState().features['toSolid' as FeatureId];
+    expect(status).toEqual({
+      status: 'ok',
+      meshToSolid: {
+        method: 'prismatic',
+        faces: 6,
+        planes: 6,
+        cylinders: 0,
+        cones: 0,
+        spheres: 0,
+        tori: 0,
+        unfit: { regions: 0, triangles: 0, fraction: 0 },
+        rebuild: 'exact',
+        facets: 0,
+        auto: true,
+        tolerance: 0.01,
+      },
+    });
+    // The solid is no mesh any more: no regions.
+    expect(await r.meshRegions(body, 0.01)).toBeUndefined();
   });
 
   it('fills ModelState.origins with where each piece came from (ADR-0081 §2)', {

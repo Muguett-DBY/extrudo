@@ -19,6 +19,7 @@ import type { ConstructionReport } from './construction';
 import { type HistoryOptions, UndoHistory } from './history';
 import type { BodyId, ComponentId, FeatureId, JointId } from './ids';
 import type { ImportReport } from './import';
+import type { MeshToSolidReport } from './mesh-to-solid';
 import type { ExtrudoDocument, GeomRef, GeomRefKind } from './schema';
 import type { Vec3 } from './sketch/planes';
 import type { SketchReport } from './sketch/projection';
@@ -274,6 +275,11 @@ export interface FeatureStatus {
    * printed and, when it failed, where. Absent for every other feature.
    */
   script?: ScriptRunStatus;
+  /**
+   * A Mesh to Solid feature's report (P4-13, ADR-0097 §4): the result's faces
+   * by surface kind. Absent for every other feature and when it failed.
+   */
+  meshToSolid?: MeshToSolidReport;
 }
 
 /** What a Script feature's run did (`FeatureStatus.script`, ADR-0070). */

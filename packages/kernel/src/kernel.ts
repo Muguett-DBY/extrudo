@@ -1,3 +1,4 @@
+import type { MeshToSolidReport } from '@extrudo/core';
 import { checkManifold, splitNonManifoldEdges, type TriangleMesh } from '@extrudo/io';
 import { decodeHistory, type HistoryRecord, type SubShapeKind } from './history';
 import type { Manifold, ManifoldToplevel, Mat4 } from './manifold';
@@ -119,6 +120,47 @@ export class MeshError extends KernelError {
 export class MeshBodyError extends KernelError {
   override name = 'MeshBodyError';
 }
+
+/** Mesh to Solid's options (ADR-0097 §3): the method, and its fitting tolerance in mm. */
+export interface MeshToSolidOptions {
+  method: 'faceted' | 'prismatic';
+  /** The fitting tolerance in mm; for prismatic, 0 or less means Auto (ADR-0097, slice D2). Faceted ignores it. */
+  tolerance: number;
+}
+
+/** What Mesh to Solid made (ADR-0097 §4); the type lives in core, which has no WASM. */
+export type { MeshToSolidReport };
+
+/**
+ * Mesh to Solid's region preview (ADR-0097 §5): prismatic's segmentation of a
+ * mesh body, no solid. `surfaceOf[t]` is the surface of triangle `t` in the
+ * body's `Manifold.getMesh()` order (so of `BodyMesh.indices` / 3), `kinds[s]`
+ * that surface's kind (core's `MESH_REGION_KIND`). The counts are the report's.
+ */
+export interface MeshRegions {
+  surfaceOf: Int32Array;
+  kinds: Int32Array;
+  planes: number;
+  cylinders: number;
+  cones: number;
+  spheres: number;
+  tori: number;
+  unfit: { regions: number; triangles: number; fraction: number };
+  suggestedTolerance?: number;
+  /** The tolerance the segmentation used in mm (ADR-0097, slice D2): always for prismatic, the Auto pick included. */
+  tolerance?: number;
+  /** Whether the tolerance was Auto (the caller passed 0 or less). */
+  auto?: boolean;
+}
+
+export interface MeshToSolidResult {
+  shape: ShapeHandle;
+  report: MeshToSolidReport;
+}
+
+/** ADR-0097 §3: faceted refuses more faces than this, prismatic more surfaces than this. */
+export const FACETED_FACE_CAP = 2000;
+export const PRISMATIC_SURFACE_CAP = 500;
 
 /**
  * The message a refused operation shows: `Mesh needs a solid body: this body
@@ -1864,6 +1906,104 @@ export class Kernel {
     } finally {
       f.clearExport();
     }
+  }
+
+  /**
+   * Turns a mesh body into a B-rep solid (ADR-0097 §3). The mesh handle is
+   * untouched; the caller owns the returned shape.
+   */
+  meshToSolid(shape: ShapeHandle, options: MeshToSolidOptions): MeshToSolidResult {
+    this.#stageMesh(shape);
+    const f = this.#facade;
+    const handle = this.#check(
+      f.meshToSolid(options.method === 'faceted' ? 0 : 1, options.tolerance),
+    );
+    // A tolerance of 0 or less means Auto (ADR-0097, slice D2); the report
+    // names the tolerance the kernel picked (the facade's slot 12).
+    const auto = options.method === 'prismatic' && !(options.tolerance > 0);
+    return {
+      shape: handle,
+      report: { method: options.method, ...(auto ? { auto: true } : {}), ...this.#meshReport() },
+    };
+  }
+
+  /**
+   * Mesh to Solid's region preview (ADR-0097 §5): prismatic's segmentation
+   * and fits of a mesh body within `tolerance` (mm), no solid built; a
+   * tolerance of 0 or less means Auto (slice D2). The same code as
+   * `meshToSolid`'s prismatic method, so the two always agree.
+   */
+  meshRegions(shape: ShapeHandle, tolerance: number): MeshRegions {
+    this.#stageMesh(shape);
+    const f = this.#facade;
+    if (!f.meshRegions(tolerance)) throw new KernelError(f.lastError());
+    try {
+      const { faces: _faces, rebuild: _rebuild, facets: _facets, ...counts } = this.#meshReport();
+      return {
+        surfaceOf: this.#copy(Int32Array, f.meshRegionsPtr(), f.meshRegionTriangles()),
+        kinds: this.#copy(Int32Array, f.meshRegionKindsPtr(), f.meshRegionCount()),
+        ...counts,
+        ...(!(tolerance > 0) ? { auto: true } : {}),
+      };
+    } finally {
+      f.clearMeshRegions();
+    }
+  }
+
+  /** Writes a mesh body's welded triangles into the facade's mesh buffers (ADR-0097 §3). */
+  #stageMesh(shape: ShapeHandle): void {
+    if (!this.isMesh(shape)) {
+      throw new KernelError('Mesh to Solid needs a mesh body: this body is already a solid.');
+    }
+    const gl = this.#manifoldOf(shape).getMesh();
+    const f = this.#facade;
+    const nodes = gl.numVert;
+    const stride = gl.numProp;
+    const props = gl.vertProperties;
+    const triangles = gl.triVerts.length / 3;
+    if (!f.meshNodes(nodes)) throw new KernelError(f.lastError());
+    // Read the pointer and write at once: memory growth moves the heap.
+    const xyz = new Float64Array(
+      this.#oc.wasmMemory.buffer as ArrayBuffer,
+      f.meshNodesPtr(),
+      3 * nodes,
+    );
+    for (let i = 0; i < nodes; i++) {
+      xyz[3 * i] = props[stride * i] as number;
+      xyz[3 * i + 1] = props[stride * i + 1] as number;
+      xyz[3 * i + 2] = props[stride * i + 2] as number;
+    }
+    if (!f.meshTriangles(triangles)) throw new KernelError(f.lastError());
+    new Uint32Array(
+      this.#oc.wasmMemory.buffer as ArrayBuffer,
+      f.meshTrianglesPtr(),
+      3 * triangles,
+    ).set(gl.triVerts);
+  }
+
+  /** The facade's Mesh to Solid report (13 doubles), without the method. */
+  #meshReport(): Omit<MeshToSolidReport, 'method'> {
+    const f = this.#facade;
+    const r = this.#copy(Float64Array, f.meshReportPtr(), f.meshReportSize());
+    const at = (i: number) => r[i] as number;
+    return {
+      faces: at(0),
+      planes: at(1),
+      cylinders: at(2),
+      cones: at(3),
+      spheres: at(4),
+      tori: at(5),
+      // An area share: the sums' rounding can put a whole mesh a hair over 1.
+      unfit: { regions: at(6), triangles: at(7), fraction: Math.min(1, at(8)) },
+      ...(at(9) >= 0 ? { suggestedTolerance: at(9) } : {}),
+      ...(at(12) > 0 ? { tolerance: at(12) } : {}),
+      ...(at(10) === 0
+        ? { rebuild: 'exact' as const }
+        : at(10) === 1
+          ? { rebuild: 'hybrid' as const }
+          : {}),
+      facets: at(11) || 0,
+    };
   }
 
   /** Reads STEP text into one shape (a compound of its roots). Release it when done. */

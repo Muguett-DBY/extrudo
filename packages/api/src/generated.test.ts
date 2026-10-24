@@ -211,6 +211,7 @@ describe('the whole registry', () => {
       combine: { target: design.ref('body', 'f0'), tools: [design.ref('body', 'f1')] },
       draft: { faces: design.ref('face', 'f1:face#1'), plane: design.origin.xy, angle: '5 deg' },
       mirror: { plane: design.origin.yz },
+      meshToSolid: { body: design.ref('body', 'f1') },
       move: { bodies: [design.ref('body', 'f1')] },
       offsetFace: { faces: design.ref('face', 'f1:face#1'), distance: '1 mm' },
       placeOnBed: { face: design.ref('face', 'f1:face#1') },

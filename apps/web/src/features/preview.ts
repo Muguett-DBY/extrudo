@@ -78,6 +78,20 @@ export interface ViewPreview {
   construction?: ConstructionDrawing;
   /** The draft's image when it is a canvas (P4-06, ADR-0066 §5). */
   canvas?: CanvasDrawing;
+  /**
+   * Mesh to Solid's region preview (ADR-0097 §5): the body whose triangles
+   * the view colours by kind, in place of its own faces and of the drawing.
+   * `surfaceOf[t]` is the surface of triangle `t` of the body's mesh
+   * (`indices` / 3), `kinds[s]` that surface's kind (core's `MESH_REGION_KIND`).
+   */
+  regions?: ViewRegions;
+}
+
+/** The region preview as the view draws it (`ViewPreview.regions`). */
+export interface ViewRegions {
+  body: BodyId;
+  surfaceOf: Int32Array;
+  kinds: ArrayLike<number>;
 }
 
 /** "cut", "new join": the styles drawn, for the viewport's test attribute. */
