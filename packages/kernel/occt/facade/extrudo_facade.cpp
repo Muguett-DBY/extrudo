@@ -12344,7 +12344,9 @@ private:
     std::string note = "free " + std::to_string(before);
     try {
       BRepBuilderAPI_Sewing sewing(sewTolerance, true, true, true, false);
-      sewing.Add(input);
+      // Add the faces, not the solid: sewing a solid may treat it as already
+      // sewn and leave its free edges alone.
+      for (TopExp_Explorer face(input, TopAbs_FACE); face.More(); face.Next()) sewing.Add(face.Current());
       sewing.Perform();
       const TopoDS_Shape sewn = asSolid(sewing.SewedShape());
       if (!sewn.IsNull() && BRepCheck_Analyzer(sewn).IsValid() && volumeOf(sewn) > 0 &&
@@ -12352,6 +12354,10 @@ private:
         best = sewn;
         bestFree = freeEdgeCount(sewn);
         note += " -> sewn " + std::to_string(bestFree);
+      } else {
+        note += " sewn no (" + std::to_string(sewn.IsNull() ? -1 : freeEdgeCount(sewn)) + " free, " +
+                std::to_string(sewn.IsNull() ? -1 : faceCount(sewn)) + " faces, valid " +
+                std::to_string(sewn.IsNull() ? 0 : (BRepCheck_Analyzer(sewn).IsValid() ? 1 : 0)) + ")";
       }
     } catch (const Standard_Failure&) {
     } catch (...) {
