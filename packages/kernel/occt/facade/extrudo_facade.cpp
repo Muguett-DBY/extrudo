@@ -2847,21 +2847,39 @@ public:
       int notSameParameter = 0;
       for (int i = 1; i <= edges.Extent(); ++i)
         if (!BRep_Tool::SameParameter(TopoDS::Edge(edges(i)))) ++notSameParameter;
-      std::vector<Handle(Geom_Surface)> surfaces;
+      std::vector<std::string> surfaces;
       int splitSurfaces = 0;
       for (int i = 1; i <= faces.Extent(); ++i) {
-        TopLoc_Location location;
-        const Handle(Geom_Surface) surface = BRep_Tool::Surface(TopoDS::Face(faces(i)), location);
-        if (surface.IsNull()) continue;
-        bool seen = false;
-        for (const Handle(Geom_Surface)& other : surfaces) {
-          if (other->IsSame(surface)) {
-            seen = true;
+        const BRepAdaptor_Surface surface(TopoDS::Face(faces(i)), false);
+        std::string key;
+        const auto point = [](const gp_Pnt& p) {
+          return std::to_string(p.X()) + "," + std::to_string(p.Y()) + "," + std::to_string(p.Z());
+        };
+        const auto axis = [&](const gp_Ax3& frame) { return point(frame.Location()) + "|" + point(frame.Direction()); };
+        switch (surface.GetType()) {
+          case GeomAbs_Plane:
+            key = "plane " + axis(surface.Plane().Position());
             break;
-          }
+          case GeomAbs_Cylinder:
+            key = "cylinder " + axis(surface.Cylinder().Position()) + "|" + std::to_string(surface.Cylinder().Radius());
+            break;
+          case GeomAbs_Cone:
+            key = "cone " + axis(surface.Cone().Position()) + "|" + std::to_string(surface.Cone().RefRadius()) + "|" +
+                  std::to_string(surface.Cone().SemiAngle());
+            break;
+          case GeomAbs_Sphere:
+            key = "sphere " + axis(surface.Sphere().Position()) + "|" + std::to_string(surface.Sphere().Radius());
+            break;
+          case GeomAbs_Torus:
+            key = "torus " + axis(surface.Torus().Position()) + "|" + std::to_string(surface.Torus().MajorRadius()) +
+                  "|" + std::to_string(surface.Torus().MinorRadius());
+            break;
+          default:
+            break;
         }
-        if (seen) ++splitSurfaces;
-        else surfaces.push_back(surface);
+        if (key.empty()) continue;
+        if (std::find(surfaces.begin(), surfaces.end(), key) != surfaces.end()) ++splitSurfaces;
+        else surfaces.push_back(key);
       }
       NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> edgeFaces;
       TopExp::MapShapesAndUniqueAncestors(*input, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
