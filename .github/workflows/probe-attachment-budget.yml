@@ -10,10 +10,69 @@ permissions:
   contents: read
 
 jobs:
-  check-and-storage:
+  check-on-host:
+    name: Full check (Node ${{ matrix.node }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['24.21.0', '26.12.1']
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CI: 'true'
+    steps:
+      - name: Check out the exact fix source
+        uses: actions/checkout@v5
+        with:
+          ref: 92eb9487bb43ebe1696a4b2730f15bbdc7047fd1
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run the required full check without a container
+        run: |
+          test "$(git rev-parse HEAD)" = 92eb9487bb43ebe1696a4b2730f15bbdc7047fd1
+          node --version
+          pnpm check
+
+  baseline-kernel:
+    name: Unchanged main kernel control (Node 24.21.0)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CI: 'true'
+    steps:
+      - name: Check out unchanged upstream main
+        uses: actions/checkout@v5
+        with:
+          ref: 4e39490ad87e987959bc5e24433db236b6743327
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: '24.21.0'
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Test the original kernel file that hit the V8 assertion
+        run: |
+          test "$(git rev-parse HEAD)" = 4e39490ad87e987959bc5e24433db236b6743327
+          pnpm wasm
+          node node_modules/vitest/vitest.mjs run packages/kernel/src/scad-export/live.test.ts
+
+  storage-browser:
+    name: Complete storage browser spec
     runs-on: ubuntu-24.04
     container: mcr.microsoft.com/playwright:v1.63.0-noble
-    timeout-minutes: 30
+    timeout-minutes: 15
     env:
       GH_TOKEN: ${{ github.token }}
       CI: 'true'
@@ -28,17 +87,15 @@ jobs:
       - uses: pnpm/action-setup@v6
       - uses: actions/setup-node@v5
         with:
-          node-version: 24
+          node-version: '24.21.0'
           cache: pnpm
       - name: Trust the checked-out workspace in this runner
         run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
-      - name: Run the required full check
+      - name: Build the web app and site
         run: |
           test "$(git rev-parse HEAD)" = 92eb9487bb43ebe1696a4b2730f15bbdc7047fd1
-          pnpm check
-      - name: Build the web app and site
-        run: pnpm build
+          pnpm build
       - name: Run the complete storage browser spec
         run: node node_modules/@playwright/test/cli.js test e2e/storage.spec.ts --project=chromium --workers=2 --retries=0 --reporter=line
