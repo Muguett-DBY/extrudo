@@ -12417,7 +12417,6 @@ private:
       // A last resort for edges that don't meet: close the wire gaps.
       try {
         Handle(ShapeFix_Wireframe) wireframe = new ShapeFix_Wireframe(input);
-        wireframe->SetTolerance(std::max(0.01, tolerance));
         wireframe->FixWireGaps();
         wireframe->FixSmallEdges();
         const TopoDS_Shape fixed = wireframe->Shape();
