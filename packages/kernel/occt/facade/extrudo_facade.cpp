@@ -12372,30 +12372,36 @@ private:
     double maxEdgeTolerance = 0;
     for (TopExp_Explorer it(input, TopAbs_EDGE); it.More(); it.Next())
       maxEdgeTolerance = std::max(maxEdgeTolerance, BRep_Tool::Tolerance(TopoDS::Edge(it.Current())));
-    const double sewTolerance = std::max(std::max(1e-3, 2 * maxEdgeTolerance), tolerance);
     const int faces = faceCount(input);
     TopoDS_Shape best = input;
     int bestFree = before;
     std::string note = "free " + std::to_string(before);
-    try {
-      BRepBuilderAPI_Sewing sewing(sewTolerance, true, true, true, false);
-      // Add the faces, not the solid: sewing a solid may treat it as already
-      // sewn and leave its free edges alone.
-      for (TopExp_Explorer face(input, TopAbs_FACE); face.More(); face.Next()) sewing.Add(face.Current());
-      sewing.Perform();
-      const TopoDS_Shape sewn = asSolid(sewing.SewedShape());
-      if (!sewn.IsNull() && BRepCheck_Analyzer(sewn).IsValid() && volumeOf(sewn) > 0 &&
-          faceCount(sewn) <= faces && freeEdgeCount(sewn) < bestFree) {
-        best = sewn;
-        bestFree = freeEdgeCount(sewn);
-        note += " -> sewn " + std::to_string(bestFree);
-      } else {
-        note += " sewn no (" + std::to_string(sewn.IsNull() ? -1 : freeEdgeCount(sewn)) + " free, " +
-                std::to_string(sewn.IsNull() ? -1 : faceCount(sewn)) + " faces, valid " +
-                std::to_string(sewn.IsNull() ? 0 : (BRepCheck_Analyzer(sewn).IsValid() ? 1 : 0)) + ")";
+    // Try the geometric tolerance first, then wider ones: a dangling edge can
+    // sit further from its partner than the edge tolerance says.
+    const double tolerances[] = {std::max(1e-3, 2 * maxEdgeTolerance), std::max(0.05, tolerance), 0.2, 1.0};
+    for (double sewTolerance : tolerances) {
+      try {
+        BRepBuilderAPI_Sewing sewing(sewTolerance, true, true, true, false);
+        // Add the faces, not the solid: sewing a solid may treat it as already
+        // sewn and leave its free edges alone.
+        for (TopExp_Explorer face(input, TopAbs_FACE); face.More(); face.Next()) sewing.Add(face.Current());
+        sewing.Perform();
+        const TopoDS_Shape sewn = asSolid(sewing.SewedShape());
+        if (sewn.IsNull()) {
+          note += " t" + std::to_string(sewTolerance) + " null";
+          continue;
+        }
+        const int free = freeEdgeCount(sewn);
+        const bool ok = BRepCheck_Analyzer(sewn).IsValid() && volumeOf(sewn) > 0 && faceCount(sewn) <= faces;
+        note += " t" + std::to_string(sewTolerance) + "->" + std::to_string(free) + (ok ? "" : " bad");
+        if (ok && free < bestFree) {
+          best = sewn;
+          bestFree = free;
+          if (free == 0) break;
+        }
+      } catch (const Standard_Failure&) {
+      } catch (...) {
       }
-    } catch (const Standard_Failure&) {
-    } catch (...) {
     }
     if (bestFree > 0) {
       try {
@@ -12412,7 +12418,7 @@ private:
       } catch (...) {
       }
     }
-    sewnNote_ = note + " (sew tol " + std::to_string(sewTolerance) + ")";
+    sewnNote_ = note + " (max edge tol " + std::to_string(maxEdgeTolerance) + ")";
     return best;
   }
 
