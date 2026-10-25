@@ -1,1 +1,1 @@
-Project imports and copies check the attachment budget before writing files, including saved versions, while keeping valid history and shared files.
+- 2026-10-25 · **Attachment budgets on import**: Project imports and copies check the attachment budget before writing files, including saved versions, while keeping valid history and shared files.
