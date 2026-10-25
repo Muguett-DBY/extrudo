@@ -9497,6 +9497,13 @@ private:
         stage("unify undone");
       }
     }
+    // Unify can also leave a merged face's edge unshared, opening the shell;
+    // keep the cells' closed solid then.
+    if (freeEdgeCount(result) > freeEdgeCount(solid) && BRepCheck_Analyzer(solid).IsValid() &&
+        volumeOf(solid) > 0) {
+      result = solid;
+      stage("unify undone (open shell)");
+    }
     stage("validity");
 
     // 4. Verify: the volume within the mesh's chord error (or 1 %), and
@@ -10281,6 +10288,10 @@ private:
         return TopoDS_Shape(compound);
       };
       bool undone = false;
+      // UnifySameDomain can leave a merged face's edge unshared, opening the
+      // shell (the gear: the assembled solid has none, the unified one five).
+      // When it does, the pre-unify solid is kept instead: closed beats split.
+      bool rawFallback = false;
       TopoDS_Shape result = assemble(unified);
       bool healed = false, valid = BRepCheck_Analyzer(result).IsValid();
       if (!valid) {
@@ -10353,11 +10364,23 @@ private:
       }
       stage(undone ? "validity (unify undone)" : "validity");
 
+      // The unified result can be valid yet open where the assembled one is
+      // closed: keep the assembled solids then (their split faces are still a
+      // solid Offset Face can work on; an open shell is not).
+      if (!undone) {
+        const TopoDS_Shape assembled = assemble(solids);
+        if (freeEdgeCount(assembled) < freeEdgeCount(result) && BRepCheck_Analyzer(assembled).IsValid() &&
+            volumeOf(assembled) > 0) {
+          result = assembled;
+          rawFallback = true;
+        }
+      }
+
       // The result's faces: a facet is a face only facets made.
       NCollection_DataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher> origin;
       for (const HybridFace& hf : faces) {
         TopTools_ListOfShape images;
-        for (size_t s = 0; s < solids.size() && !undone; ++s) {
+        for (size_t s = 0; s < solids.size() && !undone && !rawFallback; ++s) {
           if (histories[s].IsNull()) continue;
           for (const TopoDS_Shape& image : histories[s]->Modified(hf.face)) images.Append(image);
         }
