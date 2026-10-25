@@ -69,6 +69,7 @@
 #include <Bnd_Box2d.hxx>
 #include <ShapeFix_Solid.hxx>
 #include <ShapeFix_Shape.hxx>
+#include <ShapeFix_Wireframe.hxx>
 #include <BRepBuilderAPI_MakeShapeOnMesh.hxx>
 #include <Poly_Triangle.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
@@ -2933,7 +2934,7 @@ public:
   int meshRefusalDebug() {
     beginOp();
     lastError_ = "exact: " + rebuildRefusal_ + " | hybrid: " + hybridRefusal_ + " | exploded " +
-                 std::to_string(hybridExploded_) + " | cleanup " + sewnNote_;
+                 std::to_string(hybridExploded_) + " | cleanup " + sewnNote_ + " | edges " + hybridFreeNote_;
     return 1;
   }
 
@@ -9630,6 +9631,8 @@ private:
   std::string hybridRefusal_;
   /** What the last converted-body cleanup did, for meshRefusalDebug (tests and the spike harness). */
   std::string sewnNote_;
+  /** The hybrid's pre-unify vs unified free-edge counts, for meshRefusalDebug. */
+  std::string hybridFreeNote_;
   /** The last hybrid build's chains (slice D3): "chains: 12 collapsed (…), 3 polylines", and why chains stayed polylines. */
   std::string hybridChains_, hybridChainsKept_;
   /** Per recognised region of the last hybrid rebuild, when the spike harness asks (FACES=1). */
@@ -10507,6 +10510,8 @@ private:
         continue;
       }
       stage("checked against the mesh");
+      hybridFreeNote_ = "raw " + std::to_string(undone ? freeEdgeCount(result) : freeEdgeCount(assemble(solids))) +
+                        " unified " + std::to_string(freeEdgeCount(result));
       meshReport_[0] = static_cast<double>(resultFaces.Extent());
       for (int k = 0; k < 5; ++k) meshReport_[1 + k] = static_cast<double>(counts[k]);
       meshReport_[10] = 1;
@@ -12379,9 +12384,11 @@ private:
     // Try the geometric tolerance first, then wider ones: a dangling edge can
     // sit further from its partner than the edge tolerance says.
     const double tolerances[] = {std::max(1e-3, 2 * maxEdgeTolerance), std::max(0.05, tolerance), 0.2, 1.0};
+    for (bool nonManifold : {false, true}) {
     for (double sewTolerance : tolerances) {
       try {
         BRepBuilderAPI_Sewing sewing(sewTolerance, true, true, true, false);
+        sewing.SetNonManifoldMode(nonManifold);
         // Add the faces, not the solid: sewing a solid may treat it as already
         // sewn and leave its free edges alone.
         for (TopExp_Explorer face(input, TopAbs_FACE); face.More(); face.Next()) sewing.Add(face.Current());
@@ -12393,11 +12400,32 @@ private:
         }
         const int free = freeEdgeCount(sewn);
         const bool ok = BRepCheck_Analyzer(sewn).IsValid() && volumeOf(sewn) > 0 && faceCount(sewn) <= faces;
-        note += " t" + std::to_string(sewTolerance) + "->" + std::to_string(free) + (ok ? "" : " bad");
+        note += (nonManifold ? " nm" : " t") + std::to_string(sewTolerance) + "->" + std::to_string(free) +
+                (ok ? "" : " bad");
         if (ok && free < bestFree) {
           best = sewn;
           bestFree = free;
           if (free == 0) break;
+        }
+      } catch (const Standard_Failure&) {
+      } catch (...) {
+      }
+    }
+    if (bestFree == 0) break;
+    }
+    if (bestFree > 0) {
+      // A last resort for edges that don't meet: close the wire gaps.
+      try {
+        Handle(ShapeFix_Wireframe) wireframe = new ShapeFix_Wireframe(input);
+        wireframe->SetTolerance(std::max(0.01, tolerance));
+        wireframe->FixWireGaps();
+        wireframe->FixSmallEdges();
+        const TopoDS_Shape fixed = wireframe->Shape();
+        if (!fixed.IsNull() && BRepCheck_Analyzer(fixed).IsValid() && volumeOf(fixed) > 0 &&
+            faceCount(fixed) <= faces && freeEdgeCount(fixed) < bestFree) {
+          best = fixed;
+          bestFree = freeEdgeCount(fixed);
+          note += " -> wireframe " + std::to_string(bestFree);
         }
       } catch (const Standard_Failure&) {
       } catch (...) {
