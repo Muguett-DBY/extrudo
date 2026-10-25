@@ -1,0 +1,42 @@
+name: Attachment budget validation
+
+on:
+  push:
+    branches: [probe/attachment-budget-2026-10-25]
+    paths: [.github/workflows/probe-attachment-budget.yml]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check-and-storage:
+    runs-on: ubuntu-24.04
+    container: mcr.microsoft.com/playwright:v1.63.0-noble
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      CI: 'true'
+      E2E_PORT: '43917'
+    steps:
+      - name: Check out the exact fix source
+        uses: actions/checkout@v5
+        with:
+          ref: 814e3e12910d0459b69bd1ad6fe609d180a04874
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: pnpm
+      - name: Install locked dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Run the required full check
+        run: |
+          test "$(git rev-parse HEAD)" = 814e3e12910d0459b69bd1ad6fe609d180a04874
+          pnpm check
+      - name: Build the web app and site
+        run: pnpm build
+      - name: Run the complete storage browser spec
+        run: node node_modules/@playwright/test/cli.js test e2e/storage.spec.ts --project=chromium --workers=2 --retries=0 --reporter=line
