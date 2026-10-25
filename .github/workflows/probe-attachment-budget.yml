@@ -30,6 +30,8 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
+      - name: Trust the checked-out workspace in this runner
+        run: git config --global --add safe.directory "$GITHUB_WORKSPACE"
       - name: Install locked dependencies
         run: pnpm install --frozen-lockfile
       - name: Run the required full check
