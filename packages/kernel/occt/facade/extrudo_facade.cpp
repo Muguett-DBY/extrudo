@@ -2938,6 +2938,41 @@ public:
   }
 
   /**
+   * The dangling edges (used by one face and neither a seam nor degenerate):
+   * per edge, its midpoint (x, y, z), its tolerance and its length. Tests and
+   * the spike harness only. Returns 1.
+   */
+  int danglingDebug(int shape) {
+    beginOp();
+    geometry_.clear();
+    const TopoDS_Shape* input = find(shape);
+    if (input == nullptr) return fail("Dangling: unknown shape.");
+    try {
+      NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> edgeFaces;
+      TopExp::MapShapesAndUniqueAncestors(*input, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
+      for (int i = 1; i <= edgeFaces.Extent(); ++i) {
+        if (edgeFaces(i).Extent() >= 2) continue;
+        const TopoDS_Edge edge = TopoDS::Edge(edgeFaces.FindKey(i));
+        if (BRep_Tool::IsClosed(edge) || BRep_Tool::Degenerated(edge)) continue;
+        std::vector<gp_Pnt> points;
+        for (TopExp_Explorer v(edge, TopAbs_VERTEX); v.More(); v.Next())
+          points.push_back(BRep_Tool::Pnt(TopoDS::Vertex(v.Current())));
+        const gp_Pnt middle = points.size() == 2 ? gp_Pnt((points[0].XYZ() + points[1].XYZ()) / 2) : gp_Pnt(0, 0, 0);
+        geometry_.push_back(middle.X());
+        geometry_.push_back(middle.Y());
+        geometry_.push_back(middle.Z());
+        geometry_.push_back(BRep_Tool::Tolerance(edge));
+        geometry_.push_back(points.size() == 2 ? points[0].Distance(points[1]) : 0);
+      }
+      lastError_ = std::to_string(static_cast<int>(geometry_.size() / 5)) + " dangling edges";
+      return 1;
+    } catch (...) {
+      return failFromException("Dangling failed");
+    }
+  }
+
+
+  /**
    * Probes one plain `BRepOffset_MakeOffset` build of `face` by `distance`
    * (tests and the spike harness only): geometry_ holds [built, IsDone,
    * Error(), result not null, result volume]. The builder's own error code is
