@@ -69,7 +69,6 @@
 #include <Bnd_Box2d.hxx>
 #include <ShapeFix_Solid.hxx>
 #include <ShapeFix_Shape.hxx>
-#include <ShapeFix_Wireframe.hxx>
 #include <BRepBuilderAPI_MakeShapeOnMesh.hxx>
 #include <Poly_Triangle.hxx>
 #include <BRepBuilderAPI_MakeSolid.hxx>
@@ -2884,16 +2883,11 @@ public:
       }
       NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> edgeFaces;
       TopExp::MapShapesAndUniqueAncestors(*input, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
-      int freeEdges = 0, overEdges = 0, danglingEdges = 0;
+      int freeEdges = 0, overEdges = 0;
       for (int i = 1; i <= edgeFaces.Extent(); ++i) {
         const int around = edgeFaces(i).Extent();
-        if (around == 1) {
-          ++freeEdges;
-          const TopoDS_Edge edge = TopoDS::Edge(edgeFaces.FindKey(i));
-          if (!BRep_Tool::IsClosed(edge) && !BRep_Tool::Degenerated(edge)) ++danglingEdges;
-        } else if (around > 2) {
-          ++overEdges;
-        }
+        if (around == 1) ++freeEdges;
+        else if (around > 2) ++overEdges;
       }
       int invalidFaces = 0, invalidEdges = 0;
       for (int i = 1; i <= faces.Extent(); ++i)
@@ -2912,15 +2906,13 @@ public:
       geometry_.push_back(static_cast<double>(overEdges));
       geometry_.push_back(static_cast<double>(invalidFaces));
       geometry_.push_back(static_cast<double>(invalidEdges));
-      geometry_.push_back(static_cast<double>(danglingEdges));
       lastError_ = "max tolerance: vertex " + std::to_string(maxVertex) + ", edge " + std::to_string(maxEdge) +
                    ", face " + std::to_string(maxFace) + " mm; " + std::to_string(vertices.Extent()) + " vertices, " +
                    std::to_string(edges.Extent()) + " edges (" + std::to_string(notSameParameter) +
                    " not same-parameter, " + std::to_string(invalidEdges) + " invalid), " +
                    std::to_string(faces.Extent()) + " faces (" + std::to_string(splitSurfaces) +
                    " on a surface another face has, " + std::to_string(invalidFaces) + " invalid), " +
-                   std::to_string(freeEdges) + " free edges (" + std::to_string(danglingEdges) +
-                   " dangling, not a seam or degenerate), " + std::to_string(overEdges) + " over-shared edges";
+                   std::to_string(freeEdges) + " free edges, " + std::to_string(overEdges) + " over-shared edges";
       return 1;
     } catch (...) {
       return failFromException("Diagnose failed");
@@ -2934,44 +2926,9 @@ public:
   int meshRefusalDebug() {
     beginOp();
     lastError_ = "exact: " + rebuildRefusal_ + " | hybrid: " + hybridRefusal_ + " | exploded " +
-                 std::to_string(hybridExploded_) + " | cleanup " + sewnNote_ + " | edges " + hybridFreeNote_;
+                 std::to_string(hybridExploded_);
     return 1;
   }
-
-  /**
-   * The dangling edges (used by one face and neither a seam nor degenerate):
-   * per edge, its midpoint (x, y, z), its tolerance and its length. Tests and
-   * the spike harness only. Returns 1.
-   */
-  int danglingDebug(int shape) {
-    beginOp();
-    geometry_.clear();
-    const TopoDS_Shape* input = find(shape);
-    if (input == nullptr) return fail("Dangling: unknown shape.");
-    try {
-      NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> edgeFaces;
-      TopExp::MapShapesAndUniqueAncestors(*input, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
-      for (int i = 1; i <= edgeFaces.Extent(); ++i) {
-        if (edgeFaces(i).Extent() >= 2) continue;
-        const TopoDS_Edge edge = TopoDS::Edge(edgeFaces.FindKey(i));
-        if (BRep_Tool::IsClosed(edge) || BRep_Tool::Degenerated(edge)) continue;
-        std::vector<gp_Pnt> points;
-        for (TopExp_Explorer v(edge, TopAbs_VERTEX); v.More(); v.Next())
-          points.push_back(BRep_Tool::Pnt(TopoDS::Vertex(v.Current())));
-        const gp_Pnt middle = points.size() == 2 ? gp_Pnt((points[0].XYZ() + points[1].XYZ()) / 2) : gp_Pnt(0, 0, 0);
-        geometry_.push_back(middle.X());
-        geometry_.push_back(middle.Y());
-        geometry_.push_back(middle.Z());
-        geometry_.push_back(BRep_Tool::Tolerance(edge));
-        geometry_.push_back(points.size() == 2 ? points[0].Distance(points[1]) : 0);
-      }
-      lastError_ = std::to_string(static_cast<int>(geometry_.size() / 5)) + " dangling edges";
-      return 1;
-    } catch (...) {
-      return failFromException("Dangling failed");
-    }
-  }
-
 
   /**
    * Probes one plain `BRepOffset_MakeOffset` build of `face` by `distance`
@@ -3013,28 +2970,10 @@ public:
       geometry_.push_back(raw.IsNull() ? -1 : static_cast<double>(raw.ShapeType()));
       geometry_.push_back(static_cast<double>(rawShells));
       geometry_.push_back(static_cast<double>(rawClosed));
-      // The same moving set offsetFaces uses: the smooth chain around the face.
-      std::vector<int> chain;
-      smoothChains(copy, copyFaces, chain);
-      const std::vector<int> moving = smoothClosure(chain, std::vector<int>{face});
-      const double volume = result.IsNull() ? 0 : exactVolume(result);
-      const double before = exactVolume(copy);
-      const bool valid = !result.IsNull() && BRepCheck_Analyzer(result).IsValid();
-      const bool farKept = !result.IsNull() && farFacesKept(builder, copy, copyFaces, moving, result);
-      const bool good = !result.IsNull() && offsetIsGood(builder, copy, copyFaces, moving, result, distance);
-      geometry_.push_back(good ? 1 : 0);
-      geometry_.push_back(valid ? 1 : 0);
-      geometry_.push_back(volume);
-      geometry_.push_back(before);
-      geometry_.push_back(farKept ? 1 : 0);
-      geometry_.push_back(static_cast<double>(moving.size()));
       lastError_ = "offset probe: built " + std::to_string(built) + ", done " + std::to_string(builder.IsDone()) +
                    ", error " + std::to_string(static_cast<int>(error)) + ", null " + std::to_string(result.IsNull()) +
                    ", raw kind " + std::to_string(raw.IsNull() ? -1 : static_cast<int>(raw.ShapeType())) + ", shells " +
-                   std::to_string(rawShells) + " (" + std::to_string(rawClosed) + " closed), good " +
-                   std::to_string(good) + ", valid " + std::to_string(valid) + ", volume " + std::to_string(volume) +
-                   " before " + std::to_string(before) + ", farKept " + std::to_string(farKept) + ", moving " +
-                   std::to_string(moving.size());
+                   std::to_string(rawShells) + " (" + std::to_string(rawClosed) + " closed)";
       return 1;
     } catch (...) {
       return failFromException("Probe failed");
@@ -9497,13 +9436,6 @@ private:
         stage("unify undone");
       }
     }
-    // Unify can also leave a merged face's edge unshared, opening the shell;
-    // keep the cells' closed solid then.
-    if (freeEdgeCount(result) > freeEdgeCount(solid) && BRepCheck_Analyzer(solid).IsValid() &&
-        volumeOf(solid) > 0) {
-      result = solid;
-      stage("unify undone (open shell)");
-    }
     stage("validity");
 
     // 4. Verify: the volume within the mesh's chord error (or 1 %), and
@@ -9617,7 +9549,7 @@ private:
     meshReport_[5] = static_cast<double>(resultTori);
     meshReport_[10] = 0;
     meshReport_[11] = 0;
-    return store(closedConverted(result, tolerance));
+    return store(result);
   }
 
   /** The hybrid rebuild gives up after this much wall-clock time, a deadline of its own (ADR-0097, slice D1). */
@@ -9636,10 +9568,6 @@ private:
   /** The last hybrid rebuild's exploded regions, and why it refused (the spike harness prints them). */
   int hybridExploded_ = 0;
   std::string hybridRefusal_;
-  /** What the last converted-body cleanup did, for meshRefusalDebug (tests and the spike harness). */
-  std::string sewnNote_;
-  /** The hybrid's pre-unify vs unified free-edge counts, for meshRefusalDebug. */
-  std::string hybridFreeNote_;
   /** The last hybrid build's chains (slice D3): "chains: 12 collapsed (…), 3 polylines", and why chains stayed polylines. */
   std::string hybridChains_, hybridChainsKept_;
   /** Per recognised region of the last hybrid rebuild, when the spike harness asks (FACES=1). */
@@ -10269,9 +10197,7 @@ private:
       }
       stage("solid");
       for (const TopoDS_Shape& solid : solids) {
-        // ConcatBSplines off (as the exact rebuild): with it on, unify left a
-        // merged face's edge unshared and opened the shell on the gear.
-        ShapeUpgrade_UnifySameDomain unify(solid, true, true, false);
+        ShapeUpgrade_UnifySameDomain unify(solid, true, true, true);
         unify.SetLinearTolerance(1e-3);
         unify.SetAngularTolerance(1e-3);
         unify.Build();
@@ -10290,10 +10216,6 @@ private:
         return TopoDS_Shape(compound);
       };
       bool undone = false;
-      // UnifySameDomain can leave a merged face's edge unshared, opening the
-      // shell (the gear: the assembled solid has none, the unified one five).
-      // When it does, the pre-unify solid is kept instead: closed beats split.
-      bool rawFallback = false;
       TopoDS_Shape result = assemble(unified);
       bool healed = false, valid = BRepCheck_Analyzer(result).IsValid();
       if (!valid) {
@@ -10366,23 +10288,11 @@ private:
       }
       stage(undone ? "validity (unify undone)" : "validity");
 
-      // The unified result can be valid yet open where the assembled one is
-      // closed: keep the assembled solids then (their split faces are still a
-      // solid Offset Face can work on; an open shell is not).
-      if (!undone) {
-        const TopoDS_Shape assembled = assemble(solids);
-        if (freeEdgeCount(assembled) < freeEdgeCount(result) && BRepCheck_Analyzer(assembled).IsValid() &&
-            volumeOf(assembled) > 0) {
-          result = assembled;
-          rawFallback = true;
-        }
-      }
-
       // The result's faces: a facet is a face only facets made.
       NCollection_DataMap<TopoDS_Shape, int, TopTools_ShapeMapHasher> origin;
       for (const HybridFace& hf : faces) {
         TopTools_ListOfShape images;
-        for (size_t s = 0; s < solids.size() && !undone && !rawFallback; ++s) {
+        for (size_t s = 0; s < solids.size() && !undone; ++s) {
           if (histories[s].IsNull()) continue;
           for (const TopoDS_Shape& image : histories[s]->Modified(hf.face)) images.Append(image);
         }
@@ -10535,13 +10445,11 @@ private:
         continue;
       }
       stage("checked against the mesh");
-      hybridFreeNote_ = "raw " + std::to_string(undone ? freeEdgeCount(result) : freeEdgeCount(assemble(solids))) +
-                        " unified " + std::to_string(freeEdgeCount(result));
       meshReport_[0] = static_cast<double>(resultFaces.Extent());
       for (int k = 0; k < 5; ++k) meshReport_[1 + k] = static_cast<double>(counts[k]);
       meshReport_[10] = 1;
       meshReport_[11] = static_cast<double>(facets);
-      return store(closedConverted(result, tolerance));
+      return store(result);
     }
     return refuse("invalid after exploding");
   }
@@ -12362,116 +12270,6 @@ private:
     }
     if (volumeOf(solid) < 0) return solid.Reversed();
     return solid;
-  }
-
-  /** How many edges of `shape` belong to fewer than two faces (a seam counts once). */
-  static int freeEdgeCount(const TopoDS_Shape& shape) {
-    NCollection_IndexedDataMap<TopoDS_Shape, NCollection_List<TopoDS_Shape>, TopTools_ShapeMapHasher> edgeFaces;
-    TopExp::MapShapesAndUniqueAncestors(shape, TopAbs_EDGE, TopAbs_FACE, edgeFaces);
-    int free = 0;
-    for (int i = 1; i <= edgeFaces.Extent(); ++i)
-      if (edgeFaces(i).Extent() < 2) ++free;
-    return free;
-  }
-
-  /** How many faces `shape` has. */
-  static int faceCount(const TopoDS_Shape& shape) {
-    int faces = 0;
-    for (TopExp_Explorer it(shape, TopAbs_FACE); it.More(); it.Next()) ++faces;
-    return faces;
-  }
-
-  /**
-   * A Mesh to Solid result whose faces don't all share their edges -- a mesh
-   * the import repaired can leave a boundary edge on one face only, and the
-   * hybrid rebuild then leaves it dangling (ADR-0097 amendment, 2026-10-24)
-   * -- is not a watertight solid, and `BRepOffset_MakeOffset` builds an
-   * invalid skin of nearly no volume from it, so Offset Face and Shell fail
-   * on the converted body for every distance. Sew the faces back at twice
-   * the largest edge tolerance (at least the conversion tolerance), then try
-   * `ShapeFix_Shape`; keep whichever gives a valid solid with positive
-   * volume, no more faces than the input and fewer free edges. Otherwise the
-   * input is returned unchanged.
-   */
-  TopoDS_Shape closedConverted(const TopoDS_Shape& input, double tolerance) {
-    const int before = freeEdgeCount(input);
-    if (before == 0) {
-      sewnNote_ = "none (closed)";
-      return input;
-    }
-    double maxEdgeTolerance = 0;
-    for (TopExp_Explorer it(input, TopAbs_EDGE); it.More(); it.Next())
-      maxEdgeTolerance = std::max(maxEdgeTolerance, BRep_Tool::Tolerance(TopoDS::Edge(it.Current())));
-    const int faces = faceCount(input);
-    TopoDS_Shape best = input;
-    int bestFree = before;
-    std::string note = "free " + std::to_string(before);
-    // Try the geometric tolerance first, then wider ones: a dangling edge can
-    // sit further from its partner than the edge tolerance says.
-    const double tolerances[] = {std::max(1e-3, 2 * maxEdgeTolerance), std::max(0.05, tolerance), 0.2, 1.0};
-    for (bool nonManifold : {false, true}) {
-    for (double sewTolerance : tolerances) {
-      try {
-        BRepBuilderAPI_Sewing sewing(sewTolerance, true, true, true, false);
-        sewing.SetNonManifoldMode(nonManifold);
-        // Add the faces, not the solid: sewing a solid may treat it as already
-        // sewn and leave its free edges alone.
-        for (TopExp_Explorer face(input, TopAbs_FACE); face.More(); face.Next()) sewing.Add(face.Current());
-        sewing.Perform();
-        const TopoDS_Shape sewn = asSolid(sewing.SewedShape());
-        if (sewn.IsNull()) {
-          note += " t" + std::to_string(sewTolerance) + " null";
-          continue;
-        }
-        const int free = freeEdgeCount(sewn);
-        const bool ok = BRepCheck_Analyzer(sewn).IsValid() && volumeOf(sewn) > 0 && faceCount(sewn) <= faces;
-        note += (nonManifold ? " nm" : " t") + std::to_string(sewTolerance) + "->" + std::to_string(free) +
-                (ok ? "" : " bad");
-        if (ok && free < bestFree) {
-          best = sewn;
-          bestFree = free;
-          if (free == 0) break;
-        }
-      } catch (const Standard_Failure&) {
-      } catch (...) {
-      }
-    }
-    if (bestFree == 0) break;
-    }
-    if (bestFree > 0) {
-      // A last resort for edges that don't meet: close the wire gaps.
-      try {
-        Handle(ShapeFix_Wireframe) wireframe = new ShapeFix_Wireframe(input);
-        wireframe->FixWireGaps();
-        wireframe->FixSmallEdges();
-        const TopoDS_Shape fixed = wireframe->Shape();
-        if (!fixed.IsNull() && BRepCheck_Analyzer(fixed).IsValid() && volumeOf(fixed) > 0 &&
-            faceCount(fixed) <= faces && freeEdgeCount(fixed) < bestFree) {
-          best = fixed;
-          bestFree = freeEdgeCount(fixed);
-          note += " -> wireframe " + std::to_string(bestFree);
-        }
-      } catch (const Standard_Failure&) {
-      } catch (...) {
-      }
-    }
-    if (bestFree > 0) {
-      try {
-        ShapeFix_Shape healer(input);
-        healer.Perform();
-        const TopoDS_Shape fixed = healer.Shape();
-        if (!fixed.IsNull() && BRepCheck_Analyzer(fixed).IsValid() && volumeOf(fixed) > 0 &&
-            faceCount(fixed) <= faces && freeEdgeCount(fixed) < bestFree) {
-          best = fixed;
-          bestFree = freeEdgeCount(fixed);
-          note += " -> fixed " + std::to_string(bestFree);
-        }
-      } catch (const Standard_Failure&) {
-      } catch (...) {
-      }
-    }
-    sewnNote_ = note + " (max edge tol " + std::to_string(maxEdgeTolerance) + ")";
-    return best;
   }
 
   /**

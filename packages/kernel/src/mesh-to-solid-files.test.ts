@@ -481,8 +481,8 @@ describe.skipIf(!meshFile)(
   () => {
     it(`${meshFile} converts and takes Offset Face, Fillet, Shell and Press Pull`, () => {
       const mesh0 = readMeshFile(fs as NodeFs, meshFile as string);
-      expect(mesh0).toBeDefined();
-      const mesh = kernel.meshFrom(mesh0!);
+      if (!mesh0) throw new Error(`no mesh in ${meshFile}`);
+      const mesh = kernel.meshFrom(mesh0);
       let shape: ShapeHandle | undefined;
       try {
         const t0 = performance.now();
@@ -490,7 +490,7 @@ describe.skipIf(!meshFile)(
         shape = solid.shape;
         const { report } = solid;
         console.log(
-          `MESH_FILE ${meshFile}: triangles ${mesh0!.indices.length / 3}, ${report.faces} faces ` +
+          `MESH_FILE ${meshFile}: triangles ${mesh0.indices.length / 3}, ${report.faces} faces ` +
             `(${report.planes}/${report.cylinders}/${report.cones}/${report.spheres}/${report.tori})` +
             `${report.rebuild ? `, ${report.rebuild}` : ''}${report.facets ? `, ${report.facets} facets` : ''}` +
             `${report.auto ? `, auto ${report.tolerance} mm` : ''}, ${edgeCounts(shape)}, valid ${kernel.isValid(shape)}` +

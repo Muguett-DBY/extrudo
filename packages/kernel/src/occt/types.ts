@@ -256,8 +256,6 @@ export interface FacadeBinding {
   offsetProbe(shape: number, face: number, distance: number): number;
   /** Tests only: the exact/hybrid refusals of the last Mesh to Solid call; see the facade. */
   meshRefusalDebug(): number;
-  /** Tests only: the dangling edges of a converted body (midpoint, tolerance, length each); see the facade. */
-  danglingDebug(shape: number): number;
   readStepColors(text: string): number;
   readStepNames(text: string): number;
   clearExport(): void;
