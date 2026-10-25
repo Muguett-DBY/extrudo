@@ -10269,7 +10269,9 @@ private:
       }
       stage("solid");
       for (const TopoDS_Shape& solid : solids) {
-        ShapeUpgrade_UnifySameDomain unify(solid, true, true, true);
+        // ConcatBSplines off (as the exact rebuild): with it on, unify left a
+        // merged face's edge unshared and opened the shell on the gear.
+        ShapeUpgrade_UnifySameDomain unify(solid, true, true, false);
         unify.SetLinearTolerance(1e-3);
         unify.SetAngularTolerance(1e-3);
         unify.Build();
